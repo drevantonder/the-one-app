@@ -16,7 +16,7 @@ fn main() -> anyhow::Result<()> {
     let native = Native::get()?;
     let (drawn_to, drawn) = mpsc::channel();
     native.run(move |windows| {
-        let options = WindowOptions { title: "Host check".into(), app_id: "host-check".into(), size: Size { width: Pixels(480.0), height: Pixels(320.0) }, tag: serde_json::json!({}), panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
+        let options = WindowOptions { title: "Host check".into(), app_id: "host-check".into(), size: Size { width: Pixels(480.0), height: Pixels(320.0) }, tag: serde_json::json!({}), panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None, title_row: false };
         let to = drawn_to.clone();
         let opened = windows.open(options, Err("Checking how this computer's host draws".into()), move |event| {
             if matches!(event, Event::Drawn) {

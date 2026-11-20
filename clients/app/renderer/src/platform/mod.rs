@@ -238,6 +238,9 @@ pub struct WindowOptions {
     /// last snapshot as it launches (`snapshot`), a new build of its page's too. Whoever opens it names it by whose it
     /// is, so it never shows another person's.
     pub snapshot: Option<std::path::PathBuf>,
+    /// Its page draws its title row, with the window's buttons, where the system's frame has its title bar, as an
+    /// app's window on Windows and Linux does: so it's made unframed from the start (`Display::unframe`).
+    pub title_row: bool,
 }
 
 /// Where a panel was dragged to on each screen, by the screen's name as its platform gives it (`Input::Placed`): its
@@ -416,8 +419,11 @@ struct Window {
     left: Option<web_time::Instant>,
     /// The Colour Mode its system's own parts were last drawn in (`Display::set_appearance`).
     chrome: Option<Option<crate::Appearance>>,
-    /// What it shows: its app's screen, or why its app didn't open.
+    /// What it shows: its app's screen, or why its app didn't open; nothing yet while its page starts (`opening`),
+    /// until it's given it (`attach`), which its title row is made for (`WindowOptions::title_row`).
     screen: Result<Screen, String>,
+    pending: bool,
+    title_row: bool,
     title: String,
     scene: crate::render::scene::Scene,
     /// Whether what it shows changed, and so is drawn on the loop's turn, and whether something on it moves by
@@ -549,7 +555,27 @@ impl Windows {
     /// has started and heard back from what it first asked, or has waited long enough (`SHOWN_WITHIN`), and drawn
     /// as that posts what it changed.
     /// Opens a window of `screen`, or one that says only why its page isn't there, as one whose page didn't start does.
-    pub fn open(&mut self, options: WindowOptions, mut screen: Result<Screen, String>, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
+    pub fn open(&mut self, options: WindowOptions, screen: Result<Screen, String>, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
+        self.create(options, Some(screen), on_event)
+    }
+
+    /// Opens a window whose page is still starting, as a browser opens a tab before its page has loaded: its system's
+    /// window and renderer are made while its page starts elsewhere, and it shows its snapshot, where it has one, until
+    /// its page is given it (`attach`) and has started and heard back, as `open`'s does.
+    pub fn opening(&mut self, options: WindowOptions, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
+        self.create(options, None, on_event)
+    }
+
+    /// Window `id`, opened while its page started (`opening`), shows its page now, `screen`. → whether it was such a
+    /// window and is still open.
+    pub fn attach(&mut self, id: WindowId, mut screen: Screen) -> bool {
+        let Some(window) = self.windows.get_mut(&id).filter(|window| window.pending) else { return false };
+        fit(&mut screen, &window.parts[0].native, id, window.room(), window.root, window.title_row, self.pressure);
+        (window.screen, window.pending, window.dirty) = (Ok(screen), false, true);
+        true
+    }
+
+    fn create(&mut self, options: WindowOptions, screen: Option<Result<Screen, String>>, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
         let id = self.next;
         self.next += 1;
         let asked = web_time::Instant::now();
@@ -558,45 +584,20 @@ impl Windows {
         if let Some(owner) = options.owner.and_then(|owner| self.windows.get(&owner)) {
             self.display.attach(&native, &owner.parts[0].native);
         }
+        // An app's window on Linux is unframed, its title row a GNOME header bar with the desktop's window buttons, and
+        // on Windows its title row has Windows' caption buttons, drawn by the window: so from the start, before its page
+        // is there, so the system's frame never shows first.
+        #[cfg(any(target_os = "linux", target_os = "windows"))]
+        if options.title_row {
+            self.display.unframe(&native);
+        }
+        let pending = screen.is_none();
+        let mut screen = screen.unwrap_or_else(|| Err(String::new()));
         if let Ok(screen) = &mut screen {
             // Its page is laid out in the room its window has from its first frame, which only the window knows: a
             // phone's is its screen whatever it was asked to be, and a computer's app opens where it was left.
-            screen.room = if options.panel.is_some() { Size { width: options.size.width.0, height: options.size.height.0 } } else { Size { width: native.size().width.0, height: native.size().height.0 } };
-            // A phone's app window has the rail's home line; its Home Screen doesn't.
-            screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !options.root;
-            screen.appearance = appearance();
-            screen.reduced_motion = reduced_motion();
-            screen.pressure = self.pressure;
-            if let Some(clipboard) = clipboard() {
-                screen.clipboard = clipboard;
-            }
-            #[cfg(any(target_os = "android", target_os = "ios"))]
-            {
-                screen.device = native.device(id);
-                screen.text_size = Some(text_size());
-            }
-            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
-            {
-                screen.device = Box::new(Computer);
-            }
-            // An app's window on Linux is unframed, its title row a GNOME header bar with the desktop's window buttons, and
-            // on Windows its title row has Windows' caption buttons, drawn by the window.
-            #[cfg(any(target_os = "linux", target_os = "windows"))]
-            if screen.title.is_some() {
-                #[cfg(any(target_os = "linux", feature = "fake"))]
-                {
-                    screen.window_buttons = button_layout();
-                }
-                #[cfg(all(target_os = "windows", not(feature = "fake")))]
-                {
-                    screen.window_buttons = (Vec::new(), vec![crate::WindowButton::Minimize, crate::WindowButton::Maximize, crate::WindowButton::Close]);
-                }
-                self.display.unframe(&native);
-            }
-            if let Some(native) = Native::started() {
-                let native = std::sync::Mutex::new(native);
-                screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
-            }
+            let room = if options.panel.is_some() { options.size } else { native.size() };
+            fit(screen, &native, id, room, options.root, options.title_row, self.pressure);
         }
         let rendering = web_time::Instant::now();
         let renderer = self.renderer(&native)?;
@@ -604,7 +605,7 @@ impl Windows {
         eprintln!("{} opened in {} ms: the system's window {} ms, its renderer {} ms", options.title, asked.elapsed().as_millis(), windowed.as_millis(), rendering.elapsed().as_millis());
         let opened = now();
         let device = native.device_size();
-        let picture = options.snapshot.as_deref().filter(|_| screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));
+        let picture = options.snapshot.as_deref().filter(|_| pending || screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));
         let panel = options.panel.is_some();
         let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
         self.windows.insert(
@@ -621,6 +622,8 @@ impl Windows {
                 left: None,
                 chrome: None,
                 screen,
+                pending,
+                title_row: options.title_row,
                 title: options.title,
                 scene: Default::default(),
                 dirty: true,
@@ -1413,7 +1416,7 @@ impl Windows {
         for window in self.windows.values_mut() {
             // A new window shows once its page has heard back from what it asked, or has waited long enough: at once
             // where it has a snapshot, which it shows until then.
-            let starting = window.screen.as_ref().is_ok_and(Screen::starting) && since(window.opened) < SHOWN_WITHIN;
+            let starting = (window.pending || window.screen.as_ref().is_ok_and(Screen::starting)) && since(window.opened) < SHOWN_WITHIN;
             if !window.shown {
                 if starting && window.picture.is_none() {
                     continue;
@@ -1585,7 +1588,7 @@ impl Windows {
                 window.reloading = false;
                 (window.on_event)(Event::Drawn);
             }
-            if window.picture.is_none() && !std::mem::replace(&mut window.live, true) {
+            if window.picture.is_none() && !window.pending && !std::mem::replace(&mut window.live, true) {
                 (window.on_event)(Event::Live);
             }
             if let Some(asked) = window.summoned.take() {
@@ -1831,6 +1834,47 @@ impl Windows {
         if !calls.is_empty() {
             self.display.text_input(&window.parts[0].native, &calls);
         }
+    }
+}
+
+/// Fits `screen` to window `id`, its `native` window: the `room` its page is laid out in, what it's told of its system
+/// and device and of its window's title row (`WindowOptions::title_row`), and the windows' thread woken as its page
+/// posts.
+#[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_variables))]
+fn fit(screen: &mut Screen, native: &NativeWindow, id: WindowId, room: Size<Pixels>, root: bool, title_row: bool, pressure: Pressure) {
+    screen.room = Size { width: room.width.0, height: room.height.0 };
+    // A phone's app window has the rail's home line; its Home Screen doesn't.
+    screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !root;
+    screen.appearance = appearance();
+    screen.reduced_motion = reduced_motion();
+    screen.pressure = pressure;
+    if let Some(clipboard) = clipboard() {
+        screen.clipboard = clipboard;
+    }
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    {
+        screen.device = native.device(id);
+        screen.text_size = Some(text_size());
+    }
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    {
+        let _ = native;
+        screen.device = Box::new(Computer);
+    }
+    #[cfg(any(target_os = "linux", target_os = "windows"))]
+    if title_row {
+        #[cfg(any(target_os = "linux", feature = "fake"))]
+        {
+            screen.window_buttons = button_layout();
+        }
+        #[cfg(all(target_os = "windows", not(feature = "fake")))]
+        {
+            screen.window_buttons = (Vec::new(), vec![crate::WindowButton::Minimize, crate::WindowButton::Maximize, crate::WindowButton::Close]);
+        }
+    }
+    if let Some(native) = Native::started() {
+        let native = std::sync::Mutex::new(native);
+        screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
     }
 }
 

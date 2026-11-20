@@ -46,7 +46,7 @@ fn main() -> anyhow::Result<()> {
     let (said_to, said) = mpsc::channel::<Option<Value>>();
     let (opened_to, opened) = mpsc::channel();
     native.run(move |windows| {
-        let options = WindowOptions { title: "Window check".into(), app_id: "window-check".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
+        let options = WindowOptions { title: "Window check".into(), app_id: "window-check".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None, title_row: false };
         let to = said_to.clone();
         let screen = screen(folder, ui, answers, panel).map_err(|error| format!("{error:#}"));
         let id = windows.open(options, screen, move |event| match event {

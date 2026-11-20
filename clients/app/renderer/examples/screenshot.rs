@@ -228,7 +228,7 @@ fn main() -> anyhow::Result<()> {
     // With a seed, adversarial as a busy device and a person are: refreshes late, input as things move.
     windows.seed(seed);
     // A page that opens another app over it is a phone's Home Screen, its root window.
-    let options = WindowOptions { title: "screenshot".into(), app_id: "screenshot".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: opening.is_some(), icon: None, owner: None, snapshot: None };
+    let options = WindowOptions { title: "screenshot".into(), app_id: "screenshot".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: opening.is_some(), icon: None, owner: None, snapshot: None, title_row: false };
     let said = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let saying = said.clone();
     // Why its page crashed, if it did, which fails the run: a page never dies quietly.
@@ -301,7 +301,7 @@ fn main() -> anyhow::Result<()> {
             screen.text_size = touch.then_some(17.0);
             let at = |edge: &str| from[edge].as_f64().unwrap_or_default() as f32;
             let icon = from.is_object().then(|| renderer::geometry::Bounds { origin: renderer::geometry::point(at("x"), at("y")), size: Size { width: at("width"), height: at("height") } });
-            let options = WindowOptions { title: app.clone(), app_id: "screenshot".into(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag: json!({"entrypoint": app}), panel: None, places: None, frame: None, root: false, icon, owner: None, snapshot: snapshot.clone() };
+            let options = WindowOptions { title: app.clone(), app_id: "screenshot".into(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag: json!({"entrypoint": app}), panel: None, places: None, frame: None, root: false, icon, owner: None, snapshot: snapshot.clone(), title_row: false };
             opened = windows.open(options, Ok(screen), |_| {}).ok();
         })));
     }

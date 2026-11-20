@@ -298,7 +298,7 @@ pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String
         let Ok(native) = Native::get() else { return };
         let tag = json!({"entrypoint": entrypoint});
         native.run(move |windows| {
-            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
+            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None, title_row: false };
             if let Err(error) = windows.open(options, Err(said), |_| {}) {
                 eprintln!("{name}'s window didn't open: {error:#}");
             }
@@ -313,11 +313,15 @@ async fn named(entrypoint: &str, subject: Option<&str>) -> String {
     name.unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default()).to_owned()
 }
 
-/// Closes the window `shown`, once it's open.
-fn close(shown: &OnceLock<WindowId>) {
-    let Some(id) = shown.get().copied() else { return };
+/// Closes the window `shown`, once it's open: on the windows' thread, after the job that opens it.
+fn close(shown: &Arc<OnceLock<WindowId>>) {
+    let shown = shown.clone();
     if let Ok(native) = Native::get() {
-        native.run(move |windows| windows.close(id));
+        native.run(move |windows| {
+            if let Some(id) = shown.get().copied() {
+                windows.close(id);
+            }
+        });
     }
 }
 
@@ -368,16 +372,27 @@ fn listed_page<'a>(listed: &'a Value, entrypoint: &str) -> Option<&'a Value> {
 /// Whether `entrypoint`'s page is needs a runtime version this program has, its tables too, and if it is, what
 /// it's drawn with.
 async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Page>> {
-    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
+    match listing(entrypoint, subject, framed).await? {
+        Some(resource) => read(entrypoint, subject, &resource).await,
+        None => Ok(None),
+    }
+}
+
+/// `entrypoint`'s page as its app lists it for `subject`, where it needs a runtime version this program has.
+async fn listing(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Value>> {
     let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
-    Opening::step(&view, "listed");
+    Opening::step(&format!("{}|{entrypoint}", subject.unwrap_or_default()), "listed");
     let Some(resource) = listed_page(&listed, entrypoint) else { return Ok(None) };
     // A page in a frame that names no runtime version (a component's, which no entrypoint names) is tried: one that
     // isn't drawn natively doesn't start, and the page the frame's in opens in a web view instead.
     let needed = resource["_meta"]["runtimeVersion"].as_u64();
-    if !needed.map_or(framed, |needed| needed <= u64::from(renderer::RUNTIME_VERSION)) {
-        return Ok(None);
-    }
+    Ok(needed.map_or(framed, |needed| needed <= u64::from(renderer::RUNTIME_VERSION)).then(|| resource.clone()))
+}
+
+/// What `entrypoint`'s page, listed as `resource`, is drawn with, where its tables need a runtime version this program
+/// has too.
+async fn read(entrypoint: &str, subject: Option<&str>, resource: &Value) -> anyhow::Result<Option<Page>> {
+    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let trusted = resource["_meta"]["trusted"] == true;
     // Its icon, as its app lists it, as a `data:` address, for the window's title.
     let icon = match resource["icons"][0]["src"].as_str() {
@@ -393,8 +408,12 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     // Its tables: the UI library's, and its app's styles, which its build writes beside every page (`core/ui/app.js`).
     let Some(tables) = tables(&[page.join("/ui/client/tokens.json")?, page.join("/ui/client/styles.json")?, page.join("styles.json")?]).await? else { return Ok(None) };
     Opening::step(&view, "tables read");
-    let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
-    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
+    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name: listed_name(resource), icon }))
+}
+
+/// A page's name, as its app lists it (`resource`).
+fn listed_name(resource: &Value) -> Option<String> {
+    resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned)
 }
 
 /// The tables at `addresses`, or none where one needs a runtime version this program hasn't, so its page is a web
@@ -472,6 +491,7 @@ async fn unopened_launcher(entrypoint: &str, why: String) -> Option<WindowId> {
                 icon: None,
                 owner: None,
                 snapshot: None,
+                title_row: false,
             };
             let _ = shown_to.send(windows.open(options, Err(said), |_| {}).ok());
         });
@@ -616,17 +636,23 @@ pub(crate) fn recovery(typed: bool, subject: Option<String>, owner: Option<Windo
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     Opening::begin(&view, started);
-    let page = match &kind {
-        Kind::Sheet(_) => Some(client_page(RECOVERY, "Recovery Key").await?),
-        Kind::Unopened(unopened) | Kind::Launcher(_, Some(Instead::Unopened(unopened))) => Some(client_page(UNOPENED, &unopened.name).await?),
-        Kind::Launcher(_, Some(Instead::SignIn)) => Some(client_page(SIGN_IN, NAME).await?),
-        Kind::Launcher(_, Some(Instead::Behind)) => Some(client_page(UPDATE, NAME).await?),
-        _ => probe(entrypoint, subject, false).await?,
+    // What it shows: a page of the client's own, or its app's, as its app lists it, its window opened as soon as that
+    // says it's drawn here (`Windows::opening`), while its page's files are read and its JS starts.
+    let (own, listed) = match &kind {
+        Kind::Sheet(_) => (Some(client_page(RECOVERY, "Recovery Key").await?), None),
+        Kind::Unopened(unopened) | Kind::Launcher(_, Some(Instead::Unopened(unopened))) => (Some(client_page(UNOPENED, &unopened.name).await?), None),
+        Kind::Launcher(_, Some(Instead::SignIn)) => (Some(client_page(SIGN_IN, NAME).await?), None),
+        Kind::Launcher(_, Some(Instead::Behind)) => (Some(client_page(UPDATE, NAME).await?), None),
+        _ => match listing(entrypoint, subject, false).await? {
+            Some(resource) => (None, Some(resource)),
+            None => {
+                OPENING.lock().expect("nothing panics holding it").remove(&view);
+                return Ok(false);
+            }
+        },
     };
-    let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else {
-        OPENING.lock().expect("nothing panics holding it").remove(&view);
-        return Ok(false);
-    };
+    let name = own.as_ref().and_then(|page| page.name.clone()).or_else(|| listed.as_ref().and_then(listed_name));
+    let name = name.unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
     let made = view.clone();
     let launcher = matches!(kind, Kind::Launcher(..));
     let sheet = match &kind {
@@ -650,221 +676,257 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         Kind::App(from) => from,
         Kind::Launcher(..) | Kind::Sheet(_) | Kind::Unopened(_) => None,
     };
-    let tokens_page = load(&tables)?;
-    Opening::step(&view, "tables loaded");
     // An app's window, and the Home Screen, shows its last frame as it opens again.
     let snapshot = (app_window || launcher).then(|| snapshot_file(entrypoint, subject)).flatten();
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
-    let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
+    // Its channel to its app's window, which its page starts on once it's read (`started`).
+    let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
+    let to = channel(entrypoint, subject, link, launcher, asked.clone(), Native::get()?, Place::Window(window.clone()))?;
+    // Its title row is its page's: its app's icon and name (DESIGN.md, App windows).
+    let title_row = cfg!(desktop) && !launcher && sheet.is_none();
+
+    // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
+    // couldn't start, says why there.
+    let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    {
+        let (entrypoint, subject, link, sheet, name, timed, window) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned(), sheet.clone(), name.clone(), made.clone(), window.clone());
+        let to = to.clone();
+        native.run(move |windows| {
+            Opening::step(&timed, "on the windows' thread");
+            let (size, panel) = match (launcher && cfg!(desktop), &sheet) {
+                (true, _) => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
+                (false, Some(_)) => ((440.0, 360.0), None),
+                (false, None) => ((1024.0, 720.0), None),
+            };
+            let options = WindowOptions {
+                title: if launcher { NAME.to_owned() } else { name },
+                app_id: ::client::NAME.to_owned(),
+                size: Size { width: Pixels(size.0), height: Pixels(size.1) },
+                tag: json!({"entrypoint": entrypoint, "subject": subject}),
+                panel: panel.map(|corner| corner as f32),
+                // The launcher's kept where it's dragged to, on each screen.
+                places: (launcher && cfg!(desktop)).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
+                // An app's window opens where it was left, as each computer's apps do.
+                frame: frame_file(launcher, sheet.is_some(), &entrypoint, subject.as_deref()),
+                // A phone's launcher is its Home Screen, under every app's window.
+                root: launcher && cfg!(mobile),
+                icon: from,
+                // The recovery key window is a sheet of the app's that asked, as the system attaches one.
+                owner: sheet.as_ref().and_then(|sheet| sheet.owner),
+                snapshot,
+                title_row,
+            };
+            let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
+            let on_event = {
+                let (to, app, entrypoint, sheet) = (to.clone(), app.clone(), entrypoint.clone(), sheet.clone());
+                let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
+                let mut opened = false;
+                let opening_view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
+                move |event: Event| match event {
+                    // How long it took to open, from being asked to, as a page tells the app's window it has drawn: once, as
+                    // a page loaded again in it (`reloaded`) says its own (`Opening`).
+                    Event::Drawn => {
+                        let ms = started.elapsed().as_millis() as u64;
+                        Opening::drawn(&opening_view, &app);
+                        crate::deployed(&app);
+                        if !std::mem::replace(&mut opened, true) {
+                            let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
+                        }
+                        // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
+                        if !(launcher && cfg!(desktop)) {
+                            let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                        }
+                        // The device hears its person's notifications once their home is on screen, as the web
+                        // launcher's page has it (`listen`).
+                        if launcher {
+                            let _ = to.send(json!({"id": "listen", "command": "listen", "args": {}}));
+                        }
+                        crate::memory::changed();
+                    }
+                    // How long the launcher took to show as it was summoned, to its first frame.
+                    Event::Shown(took) => {
+                        let ms = took.as_secs_f64() * 1000.0;
+                        let load = Load::now();
+                        eprintln!("the launcher showed {ms:.1} ms after it was summoned, {load}");
+                        if let Ok(views) = crate::views() {
+                            views.client.report(json!({"name": "one.client.native.summon.duration", "value": ms, "attributes": {"one.view": app, "one.system.busy": load.busy()}}));
+                        }
+                        let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                        crate::memory::changed();
+                    }
+                    Event::Live => Opening::live(&opening_view),
+                    Event::Frames(frames) => frames_reported(&app, &frames),
+                    Event::PutAway => {
+                        let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
+                        crate::memory::changed();
+                    }
+                    // Its person is using something else, so a new build waiting for what they typed to be sent looks
+                    // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
+                    Event::Unfocused => crate::spawn(crate::updater::ready()),
+                    Event::Quit => {
+                        #[cfg(desktop)]
+                        computer::quit();
+                    }
+                    // Closed before it was done, the recovery key wasn't seen or used.
+                    Event::Closed => {
+                        crate::memory::changed();
+                        if let Some(told) = sheet.as_ref().and_then(|sheet| sheet.done.lock().expect("nothing panics holding it").take()) {
+                            let _ = told.send(false);
+                        }
+                    }
+                    // A page that crashed after it started is gone, and Telemetry hears why, as an error: an app's window
+                    // closes and its app is forgotten, so it opens afresh, and the client's own page says it stopped, with
+                    // Reload, as a browser's crashed tab does; the launcher opens again, as a phone's app is relaunched.
+                    Event::Crashed(why) => {
+                        eprintln!("{entrypoint} crashed: {why}");
+                        if let Ok(views) = crate::views() {
+                            views.client.report(json!({"name": "one.client.native.crash", "error": why, "attributes": {"one.view": app}}));
+                        }
+                        #[cfg(desktop)]
+                        if launcher {
+                            return computer::reload_native();
+                        }
+                        #[cfg(mobile)]
+                        if launcher {
+                            return computer::native(None);
+                        }
+                        close(&shown);
+                        crate::hosts::forget(&entrypoint, subject.as_deref());
+                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, true);
+                    }
+                    // A window whose page didn't start says so, and Telemetry hears why: an app's in the client's own
+                    // window with its problem box in its place (`unopened`), and a phone's launcher is then its page's.
+                    Event::Failed(why) => {
+                        reported(&entrypoint, started, &why);
+                        #[cfg(mobile)]
+                        if launcher {
+                            computer::native(None);
+                        }
+                        #[cfg(desktop)]
+                        if launcher_page {
+                            replace_launcher(entrypoint.clone(), why, shown.get().copied());
+                            return;
+                        }
+                        if app_window {
+                            close(&shown);
+                            crate::hosts::forget(&entrypoint, subject.as_deref());
+                            self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, false);
+                        }
+                    }
+                    // A computer's window says why it didn't open, as one that didn't start does, and Telemetry hears; a
+                    // phone opens it in its page.
+                    Event::Mismatched(why) => {
+                        reported(&entrypoint, started, &why);
+                        #[cfg(desktop)]
+                        if launcher_page {
+                            replace_launcher(entrypoint.clone(), why, shown.get().copied());
+                            return;
+                        }
+                        #[cfg(desktop)]
+                        if app_window {
+                            close(&shown);
+                            crate::hosts::forget(&entrypoint, subject.as_deref());
+                            self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, false);
+                        }
+                        #[cfg(mobile)]
+                        if launcher {
+                            computer::native(None);
+                        } else {
+                            close(&shown);
+                            let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
+                            if let Err(error) = crate::hosts::open_web_view(entrypoint.clone(), subject, link) {
+                                eprintln!("{entrypoint}: {error}");
+                            }
+                        }
+                    }
+                }
+            };
+            let opened = windows.opening(options, on_event);
+            if opened.is_ok() {
+                Opening::step(&timed, "window made");
+            }
+            let _ = opened_to.send(opened.map(|id| { let _ = window.set(id); }).map_err(|error| format!("{error:#}")));
+            if let Kind::Launcher(told, _) = &mut kind
+                && let Some(told) = told.take()
+            {
+                let _ = told.send(window.get().copied());
+            }
+        });
+    }
+
+    // Its page, read and started while its window opens.
+    let page = match own {
+        Some(page) => Ok(Some(page)),
+        None => read(entrypoint, subject, listed.as_ref().expect("an app's page is listed")).await,
+    };
+    let Some(Page { page, module, trusted, tables, name: _, icon }) = page.inspect_err(|_| close(&window))? else {
+        close(&window);
+        OPENING.lock().expect("nothing panics holding it").remove(&view);
+        return Ok(false);
+    };
+    let tokens_page = load(&tables).inspect_err(|_| close(&window))?;
+    Opening::step(&view, "tables loaded");
+    let begun = self::started(entrypoint, subject, to.clone(), asked.clone(), &module, page);
     Opening::step(&view, "JS thread started");
-    let (to, asked) = (begun.to.clone(), begun.asked.clone());
 
     // Where the device is with its network, as a page asks as it opens: the Colour Mode chosen on it, if one was.
     let (start_to, start) = tokio::sync::oneshot::channel();
     asked.lock().expect("nothing panics holding it").insert("start".into(), Asked::Start(start_to));
     let _ = to.send(json!({"id": "start", "command": "start", "args": {"entrypoint": entrypoint}}));
-    let start = start.await?;
+    let start = start.await.inspect_err(|_| close(&window))?;
     Opening::step(&view, "started");
     let chosen = start["theme"].as_str().map(str::to_owned);
-    let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
     let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, page: 0, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), unopened, signing_in, behind, window: window.clone() };
-    let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
-    let link = link.to_owned();
-    // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
-    // couldn't start, says why there.
-    let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
-    let timed = made.clone();
+    // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it. The launcher has none.
+    let top = if launcher { 0.0 } else { BAR.0 as f32 };
+    let insets = renderer::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
+    // Its window shows its page, once the windows' thread has opened it: or closes, saying why, where its page's
+    // screen couldn't be made.
+    let (attached_to, attached) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let shown = window.clone();
     native.run(move |windows| {
-        Opening::step(&timed, "on the windows' thread");
-        let (size, panel) = match (launcher && cfg!(desktop), &sheet) {
-            (true, _) => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
-            (false, Some(_)) => ((440.0, 360.0), None),
-            (false, None) => ((1024.0, 720.0), None),
-        };
-        let options = WindowOptions {
-            title: if launcher { NAME.to_owned() } else { name.clone() },
-            app_id: ::client::NAME.to_owned(),
-            size: Size { width: Pixels(size.0), height: Pixels(size.1) },
-            tag: json!({"entrypoint": entrypoint, "subject": subject}),
-            panel: panel.map(|corner| corner as f32),
-            // The launcher's kept where it's dragged to, on each screen.
-            places: (launcher && cfg!(desktop)).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
-            // An app's window opens where it was left, as each computer's apps do.
-            frame: frame_file(launcher, sheet.is_some(), &entrypoint, subject.as_deref()),
-            // A phone's launcher is its Home Screen, under every app's window.
-            root: launcher && cfg!(mobile),
-            icon: from,
-            // The recovery key window is a sheet of the app's that asked, as the system attaches one.
-            owner: sheet.as_ref().and_then(|sheet| sheet.owner),
-            snapshot,
-        };
-        let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
-        let on_event = {
-            let (to, app, entrypoint, sheet) = (to.clone(), app.clone(), entrypoint.clone(), sheet.clone());
-            let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
-            let mut opened = false;
-            let opening_view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
-            move |event: Event| match event {
-                // How long it took to open, from being asked to, as a page tells the app's window it has drawn: once, as
-                // a page loaded again in it (`reloaded`) says its own (`Opening`).
-                Event::Drawn => {
-                    let ms = started.elapsed().as_millis() as u64;
-                    Opening::drawn(&opening_view, &app);
-                    crate::deployed(&app);
-                    if !std::mem::replace(&mut opened, true) {
-                        let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
-                    }
-                    // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
-                    if !(launcher && cfg!(desktop)) {
-                        let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
-                    }
-                    // The device hears its person's notifications once their home is on screen, as the web
-                    // launcher's page has it (`listen`).
-                    if launcher {
-                        let _ = to.send(json!({"id": "listen", "command": "listen", "args": {}}));
-                    }
-                    crate::memory::changed();
-                }
-                // How long the launcher took to show as it was summoned, to its first frame.
-                Event::Shown(took) => {
-                    let ms = took.as_secs_f64() * 1000.0;
-                    let load = Load::now();
-                    eprintln!("the launcher showed {ms:.1} ms after it was summoned, {load}");
-                    if let Ok(views) = crate::views() {
-                        views.client.report(json!({"name": "one.client.native.summon.duration", "value": ms, "attributes": {"one.view": app, "one.system.busy": load.busy()}}));
-                    }
-                    let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
-                    crate::memory::changed();
-                }
-                Event::Live => Opening::live(&opening_view),
-                Event::Frames(frames) => frames_reported(&app, &frames),
-                Event::PutAway => {
-                    let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
-                    crate::memory::changed();
-                }
-                // Its person is using something else, so a new build waiting for what they typed to be sent looks
-                // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
-                Event::Unfocused => crate::spawn(crate::updater::ready()),
-                Event::Quit => {
-                    #[cfg(desktop)]
-                    computer::quit();
-                }
-                // Closed before it was done, the recovery key wasn't seen or used.
-                Event::Closed => {
-                    crate::memory::changed();
-                    if let Some(told) = sheet.as_ref().and_then(|sheet| sheet.done.lock().expect("nothing panics holding it").take()) {
-                        let _ = told.send(false);
-                    }
-                }
-                // A page that crashed after it started is gone, and Telemetry hears why, as an error: an app's window
-                // closes and its app is forgotten, so it opens afresh, and the client's own page says it stopped, with
-                // Reload, as a browser's crashed tab does; the launcher opens again, as a phone's app is relaunched.
-                Event::Crashed(why) => {
-                    eprintln!("{entrypoint} crashed: {why}");
-                    if let Ok(views) = crate::views() {
-                        views.client.report(json!({"name": "one.client.native.crash", "error": why, "attributes": {"one.view": app}}));
-                    }
-                    #[cfg(desktop)]
-                    if launcher {
-                        return computer::reload_native();
-                    }
-                    #[cfg(mobile)]
-                    if launcher {
-                        return computer::native(None);
-                    }
-                    close(&shown);
-                    crate::hosts::forget(&entrypoint, subject.as_deref());
-                    self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, true);
-                }
-                // A window whose page didn't start says so, and Telemetry hears why: an app's in the client's own
-                // window with its problem box in its place (`unopened`), and a phone's launcher is then its page's.
-                Event::Failed(why) => {
-                    reported(&entrypoint, started, &why);
-                    #[cfg(mobile)]
-                    if launcher {
-                        computer::native(None);
-                    }
-                    #[cfg(desktop)]
-                    if launcher_page {
-                        replace_launcher(entrypoint.clone(), why, shown.get().copied());
-                        return;
-                    }
-                    if app_window {
-                        close(&shown);
-                        crate::hosts::forget(&entrypoint, subject.as_deref());
-                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, false);
-                    }
-                }
-                // A computer's window says why it didn't open, as one that didn't start does, and Telemetry hears; a
-                // phone opens it in its page.
-                Event::Mismatched(why) => {
-                    reported(&entrypoint, started, &why);
-                    #[cfg(desktop)]
-                    if launcher_page {
-                        replace_launcher(entrypoint.clone(), why, shown.get().copied());
-                        return;
-                    }
-                    #[cfg(desktop)]
-                    if app_window {
-                        close(&shown);
-                        crate::hosts::forget(&entrypoint, subject.as_deref());
-                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, false);
-                    }
-                    #[cfg(mobile)]
-                    if launcher {
-                        computer::native(None);
-                    } else {
-                        close(&shown);
-                        let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
-                        if let Err(error) = crate::hosts::open_web_view(entrypoint.clone(), subject, link) {
-                            eprintln!("{entrypoint}: {error}");
-                        }
-                    }
-                }
+        let Some(id) = shown.get().copied() else { return };
+        let screen = begun.screen(state, insets).map(|mut screen| {
+            Opening::step(&made, "screen made");
+            screen.theme = theme(chosen.as_deref());
+            // A phone's is under a finger from the start, so it's drawn with its tokens' touch values from its
+            // first frame (pointer: coarse), as the page is told (`deviceCapabilities`).
+            screen.touch = cfg!(mobile);
+            screen.page = tokens_page;
+            screen.make_frame = trusted.then(|| frames(shown.clone()));
+            if launcher && cfg!(desktop) {
+                // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
+                // popover's colour (DESIGN.md, Launcher).
+                screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux"), whole: instead });
+            } else if title_row {
+                screen.title = Some(renderer::Title { icon, name, start: BAR.1 as f32 });
+            }
+            screen
+        });
+        let failed = match screen {
+            Ok(screen) => {
+                windows.attach(id, screen);
+                None
+            }
+            Err(error) => {
+                windows.close(id);
+                Some(format!("{error:#}"))
             }
         };
-        // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it. The launcher has
-        // none.
-        let top = if launcher { 0.0 } else { BAR.0 as f32 };
-        let insets = renderer::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
-        let opened = match begun.screen(state, insets) {
-            Ok(mut screen) => {
-                Opening::step(&timed, "screen made");
-                screen.theme = theme(chosen.as_deref());
-                // A phone's is under a finger from the start, so it's drawn with its tokens' touch values from its
-                // first frame (pointer: coarse), as the page is told (`deviceCapabilities`).
-                screen.touch = cfg!(mobile);
-                screen.page = tokens_page;
-                screen.make_frame = trusted.then(|| frames(window.clone()));
-                if launcher && cfg!(desktop) {
-                    // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
-                    // popover's colour (DESIGN.md, Launcher).
-                    screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux"), whole: instead });
-                } else if cfg!(desktop) && sheet.is_none() {
-                    // Its app's icon and name in its title row (DESIGN.md, App windows).
-                    screen.title = Some(renderer::Title { icon, name: name.clone(), start: BAR.1 as f32 });
-                }
-                windows.open(options, Ok(screen), on_event)
-            }
-            Err(error) => Err(error),
-        };
-        let _ = opened_to.send(opened.map(|id| { let _ = window.set(id); }).map_err(|error| format!("{error:#}")));
-        if let Kind::Launcher(told, _) = &mut kind
-            && let Some(told) = told.take()
-        {
-            let _ = told.send(window.get().copied());
-        }
+        let _ = attached_to.send(failed.map_or(Ok(()), Err));
     });
     match opened.await {
-        Ok(Ok(())) => {
-            Opening::step(&made, "window made");
-            Ok(true)
-        }
+        Ok(Ok(())) => {}
         Ok(Err(why)) => anyhow::bail!("its window didn't open: {why}"),
         Err(_) => anyhow::bail!("its device's native windows didn't start: {}", renderer::platform::unstarted().unwrap_or_else(|| "it didn't say why".into())),
+    }
+    match attached.await {
+        Ok(Err(why)) => anyhow::bail!("its page didn't start: {why}"),
+        // Closed before its page was there, as its person may.
+        Ok(Ok(())) | Err(_) => Ok(true),
     }
 }
 

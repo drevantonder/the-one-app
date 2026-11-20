@@ -774,7 +774,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
         _ => None,
     };
     let _ = Native::get();
-    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
+    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None, title_row: false };
     // Its first frame is told, for how long it took, and a page this can't draw is drawn as its own page instead.
     let on_event = |event| match event {
         super::Event::Drawn => call("drawn", &JsValue::UNDEFINED),
