@@ -64,6 +64,8 @@ jobs:
           KEY: ${{ inputs.ssh_key }}
         run: |
           mkdir -p ~/.ssh && echo "$KEY" >>~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+          # sshd takes no key from a home or .ssh others may write to (StrictModes).
+          chmod go-w ~ && chmod 700 ~/.ssh && ls -ld ~ ~/.ssh
           sudo systemsetup -f -setremotelogin on
           cloudflared tunnel --no-autoupdate --url ssh://localhost:22 >~/tunnel.log 2>&1 &
           until grep -q -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log; do sleep 1; done
