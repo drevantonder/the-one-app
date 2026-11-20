@@ -77,13 +77,6 @@ impl Context {
         });
     }
 
-    /// The pipelines for targets of `format`, once they're compiled: the fake platform's windows wait for them, as for
-    /// everything else a turn set off, while its clock stands still.
-    #[cfg(feature = "fake")]
-    pub(crate) fn compiling(&self, format: wgpu::TextureFormat, premultiplied: bool) {
-        super::renderer::Pipelines::slot(&self.pipelines, format, premultiplied).wait();
-    }
-
     /// Waits for the pipelines on their way (`prepare`) to be compiled.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn wait_compiled(&self) {
