@@ -79,7 +79,8 @@ struct OpenApp: OpenIntent {
 @available(iOS 17.0, *)
 struct OnCharger: AppIntent {
     static let title: LocalizedStringResource = "On Charger"
-    static let description = IntentDescription("Tells your network whether this iPhone is on its charger.")
+    // Apple refuses an App Intent whose title or description names a device of theirs ("iPhone", ITMS-90626).
+    static let description = IntentDescription("Tells your network whether this device is on its charger.")
     static let openAppWhenRun = false
 
     @Parameter(title: "On Charger") var on: Bool
