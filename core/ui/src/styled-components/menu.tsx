@@ -109,8 +109,8 @@ export const Menu = {
       </Button>
     )
   },
-  /** Where a menu's content shows: in a layer over the page, under what opened it, its end at that's end, or above
-   * it where there isn't room. Closed, it's kept, unseen, so a row knows its destructive item. */
+  /** Where a menu's content shows: in a layer over the page, under what opened it, centred on its trigger or its end
+   * where a row was held, or above it where there isn't room. Closed, it's kept, unseen, so a row knows its destructive item. */
   Positioner: (props: { children?: JSX.Element }) => {
     const menu = useContext(Opened)!
     const inside = children(() => props.children)

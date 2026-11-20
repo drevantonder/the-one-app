@@ -3,8 +3,8 @@
 // ab55044caee66cc8228fa7ed3525088a1b7b5af7: opened, the keyboard is on its first item; the arrows move through the
 // items, wrapping (`loop`), Home and End to the first and the last, a letter to the next that starts with it
 // (typeahead); Enter and Space choose; Tab, Escape, a press outside and the device's back close it, and the keyboard
-// goes back to its trigger; it opens under its trigger, its end at the trigger's, flipped above where there isn't
-// room. On our host's focus (`autoFocus`) and layout (`onLayout`, `viewport()`).
+// goes back to its trigger; it opens under its trigger, flipped above where there isn't room. On our host's focus
+// (`autoFocus`) and layout (`onLayout`, `viewport()`).
 import { createEffect, createSignal, merge } from "solid-js"
 import { direction, viewport } from "#bridge"
 import { createControllableSignal } from "../behavior-primitives/controllable.ts"
@@ -65,13 +65,14 @@ export function createMenu(props: MenuProps) {
       if (opened && first) roving.focus(first.value)
     },
   )
-  /** Where its content goes, once it's measured: under what opened it, its end at that's end, flipped above where
-   * there isn't room, inside the window's edges. */
+  /** Where its content goes, once it's measured: under what opened it, flipped above where there isn't room, inside
+   * the window's edges. Under its trigger it's centred on it, as a Mac's pop-up button's menu is; at a point (where a
+   * row was held), its end is there. */
   const placed = () => {
     const anchor = at()
     const measured = size()
     if (!anchor || !measured) return
-    return computePlacement(anchor, measured, viewport(), { side: "bottom", align: "end", sideOffset: pixels(tokens.grid[1]), alignOffset: 0, collisionPadding: pixels(tokens.grid[2]), rtl: direction() === "rtl" })
+    return computePlacement(anchor, measured, viewport(), { side: "bottom", align: anchor.width || anchor.height ? "center" : "end", sideOffset: pixels(tokens.grid[1]), alignOffset: 0, collisionPadding: pixels(tokens.grid[2]), rtl: direction() === "rtl" })
   }
   return {
     at,
