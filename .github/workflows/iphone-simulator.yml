@@ -1,0 +1,78 @@
+# An iPhone simulator on GitHub's macOS runner, for an agent to drive over ssh as it would a Mac of its own: it builds
+# the app for the simulator at a commit, boots an iPhone with it installed, and lets in the ssh key it's given through a
+# Cloudflare quick tunnel, whose address is the run's artifact `tunnel`, there as soon as it's up. It stays up until
+# `~/done` exists or `minutes` pass. The owner's Mac is his own laptop, so nothing is tested on it.
+name: iPhone simulator
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: The commit to build
+        required: true
+      ssh_key:
+        description: The public key let in over ssh
+        required: true
+      minutes:
+        description: How long it stays up at most
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  simulator:
+    runs-on: macos-26
+    timeout-minutes: 180
+    steps:
+      # Its build is named from the commits that lead to it (`tooling/version`).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - run: sudo xcode-select -s "$(ls -d /Applications/Xcode_*.app | sort -V | tail -1)" && xcodebuild -version
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-ios-sim
+      # The UI library the app has built in, which its build makes with bun (clients/app/build.rs), at mise.toml's.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2.12.4
+      - run: brew install xcodegen cloudflared cameroncooke/axe/axe
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ios-sim
+      - uses: mozilla-actions/sccache-action@v0.0.9
+      - working-directory: clients/app
+        run: gen/apple/generate && cargo tauri ios build --target aarch64-sim --debug --ci
+        env:
+          RUSTC_WRAPPER: sccache
+          SCCACHE_GHA_ENABLED: "true"
+          CARGO_PROFILE_DEV_DEBUG: "0"
+      - name: Boot an iPhone with the app
+        run: |
+          device=$(xcrun simctl list devices available -j | jq -r '[.devices | to_entries[] | select(.key | test("iOS")) | .value[] | select(.name | test("^iPhone .*Pro$"))] | last | .udid')
+          xcrun simctl boot "$device"
+          xcrun simctl bootstatus "$device"
+          xcrun simctl install "$device" "clients/app/gen/apple/build/arm64-sim/the One App.app"
+          echo "$device" >~/device
+      - name: Let the key in over ssh
+        env:
+          KEY: ${{ inputs.ssh_key }}
+        run: |
+          mkdir -p ~/.ssh && echo "$KEY" >>~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+          sudo systemsetup -f -setremotelogin on
+          cloudflared tunnel --no-autoupdate --url ssh://localhost:22 >~/tunnel.log 2>&1 &
+          until grep -q -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log; do sleep 1; done
+          mkdir -p ~/tunnel
+          { grep -o -m1 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log | sed 's|https://||'; whoami; cat ~/device; echo "$PWD"; } >~/tunnel/tunnel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tunnel
+          path: ~/tunnel/tunnel
+          retention-days: 1
+      - name: Stay up
+        run: timeout "${{ inputs.minutes }}m" bash -c 'until [ -e ~/done ]; do sleep 5; done' || true
