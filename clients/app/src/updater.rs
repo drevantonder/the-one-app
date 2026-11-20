@@ -7,8 +7,9 @@
 //! `one update` replaces it, so that alone has it start again, whatever it heard. What it decides it reports
 //! (`one.client.update.*`), as Telemetry shows.
 //!
-//! A computer's app takes a newer build of itself (on a device that's also a server, its server puts it in place as it
-//! restarts on it, `cli::serving`), or keeps a newer page, and starts again on it (`computer::restart`), its app windows
+//! A computer's app takes a newer build of itself (on a device that's also a server, beside its server, which runs it
+//! from its next start, or by its server as it restarts on one that changed what it runs, `cli::serving`), or keeps a
+//! newer page, and starts again on it (`computer::restart`), its app windows
 //! opening again where they were. A phone's app reloads a newer page once it's off screen; its own builds come from
 //! its store (TestFlight). Either waits while a window on screen holds something its person typed and hasn't sent: in
 //! a web view a field typed in that still holds text, which its page says (`editing`),
@@ -91,10 +92,10 @@ fn replaced() {
 /// What the network's update says, as a server tells the app (`notifications/one/update`).
 pub async fn heard(update: Value) {
     report("one.client.update.heard", json!({"one.build.latest": update["latest"][cli_name()], "one.edge.build": update["edge"]}));
+    // What it says of each `one` is what servers run (`serving`, `OneCore.Builds`), which may be older than the app's
+    // latest build, so the network is asked for that.
     #[cfg(desktop)]
-    if let Some(latest) = update["latest"][cli::serving::name()].as_str() {
-        take(latest).await
-    }
+    caught_up().await;
     #[cfg(mobile)]
     if let Some(edge) = update["edge"].as_str() {
         let before = EDGE.lock().expect("nothing panics holding it").replace(edge.to_owned());
@@ -118,21 +119,25 @@ pub async fn caught_up() {
     page().await
 }
 
-/// Takes `latest`, if it's newer than this build: put in place by this device's server, where it's one, or downloaded
-/// here.
+/// Takes `latest`, if it's newer than this build: downloaded here, and on a device that's also a server put in place
+/// beside it (`cli::serving::take_program`) or by it.
 #[cfg(desktop)]
 async fn take(latest: &str) {
     if cli::serving::count(latest) <= cli::serving::count(::client::BUILD) {
         return;
     }
-    // On a device that's also a server, its server puts it in place as it restarts on it, which is heard (`replaced`).
-    if cli::serving::server().is_none() {
+    {
         let _one = TAKING.lock().await;
         if !DUE.load(Ordering::Relaxed) {
             let Ok(views) = crate::views() else { return };
-            match cli::serving::update(&views.client).await {
-                Ok(said) => eprintln!("{said}"),
-                Err(error) => return report("one.client.update.failed", json!({"one.build.latest": latest, "error": format!("{error:#}")})),
+            // On a device that's also a server, it's put in place beside the server, which runs it from its next
+            // start, or, where it changed what a server runs, by its server as it restarts on it (`replaced`).
+            let taken = match cli::serving::server() {
+                None => cli::serving::update(&views.client).await.map(|said| eprintln!("{said}")),
+                Some(_) => cli::serving::take_program(&views.client).await.map(|_| ()),
+            };
+            if let Err(error) = taken {
+                return report("one.client.update.failed", json!({"one.build.latest": latest, "error": format!("{error:#}")}));
             }
         }
     }

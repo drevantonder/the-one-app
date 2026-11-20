@@ -538,7 +538,11 @@ pub async fn update(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
     // A server is taken to the latest build, as every other, by its network's update: this is its Update Now.
     if settled(client, &here, true).await?.server_membership != ServerMembership::Inactive {
-        return crate::said(crate::tasks::result(client, "update", json!({})).await?);
+        let said = crate::said(crate::tasks::result(client, "update", json!({})).await?)?;
+        return Ok(match take_program(client).await? {
+            Some(build) => format!("{said}\nThis device's one is the build {build} now, which its server runs from its next start."),
+            None => said,
+        });
     }
     let builds = download(client).await?;
     let one =
@@ -549,6 +553,42 @@ pub async fn update(client: &Client) -> Result<String> {
     let program = program()?;
     put(&fetched_program(one, &program).await?, &program)?;
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
+}
+
+/// Puts the network's latest `one` in place on a device that's also a server, where it runs a server as the `one` the
+/// server's record pairs with its build does (its `serving` is that one or older, `OneCore.Builds`): the server goes on
+/// as it is and runs it from its next start, and only the app starts again on it, as it hears its program replaced.
+/// So the app takes each build of itself at once, while the network's update restarts servers only for a `one` that
+/// changed what they run (`prepare`, `go`). Gives the build it put in place, if it did.
+pub async fn take_program(client: &Client) -> Result<Option<String>> {
+    let here = Here::of(&client::home()?);
+    let Some(current) = here.read()?.current else { return Ok(None) };
+    let builds = download(client).await?;
+    let Some(one) = builds.get(PROGRAM) else { return Ok(None) };
+    let (Some(latest), Some(serving)) = (one["build"].as_str(), one["serving"].as_str()) else { return Ok(None) };
+    if count(latest) <= count(&current.program).max(count(BUILD)) || count(serving) > count(&current.program) {
+        return Ok(None);
+    }
+    let program = program()?;
+    let new = fetched_program(one, &program).await?;
+    fs::create_dir_all(here.folder.join("programs").join(PROGRAM))?;
+    fs::copy(&new, here.program(latest))?;
+    // Put in place under the record's lock, and only while the server takes no update of its own, which pairs the
+    // program in place with its build as it prepares.
+    let mut taken = Ok(false);
+    here.change(|record| {
+        if record.server_update_status == ServerUpdateStatus::UpToDate && record.current.as_ref() == Some(&current) {
+            taken = put(&new, &program).map(|()| {
+                record.current = Some(Pair { build: current.build.clone(), program: latest.to_owned() });
+                true
+            });
+        }
+    })?;
+    if !taken? {
+        let _ = fs::remove_file(&new);
+        return Ok(None);
+    }
+    Ok(Some(latest.to_owned()))
 }
 
 /// This program's file, which an update replaces, or `ONE_PROGRAM` where something else runs it: Linux names a
