@@ -388,6 +388,8 @@ struct Window {
     pictured: bool,
     /// Its frames while something on it moves.
     timing: frame_timing::Timing,
+    /// Whether it's handed the display a frame since the display's last tick (`Windows::turned`).
+    presented: bool,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -406,6 +408,10 @@ pub struct Windows {
     next: WindowId,
     /// When the display last showed a frame, as its platform says, or the loop's own clock stood in for it.
     framed: web_time::Instant,
+    /// Whether the display's frames were asked for as the loop last turned, and whether one has come since they were
+    /// (`ticking`).
+    wanted: bool,
+    ticked: bool,
     /// The inspector's `host` check under way, and what the host has done since it started.
     check: Option<conformance::Check>,
     record: conformance::Record,
@@ -433,7 +439,7 @@ impl Windows {
             context.prepare();
             let atlas = Arc::new(Atlas::new(&context));
             let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (web_time::Instant::now(), Pressure::Nominal) })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), wanted: false, ticked: false, check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (web_time::Instant::now(), Pressure::Nominal) })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -522,6 +528,7 @@ impl Windows {
                 snapshot: options.snapshot,
                 picture,
                 pictured: false,
+                presented: false,
                 timing: Default::default(),
             },
         );
@@ -849,6 +856,12 @@ impl Windows {
         screens.chain(showing).chain(frame).chain(pulled).chain(check).min()
     }
 
+    /// Whether the display says when it shows each frame, and has since its frames were last asked for: a display link
+    /// just started takes a while to tick (a Mac's two or three refreshes).
+    fn ticking(&self) -> bool {
+        self.display.paced() && self.ticked
+    }
+
     /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
     /// for one (`requestAnimationFrame`).
     fn framing(&self) -> bool {
@@ -909,7 +922,9 @@ impl Windows {
         // The display showed a frame: what moves on a window on screen is drawn again, and its page's
         // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
         let framing = self.framing();
-        let shown = self.display.frame().or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
+        let ticked = self.display.frame();
+        self.ticked |= ticked.is_some();
+        let shown = ticked.or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
         if let Some(at) = shown {
             self.framed = at;
             if let Some(check) = &self.check {
@@ -963,6 +978,17 @@ impl Windows {
                 (window.on_event)(Event::Mismatched(why));
             }
         }
+        // While the display's link ticks, a window hands it at most one frame a refresh: what changes after it has drawn
+        // since the last tick is drawn on the next, as a browser draws on its frames. Drawn as each input or change
+        // came, frames queued ahead of the display, each shown a refresh late, and the thread waited for an image to
+        // draw on every frame (an iPhone's main thread, 120 times a second). A change before it has is drawn at once,
+        // so what the page answers just after a tick isn't held a refresh; idle, every change is.
+        let ticking = self.ticking();
+        if shown.is_some() {
+            for window in self.windows.values_mut() {
+                window.presented = false;
+            }
+        }
         for window in self.windows.values_mut() {
             // A new window shows once its page has heard back from what it asked, or has waited long enough: at once
             // where it has a snapshot, which it shows until then.
@@ -1002,6 +1028,9 @@ impl Windows {
             if window.picture.as_ref().is_some_and(|picture| !starting || picture.len() != (width * height * 4) as usize) {
                 window.picture = None;
                 window.dirty = true;
+            }
+            if ticking && window.presented && window.summoned.is_none() {
+                continue;
             }
             if !window.dirty || window.parts[0].renderer.is_none() {
                 if window.timing.idle()
@@ -1046,6 +1075,7 @@ impl Windows {
                 continue;
             }
             window.missed = 0;
+            window.presented = true;
             if self.check.is_some() {
                 self.record.present();
             }
@@ -1080,7 +1110,13 @@ impl Windows {
             }
         }
         self.pressed();
-        self.display.request_frame(self.framing());
+        // The display's frames are wanted while something moves, and while a change waits for its next tick; a link
+        // just started, or stopped, hasn't ticked.
+        let waiting = ticking && self.windows.values().any(|window| window.on_screen() && window.dirty);
+        let wanted = self.framing() || waiting;
+        self.ticked &= wanted && self.wanted;
+        self.wanted = wanted;
+        self.display.request_frame(wanted);
         self.display.flush();
         if let Some(check) = self.check.take_if(|check| check.over()) {
             let said = check.said(&self.record, self.display.paced());
