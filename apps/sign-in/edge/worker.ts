@@ -191,7 +191,7 @@ const signerKey = (request: Request, body: string) => env.NETWORK.verifiedKey(re
 
 /**
  * What a server asks for a person in the app: one acting for them, or for the network, which acts for everyone, as
- * servers have it themselves (`OneCore.Servers.acting/1`). Nothing else is believed about who that is. An
+ * servers have it themselves (`OneCore.Servers.covering/1`). Nothing else is believed about who that is. An
  * invitation, the first owner's included, is only the network's to make, since it can make someone nobody acts for
  * yet, and so is taking someone out and listing everyone, which a person's own server isn't told.
  */

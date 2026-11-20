@@ -13,10 +13,7 @@ defmodule OneCore.Servers do
   So a server acts for someone once both said so: they put it on their list, which is what gives it their blobs,
   and its owner chose them as a member, which is what has it run their apps on its machine.
 
-  An app's code runs with all of its machine's access, so an app runs only on servers of whoever it's installed
-  for (`runs?/1`): the network's on the network's servers, and a user's or a group's on servers acting for them
-  alone, never on the network's merely because those act for everyone. The network's owners own the network's
-  servers, so what they install for themselves runs there too.
+  An app's code runs with all of its machine's access, so which servers allow it is `OneCore.Apps.allows?/3`'s.
 
   What's read of this is cached (`OneCore.Cache`), so a call asks the bucket nothing, and read again once this server
   looks at someone (`reload/1`) or invalidates it all (`invalidate/0`).
@@ -29,17 +26,20 @@ defmodule OneCore.Servers do
   @doc "The keys of the servers on `owner`'s list, the first first."
   def listed(owner), do: cached({:listed, owner}, fn -> read("#{owner}/servers", []) end)
 
-  @doc "The keys of the servers to ask for `owner`: the ones on their list, then the ones acting for the network."
-  def acting(owner), do: Enum.uniq(listed(owner) ++ listed(@network))
-
   @doc """
   The keys of the servers to ask for `whose`, a user, a group or the network, narrowest first: those acting for them,
   then those acting for the network, which holds everyone, each both ways (`acts_for/1`).
   """
-  def covering(whose) do
-    own = if whose == @network, do: [], else: for(key <- listed(whose), whose in members(key), do: key)
-    Enum.uniq(own ++ for(key <- listed(@network), @network in members(key), do: key))
+  def covering(whose), do: Enum.uniq(own(whose) ++ own(@network))
+
+  @doc "The keys of the servers that are up, of every server there is by its own blobs (`ready?/1`)."
+  def up do
+    keys = cached(:all, fn -> for blob <- Bucket.list("servers/"), [key, "members"] <- [Path.split(Path.relative_to(blob, "servers"))], do: key end)
+    Enum.filter(keys, &(ready?(&1) == true))
   end
+
+  @doc "The keys of the servers acting for `whose` as their own, both ways (`acts_for/1`)."
+  def own(whose), do: for(key <- listed(whose), whose in members(key), do: key)
 
   @doc """
   Whether the server whose key is `key` acts for `who`, a user, a group or the network: for them, or for the network,

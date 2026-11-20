@@ -268,7 +268,7 @@ defmodule OneCore.Apps.Lifecycle do
     move(owner, name, {:stage, "fetching"})
     stage("Getting #{title}'s code")
 
-    case Store.version(artifact, code, Apps.runs?(owner), trusted) do
+    case Store.version(artifact, code, Apps.loads?(owner), trusted) do
       {:ok, version} ->
         # What it's installed for holds it once it runs; this lets go of it however installing ends.
         try do

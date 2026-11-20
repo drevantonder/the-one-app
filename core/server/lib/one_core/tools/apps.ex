@@ -152,8 +152,7 @@ defmodule OneCore.Tools.Apps do
   defp requires(version), do: version.requires
 
   # Has a server that runs an app installed for `owner`, `trusted` or not, run this call, if this one doesn't, since
-  # what it deploys or installs runs there (`OneCore.Apps.runs?/2`): a trusted app on a server that runs their
-  # apps, and an untrusted one on any acting for them.
+  # what it deploys or installs runs there (`OneCore.Apps.runs?/3`).
   defp runs(owner, trusted, forward) do
     cond do
       Apps.runs?(owner, trusted) ->

@@ -2,9 +2,9 @@ defmodule OneCore.Apps.Calls do
   @moduledoc """
   Calling an app: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having its
   scheduled jobs called. A call runs on the version of the app that was latest when it began, and those of the
-  apps it requires whose code runs inside it, which stay loaded until it ends (`OneCore.Apps.run/3`). It runs on a
-  server that runs the apps of whoever the app was installed for (`OneCore.Apps.runs?/1`): this one, or one
-  it's passed on to.
+  apps it requires whose code runs inside it, which stay loaded until it ends (`OneCore.Apps.run/3`). It runs on the
+  narrowest server that's up of those that allow the app's code and act for whose data it keeps
+  (`OneCore.Apps.runs?/3`): this one, or one it's passed on to.
   """
   require Logger
   alias ExJsonSchema.Validator.Error
@@ -488,17 +488,16 @@ defmodule OneCore.Apps.Calls do
     end
   end
 
-  # What a function of an app is called with: who asked, who it runs for, and what was asked, to pass on. It's run
-  # by a server that runs the apps of whoever it was installed for, by any server acting for them where the app is
-  # untrusted, or for a network's app, by the person's own server, for them (`Apps.runs?/4`): this one, or one that
-  # it's passed on to.
-  defp called(at, name, versions, ask, {actor, subject} = principal, forwarded) do
+  # What a function of an app is called with: who asked, who it runs for, and what was asked, to pass on. It runs on
+  # the narrowest server that's up of those that allow the app's code and act for whose data it keeps (`Apps.runs?/3`,
+  # `Apps.first?/3`): this one, or one that it's passed on to, which runs it if it may, and passes it on no further.
+  defp called(at, name, versions, ask, {_actor, subject} = principal, forwarded) do
     call = new_call(at, name, versions, ask, principal, forwarded)
-    whose = whose(at, versions[name], subject)
+    {trusted, whose} = {versions[name].trusted, whose(at, versions[name], subject)}
 
-    if Apps.runs?(at, versions[name].trusted, whose, actor),
+    if Apps.runs?(at, trusted, whose) and (forwarded != false or Apps.first?(at, trusted, whose)),
       do: call,
-      else: Call.run_elsewhere(call, at)
+      else: Call.run_elsewhere(call, Apps.servers(at, trusted, whose))
   end
 
   # The call as this server would run it. One run for someone who keeps their own data apart from whoever the app was
@@ -506,7 +505,7 @@ defmodule OneCore.Apps.Calls do
   defp new_call(at, name, versions, ask, {actor, subject}, forwarded) do
     whose = whose(at, versions[name], subject)
 
-    if whose != at and Apps.runs?(at, versions[name].trusted, whose, actor), do: Installed.subject(at, name, whose)
+    if whose != at and Apps.runs?(at, versions[name].trusted, whose), do: Installed.subject(at, name, whose)
 
     own = "#{whose}/own/#{name}"
 

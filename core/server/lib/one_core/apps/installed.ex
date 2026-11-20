@@ -208,7 +208,7 @@ defmodule OneCore.Apps.Installed do
   @doc """
   Says that `who` keeps their own data with the app installed for `owner` as `name`, which keeps each person's apart.
   Said once: each server keeps that it has. Only the owner's servers write beside their installs, so a person's own
-  server running their call of a network's app (`OneCore.Apps.runs?/4`) has one of the network's say it
+  server running their call of a network's app (`OneCore.Apps.runs?/3`) has one of the network's say it
   (`apps/subject`), and says it again with their next call where none answered.
   """
   def subject(owner, name, who) do
@@ -223,7 +223,7 @@ defmodule OneCore.Apps.Installed do
   end
 
   defp elsewhere(owner, name, who) do
-    Call.run_elsewhere({"apps/subject", %{installed: owner, app: name}}, {nil, who}, false, owner, name)
+    Call.run_elsewhere({"apps/subject", %{installed: owner, app: name}}, {nil, who}, false, {owner, OneCore.Apps.servers(owner)}, name)
   rescue
     unanswered ->
       Logger.warning("#{who} isn't said to keep their own data with #{name} yet: #{Exception.message(unanswered)}")

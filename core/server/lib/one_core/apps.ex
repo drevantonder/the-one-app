@@ -10,9 +10,9 @@ defmodule OneCore.Apps do
   this: restarted, this adopts what's loaded rather than loading it again.
 
   A server looks in the bucket at what's installed for the network and for whoever it acts for when it starts, and at
-  what's installed for anyone else when it's first asked for them. Only a server that runs the apps of whoever a
-  app was installed for (`runs?/1`) loads it and runs it for them, and one of a network's owner's own servers the
-  network's, for their services (`loads?/1`): another knows it only by what it says of itself
+  what's installed for anyone else when it's first asked for them. Only a server that allows an app's code
+  (`allows?/3`) loads it (`loads?/1`), and runs a call of it where it acts for whose data the call keeps
+  (`runs?/3`): another knows it only by what it says of itself
   (`OneCore.Apps.Version.Description`), which lists it, and passes every call to it on to one that runs it. It looks
   again when it's told to, when it's asked for an app it doesn't run, when it comes back (`reconnected/0`), and
   behind a request for someone it last looked at more than five minutes ago: the request runs on what the server has,
@@ -229,54 +229,52 @@ defmodule OneCore.Apps do
   end
 
   @doc """
-  Whether this server runs the apps installed for `owner`: it acts for them as one of their own servers, not
-  only as one of the network's, or it's the network's and they are, or own, the network. Who owns the network is
-  what the apps that validate `reach` say.
+  Whether this server runs a call of an app installed for `at`, which is `trusted` or not, that keeps `whose` data,
+  `at`'s own by default: it allows the app's code (`allows?/3`) and acts for whose data it is
+  (`OneCore.Servers.here?/1`). Of the servers that do, the narrowest that's up takes a call (`first?/3`).
   """
-  def runs?(owner) do
-    cond do
-      owner == @network -> Servers.here?(@network)
-      owner in Servers.here() -> true
-      true -> Servers.here?(@network) and owns_network?(owner)
-    end
+  def runs?(at, trusted, whose \\ nil), do: allowed?(Servers.here(), at, trusted) and Servers.here?(whose || at)
+
+  @doc """
+  Whether the server whose key is `key` allows the code of an app installed for `at`, which is `trusted` or not: an
+  untrusted one runs anywhere, in its sandbox, and a trusted one with its machine's access where it's the network's,
+  or installed for whoever the server acts for as its own (`OneCore.Servers.acts_for/1`), or for one of the network's
+  owners on one of the network's servers, which they own. Who owns the network is what the apps that validate
+  `reach` say.
+  """
+  def allows?(key, at, trusted), do: allowed?(Servers.acts_for(key), at, trusted)
+
+  defp allowed?(scopes, at, trusted),
+    do: not trusted or at == @network or at in scopes or (@network in scopes and owns_network?(at))
+
+  @doc "Whether this server loads the code of the apps installed for `owner`: it allows a trusted one's (`allows?/3`)."
+  def loads?(owner), do: allowed?(Servers.here(), owner, true)
+
+  @doc """
+  The keys of the servers that run a call of an app installed for `at`, `trusted` or not, that keeps `whose` data,
+  `at`'s own by default: those acting for whose it is, narrowest first (`OneCore.Servers.covering/1`), that allow
+  the app's code.
+  """
+  def servers(at, trusted \\ true, whose \\ nil),
+    do: Enum.filter(Servers.covering(whose || at), &allows?(&1, at, trusted))
+
+  @doc """
+  Who an app installed for `at` as `name`, which keeps each person's data apart (`own` is `:subject`) or not, runs
+  for here, as its jobs and services do: whoever it was installed for, and each who keeps something with it, as the
+  servers acting for whoever it's installed for keep them (`OneCore.Apps.Installed.subjects/2`), or the people this
+  server is for, whose own it is. Where it runs for each is `runs?/3`'s.
+  """
+  def runs_for(at, name, own) do
+    subjects = if Servers.here?(at), do: Installed.subjects(at, name), else: Servers.here()
+    [at | if(own == :subject, do: subjects, else: [])]
   end
 
   @doc """
-  Whether this server loads the code of the apps installed for `owner`: where it runs them (`runs?/1`), and the
-  network's on a server of a person's own (`serves/0`) too, which runs them for that person (`runs?/4`).
+  Whether this server is of the narrowest scope that's up of those that run such a call (`servers/3`), and so takes
+  it: it acts for whose data it is as their own, or none of their own that allows the app's code is up.
   """
-  def loads?(owner), do: runs?(owner) or (owner == @network and serves() != [])
-
-  @doc """
-  The people this server serves as one of their own servers, and not as one of the network's, who run any of the
-  network's apps on it (`runs?/4`).
-  """
-  def serves do
-    if Servers.here?(@network), do: [], else: Enum.filter(Servers.here(), &String.starts_with?(&1, "users/"))
-  end
-
-  @doc """
-  Whether this server runs a call of an app installed for `at`, which is `trusted` or not, that keeps `whose` data
-  and is asked by `actor`: where it runs `at`'s apps (`runs?/2`), and a network's app on a server of the person it
-  serves (`serves/0`), for a call from them, or from nobody for them as their services' are, that keeps their own
-  data. The network's shared data, and everyone else's calls, go to the network's servers.
-  """
-  def runs?(at, trusted, whose, actor),
-    do: runs?(at, trusted) or (at == @network and whose in serves() and actor in [nil, whose])
-
-  @doc """
-  Whether this server runs an app installed for `owner`, which is `trusted` or not: a trusted one where it runs the
-  apps installed for them (`runs?/1`), and an untrusted one, in a sandbox, wherever it acts for them
-  (`OneCore.Servers.here?/1`).
-  """
-  def runs?(owner, trusted), do: if(trusted, do: runs?(owner), else: Servers.here?(owner))
-
-  @doc "The keys of the servers that run the apps installed for `owner`, as `runs?/1` says of each, the first first."
-  def servers(@network), do: Servers.listed(@network)
-
-  def servers(owner) do
-    own = Enum.filter(Servers.listed(owner), &(owner in Servers.members(&1)))
-    Enum.uniq(own ++ if(owns_network?(owner), do: Servers.listed(@network), else: []))
+  def first?(at, trusted, whose) do
+    whose in Servers.here() or not Enum.any?(Servers.own(whose), &(allows?(&1, at, trusted) and Servers.ready?(&1) == true))
   end
 
   # Asked of the network's apps by this server, as nobody, as everything about the network is.

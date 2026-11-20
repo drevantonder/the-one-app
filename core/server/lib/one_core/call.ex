@@ -390,17 +390,19 @@ defmodule OneCore.Call do
   def forward(%__MODULE__{} = call, owner), do: forward(call.request, {call.actor, call.subject}, call.forwarded, owner)
 
   @doc """
-  Has a server that runs the apps installed for `owner` run this call, since this one doesn't
-  (`OneCore.Apps.runs?/1`). It ends here with that server's answer, or raises saying whose servers run it and
-  that none is on.
+  Has one of `servers`, the ones that run this call (`OneCore.Apps.servers/3`), run it, since this one doesn't
+  (`OneCore.Apps.runs?/3`). It ends here with that server's answer, or raises saying whose servers run it and that
+  none is on.
   """
-  def run_elsewhere(%__MODULE__{} = call, owner),
-    do: run_elsewhere(call.request, {call.actor, call.subject}, call.forwarded, owner, call.app)
+  def run_elsewhere(%__MODULE__{} = call, servers),
+    do: run_elsewhere(call.request, {call.actor, call.subject}, call.forwarded, {call.installed, servers}, call.app)
 
-  @doc "Has a server that runs the apps installed for `owner` run what was asked of this one, `what`, as `run_elsewhere/2` does."
-  def run_elsewhere(ask, principal, forwarded, owner, what) do
+  @doc """
+  Has one of `servers`, the ones that run the apps installed for `owner`, run what was asked of this one, `what`, as
+  `run_elsewhere/2` does.
+  """
+  def run_elsewhere(ask, principal, forwarded, {owner, servers}, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    servers = OneCore.Apps.servers(owner)
     elsewhere(ask, principal, servers -- [Server.key()])
     raise Servers.off(what, owner, servers)
   end

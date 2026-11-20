@@ -239,12 +239,17 @@ defmodule OneCore.Server do
   defp named(server), do: Servers.name(server) || "That server"
 
   @doc """
-  Tells the other servers acting for `owners` that there's something new of theirs in the bucket to `look` for: a
+  Tells the other servers running what's `owners'` that there's something new of theirs in the bucket to `look` for: a
   app's version, a server, a service installed. Or that what they kept of `hooks` was `decided` from what has
   since changed. Each has looked or forgotten, or couldn't be reached, when this returns.
   """
   def notify_servers(owners, what \\ "reload", hooks \\ []),
-    do: notify(Enum.uniq(Enum.flat_map(owners, &Servers.acting/1)), owners, what, hooks)
+    do: notify(Enum.uniq(Enum.flat_map(owners, &told/1)), owners, what, hooks)
+
+  # The network's apps run on every server, a person's own too, for them (`OneCore.Apps.loads?/1`), and anyone else's on
+  # the servers acting for them.
+  defp told("network"), do: Servers.up()
+  defp told(owner), do: Servers.covering(owner)
 
   @doc "Tells `server` to cancel the call it's running for what this server asked it as `request` (`request/3`)."
   def cancel(server, request) do

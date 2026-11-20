@@ -10,7 +10,7 @@ defmodule OneCore.Tools do
   so does a `member` of the group or the network it's whoever's or installed for, since what's in use is open to
   everyone it's in use for. An `installer` of a user, a group or the network adds apps for them, which an `owner`
   is, and only an `owner` removes them and says which servers act for them. An app is added only where a server
-  would run it (`OneCore.Apps.runs?/1`): for a user or a group, one of their own. A server is its owner's: who it was started for, and only their `owner` says
+  would run it (`OneCore.Apps.runs?/3`): for a user or a group, one of their own. A server is its owner's: who it was started for, and only their `owner` says
   who else it acts for and what it runs. Nothing is asked about what's whoever's asked, which is what their name
   starts. With no app validating `reach`, they're the network's first owner's alone.
 
@@ -56,7 +56,8 @@ defmodule OneCore.Tools do
         ask = {"tools/call", %{name: name, arguments: inputs}}
         # To a server acting for someone, or with `{:running, owner}` to one that runs their apps.
         forward = fn
-          {:running, owner} -> Call.run_elsewhere(ask, principal, forwarded, owner, "An app for #{owner}")
+          {:running, owner} ->
+            Call.run_elsewhere(ask, principal, forwarded, {owner, OneCore.Apps.servers(owner)}, "An app for #{owner}")
           owner -> Call.forward(ask, principal, forwarded, owner)
         end
 

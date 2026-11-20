@@ -10,7 +10,7 @@ defmodule OneCore.Service do
   which its `terminate/2` is given while its folder is still there, to remove what it put on the machine.
   """
   alias OneCore.{Call, Apps, Server, Servers, Services}
-  alias OneCore.Apps.{Calls, Installed, Store, Version}
+  alias OneCore.Apps.{Calls, Store, Version}
 
   @doc "What the service needs of a machine, for its owner to read before installing it."
   @callback needs() :: String.t()
@@ -176,12 +176,11 @@ defmodule OneCore.Service do
   end
 
   @doc """
-  Who the service that asks runs for on its server, each as `app/4` takes it: everyone its app was installed
-  for, a user, a group or the network, whose apps its server runs (`OneCore.Apps.runs?/1`), and where it keeps
-  each person's data apart, each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). A network's app's
-  service on a person's own server runs for them (`OneCore.Apps.serves/0`). Whoever the server
-  is for comes first, as its owner chose them, so a service that's for one of them at a time, its machine's person,
-  takes the first.
+  Who the service that asks runs for on its server, each as `app/4` takes it, as the one rule has a call run
+  (`OneCore.Apps.runs?/3`): whoever its server acts for, of everyone its app was installed for, a user, a group or the
+  network, and where it keeps each person's data apart, each who keeps something with it
+  (`OneCore.Apps.Installed.subjects/2`) and whoever the server is for. Whoever the server is for comes first, as its
+  owner chose them, so a service that's for one of them at a time, its machine's person, takes the first.
   """
   def acts_for do
     {app, _name, _version} = which(self())
@@ -190,20 +189,14 @@ defmodule OneCore.Service do
     whos =
       for at <- Apps.installed_for(app),
           {name, %Version{artifact: ^app} = version} <- Apps.versions([at]),
-          who <- runs_for(at, name, version),
+          who <- Apps.runs_for(at, name, version.own),
+          Apps.runs?(at, version.trusted, who),
           uniq: true,
           do: who
 
     Enum.sort_by(whos, &(Enum.find_index(members, fn member -> member == &1 end) || length(members)))
   end
 
-  defp runs_for(at, name, version) do
-    cond do
-      Apps.runs?(at) -> [at | if(version.own == :subject, do: Installed.subjects(at, name), else: [])]
-      at == "network" -> Apps.serves()
-      true -> []
-    end
-  end
 
   @doc "The key of the server a service runs on, as `call/5` takes it."
   def server, do: Server.key()
