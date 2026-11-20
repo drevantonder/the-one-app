@@ -578,6 +578,15 @@ SIGN
 )")" <"$beam" >"$beam.signed"
     cat "$beam.signed" >"$beam" && rm "$beam.signed"
   fi
+  # A Mac's and Linux' VM is named for what it is, as Activity Monitor and `ps` list a process by its file's name: the
+  # emulator erlexec starts is `$EMU.smp`, and the release's `erl` says which, where it says `beam`. `The One App server`
+  # on a Mac, as its helpers are named, and `one-server` on Linux, where a name has no spaces.
+  if [[ $kind != windows-* ]]; then
+    erts=$(echo "$release"/erts-*/bin)
+    emu=one-server && [[ $kind != macos-* ]] || emu="The One App server"
+    mv "$erts/beam.smp" "$erts/$emu.smp"
+    sed -i "s/^EMU=beam\$/EMU=\"$emu\"/" "$erts/erl" "$erts/erl.src" "$erts/start_erl.src"
+  fi
 
   # What it ships with: the UI library's build, which it builds apps against and serves, and the Bun it builds apps
   # with. What its NIFs were built from is beside them, for `tooling/nifs` to find a Mac's again.

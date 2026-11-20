@@ -586,7 +586,7 @@ defmodule OneCore.Sandbox do
     env = %{
       "ROOTDIR" => root,
       "BINDIR" => Path.join(erts, "bin"),
-      "EMU" => "beam",
+      "EMU" => emulator(erts),
       "PROGNAME" => "erl",
       "HOME" => "/tmp",
       "LANG" => "C.UTF-8",
@@ -599,6 +599,15 @@ defmodule OneCore.Sandbox do
     # in it rather than started by it.
     vm = if match?({:win32, _}, :os.type()), do: "bin/one-server.exe", else: "bin/erlexec"
     walled(Path.join(erts, vm), arguments, policy)
+  end
+
+  # The emulator erlexec starts is named by the release (`tooling/release`): `<EMU>.smp` in the VM's bin folder. Windows'
+  # has the VM in `one-server.exe`, with its emulator beside it as a DLL.
+  defp emulator(erts) do
+    case Path.wildcard(Path.join(erts, "bin/*.smp")) do
+      [emulator] -> Path.basename(emulator, ".smp")
+      [] -> "beam"
+    end
   end
 
   defp loaded(data), do: {:ok, self(), data.port, data.context}
