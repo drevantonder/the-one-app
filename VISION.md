@@ -21,9 +21,9 @@ So:
 - Whatever is kept here belongs to someone: a person, a group, or everyone. Whoever it belongs to can share it with one person, a group or everyone, to use or to change, and it stays theirs. Only what belongs to everyone is looked after by whoever looks after the whole thing.
 - What's made is open to everyone inside once it's in use: anyone can see how it's made and how it's doing, and take their own copy. What someone is still working on can stay private. What people put in it is not open. What's mine and not shared is mine alone, and a group's is its members'.
 - All of it belongs to our family or organisation. Whoever looks after the whole thing can get into anything when it's needed, such as for support, moving it or an audit, and only on purpose, except what someone has encrypted for themselves. Users have the privacy they need, and the owner isn't responsible for keeping their credentials safe.
-- Our own devices do the work when they're on: we already have them, and some things only exist there. A small piece running on a device reaches those. When no device is on, whatever doesn't need one still works in the cloud, on something we pay for only while it's used, including work on a schedule and a screen for my AI. What lives only on a device, like reminders on a Mac, waits until it's back.
+- Our own devices do the work when they're on: we already have them, and some things only exist there. The One App's server running on a device reaches those. When no device is on, whatever doesn't need one still works in the cloud, on something we pay for only while it's used, including work on a schedule and a screen for my AI. What lives only on a device, like reminders on a Mac, waits until it's back.
 - Devices on the same network reach each other directly, not by way of the internet. A server still needs the internet to reach the bucket. A server without a connection to the bucket isn't in a normal state. Nothing is designed around it.
-- That place is worth stealing, so a break-in should get as little as possible. My things open only on my own devices, while one of my AIs is asking, or for software doing its own work. We trust whoever stores them, as people ordinarily trust a cloud provider. What I want kept safe from everyone, like passwords, is encrypted, and nothing that stores or carries it can read it. Whatever helps sees only what it's asked to do.
+- That place is worth stealing, so a break-in should get as little as possible. My things open only on servers that act for me (my own, my group's or the network's), while one of my AIs is asking, or for software doing its own work. What I've encrypted opens only on the servers I chose. We trust whoever stores them, as people ordinarily trust a cloud provider. What I want kept safe from everyone, like passwords, is encrypted, and nothing that stores or carries it can read it. Whatever helps sees only what it's asked to do.
 - Data loss is prevented by storage in the cloud, not necessarily compute in the cloud.
 - It runs on Mac, Linux, Windows, iPhone, Android and the web.
 - It's built for networks of up to about 20,000 users, all in one network with many servers: more than half its users bring their own, about one group in eight has one, and the network runs about one for every 50 to 100 users.
@@ -32,16 +32,16 @@ Everything above this line is the thing. None of it is left out.
 
 Would be nice:
 
-- One general version in the app stores, built to stay within their rules, that works for any group.
+- One general version in the app stores, built to stay within their rules, that works for any group. Until then, each network builds its own app from its own repo.
 - Devices in different places reach each other directly, without going through the cloud.
 - A record I can read of what my AIs did as me.
 
 Building it:
 
-- AIs do the building. They can try a change on every kind of device we support, see it running, and check their own work before calling it done.
-- I run the latest development version in my own network, so the newest changes reach my devices quickly and I can dogfood it.
+- AIs do the building, for the people steering them. They can try a change on every kind of device we support, see it running, and check their own work before calling it done.
+- At first, Andre's network and PTC's run the latest development version, so the newest changes reach real users' devices quickly and we can dogfood it. Later, a network offers channels: its developers run development while everyone else stays on a steadier one.
 - While it runs, it shows what it's doing: what's slow, what's failing, what it costs, and anything that makes it worse to use, for a person or for an AI. No one has to dig for it.
 - The codebase follows best practices in an era where agents do the development: the right way is the easy way because the code's structure makes it so, work is proven on the real thing, and it is tidied constantly.
-- Many AIs can work on it at once, on several machines, without getting in each other's way.
+- Many AIs and their people can work on it at once, on several machines, without getting in each other's way.
 - What slows a builder down gets written down and fixed.
 - Store releases are kept few, so iterating stays fast and cheap.
