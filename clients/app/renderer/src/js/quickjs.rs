@@ -566,10 +566,9 @@ impl Thread {
         !posts.ended && (posts.started.is_none() || posts.ran < self.posted)
     }
 
-    /// Whether it has run call number `call` (`sent`), or ended.
-    pub fn ran(&self, call: u64) -> bool {
-        let posts = self.shared.posts();
-        posts.ended || (posts.started.is_some() && posts.ran >= call)
+    /// Whether its thread ended.
+    pub fn ended(&self) -> bool {
+        self.shared.posts().ended
     }
 
     /// Waits until it has run all that's reached its thread, or ended.

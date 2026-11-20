@@ -360,8 +360,9 @@ impl Thread {
         STARTED.with_borrow(Option::is_none) || RAN.get() < self.sent
     }
 
-    pub fn ran(&self, call: u64) -> bool {
-        STARTED.with_borrow(Option::is_some) && RAN.get() >= call
+    /// A browser's JS never ends.
+    pub fn ended(&self) -> bool {
+        false
     }
 
     /// A browser's JS can't be waited on: what it was sent runs once this turn ends.

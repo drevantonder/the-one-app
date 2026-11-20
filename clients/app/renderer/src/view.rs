@@ -559,10 +559,11 @@ impl Screen {
         self.pictures.decoding() || self.frames.values().any(|child| child.screen.decoding())
     }
 
-    /// Whether its app is starting: it hasn't heard back from what it asked (`waiting`), or its JS hasn't yet run
-    /// the answers, so what it draws of them is on its way.
+    /// Whether its app is starting: it hasn't heard back from what it asked (`waiting`), or what its JS made of the
+    /// answers isn't applied yet (`editing.heard`, which comes with what it changed), so what it draws of them is on
+    /// its way. Its thread having run them isn't enough: what that changed may not have reached the window yet.
     pub fn starting(&self) -> bool {
-        self.waiting() || !self.js.ran(self.heard)
+        self.waiting() || (self.editing.heard < self.heard && !self.js.ended())
     }
 
     /// Whether its page, and each frame's, has run all it was told (`Thread::told`), and what that changed is applied:
