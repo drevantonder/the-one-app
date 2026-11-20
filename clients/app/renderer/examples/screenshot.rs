@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p renderer --example screenshot -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
-//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--measure]
+//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--gpu] [--measure]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -13,6 +13,8 @@
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
 //! `step` moves it. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`).
+//! `--gpu` waits for the GPU after each frame drawn, and says how long that took with its cost (`gpu_ms`): on a real
+//! GPU, its time for the frame, as a device that draws it would take.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
@@ -43,6 +45,7 @@ fn main() -> anyhow::Result<()> {
     let scale: f32 = flag("--scale").and_then(|scale| scale.parse().ok()).unwrap_or(2.0);
     let dark = args.iter().any(|arg| arg == "--dark");
     let touch = args.iter().any(|arg| arg == "--touch");
+    let gpu_times = args.iter().any(|arg| arg == "--gpu");
     // What the window keeps for itself at each edge, as a phone's status bar and home indicator, or a title bar.
     let safe: Vec<f32> = flag("--safe-area").map(|edges| edges.split(',').filter_map(|edge| edge.parse().ok()).collect()).unwrap_or_default();
     let insets = match safe[..] {
@@ -144,8 +147,14 @@ fn main() -> anyhow::Result<()> {
                 break;
             }
         }
+        let drawing = std::time::Instant::now();
         renderer.draw(&scene, [0.0, 0.0]);
-        let cost = screen.cost(&renderer);
+        let mut cost = screen.cost(&renderer);
+        // How long the GPU took, waited for, where it's asked: on a real GPU, that GPU's time for the frame.
+        if gpu_times {
+            renderer.finish();
+            cost["gpu_ms"] = json!((drawing.elapsed().as_secs_f64() * 100_000.0).round() / 100.0);
+        }
         // The first frame is read back too, which `first_frame_ms` is until.
         if !read && first_frame.get().is_some() {
             return Ok((0, 0, Vec::new(), cost));

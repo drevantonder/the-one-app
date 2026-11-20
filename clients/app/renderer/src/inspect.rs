@@ -23,10 +23,12 @@
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
 //! - `profile` (`at`, ms from now, in order: `[0, 80, 200, 400]` unless given; `snap`: false for no pictures) →
 //!   `{frames, time, paused}`: the clock paused and stepped to each time, as `clock` steps it, and the frame there
-//!   drawn, each `{at, mutations, layout_ms, paint_ms, draws, atlas, png, width, height}`: the mutations its JS made
-//!   that it applied since the frame before, how long laying it out took and painting it all told (styling, layout and
-//!   its scene), its draw calls, and its glyph and picture atlas's `tiles`, `textures`, `bytes` and how much of them
-//!   is `filled`. The first is painted whole, the rest as the window paints a frame, from what changed; one where
+//!   drawn, each `{at, mutations, layout_ms, paint_ms, draws, work, atlas, png, width, height}`: the mutations its JS
+//!   made that it applied since the frame before, how long laying it out took and painting it all told (styling,
+//!   layout and its scene), its draw calls, what its GPU did, the same on any GPU (`work`: the device pixels of
+//!   `quads`, `shadows`, `sprites`, `backdrops` and `rasters` it drew, as often as each is drawn over, the pixels it
+//!   `copied` of the frames before, and the bytes it `uploaded`), and its glyph and picture atlas's `tiles`,
+//!   `textures`, `bytes` and how much of them is `filled`. The first is painted whole, the rest as the window paints a frame, from what changed; one where
 //!   nothing changed costs nothing. The clock stays paused.
 //! - `replay` (a selector, or a point, where a press goes down; `moves`, each `{dx, dy, ms}`, a stretch with neither
 //!   holding still; `lift`, true unless given; `hz`, the display's frames a second, 60 unless given; `input_hz`, its

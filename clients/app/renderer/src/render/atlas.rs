@@ -33,6 +33,8 @@ struct AtlasState {
     generation: u64,
     /// How many textures it has made, whose bind groups a renderer keeps (`Renderer::atlas_group`).
     made: u64,
+    /// How many bytes it's written to its textures since it was last asked (`Atlas::uploaded`).
+    uploaded: u64,
 }
 
 impl Atlas {
@@ -46,12 +48,19 @@ impl Atlas {
             uploads: Vec::new(),
             generation: 0,
             made: 0,
+            uploaded: 0,
         }))
     }
 
     /// Writes what's been added since the last frame into its textures, before the frame that draws it.
     pub fn before_frame(&self) {
         self.0.lock().flush();
+    }
+
+    /// How many bytes it's written to its textures since this was last asked: the glyphs and pictures a frame
+    /// uploaded.
+    pub(crate) fn uploaded(&self) -> u64 {
+        std::mem::take(&mut self.0.lock().uploaded)
     }
 
     /// How many textures it has made (`AtlasState::made`).
@@ -163,6 +172,7 @@ impl AtlasState {
     fn flush(&mut self) {
         self.generation += u64::from(!self.uploads.is_empty());
         for upload in self.uploads.drain(..) {
+            self.uploaded += upload.data.len() as u64;
             let texture = &self.storage[upload.id];
             self.queue.write_texture(
                 wgpu::TexelCopyTextureInfo {

@@ -8,7 +8,7 @@
 use super::scene::{PrimitiveBatch, Recording, Scene, Shadow};
 use super::atlas::Atlas;
 use super::context::Context;
-use crate::geometry::{DevicePixels, Size};
+use crate::geometry::{Bounds, ContentMask, DevicePixels, ScaledPixels, Size};
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Arc, OnceLock};
 
@@ -353,6 +353,8 @@ pub struct Renderer {
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
     /// How many draw calls the last frame made (`draws`).
     draws: std::cell::Cell<u32>,
+    /// What the last frame's GPU did (`Work`).
+    work: std::cell::Cell<Work>,
 }
 
 /// The frame's batches' instances: the bind group of its data, and each batch's offset in it.
@@ -372,6 +374,20 @@ struct Drawn {
 /// The start of a frame that's the same as the frames before it, drawn once into a texture of its own, as a
 /// compositor keeps a layer: a frame starts as a copy of it and draws only what follows. What stays the same as the
 /// rest moves (a launcher's card under its turning pages, a page under a sheet sliding up), shadows, blurs and all.
+/// What a frame's GPU did, the same on any GPU: the device pixels of quads (and underlines), shadows, glyphs and
+/// pictures (sprites), backdrops and layers' images (rasters) it drew, each counted as often as it's drawn over, the
+/// pixels it copied of the frames before, and the bytes it uploaded to the atlas.
+#[derive(Clone, Copy, Default)]
+struct Work {
+    quads: f64,
+    shadows: f64,
+    sprites: f64,
+    backdrops: f64,
+    rasters: f64,
+    copied: f64,
+    uploaded: u64,
+}
+
 struct Kept {
     texture: wgpu::Texture,
     drawn: Drawn,
@@ -503,6 +519,7 @@ impl Renderer {
             blurred: Default::default(),
             atlas_groups: Default::default(),
             draws: Default::default(),
+            work: Default::default(),
         }
     }
 
@@ -543,6 +560,11 @@ impl Renderer {
         self.rasters.insert(id, (texture, bound));
     }
 
+    /// Waits until the GPU has done all it was given: how long a frame took it, timed from its `draw`.
+    pub fn finish(&self) {
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+    }
+
     /// How many draw calls the last frame made: each batch, shadow tile, raster and blur pass drawn, but what was kept
     /// of the frames before (`Kept`), as a GPU profiler counts them.
     pub fn draws(&self) -> u32 {
@@ -551,6 +573,40 @@ impl Renderer {
 
     fn drew(&self) {
         self.draws.set(self.draws.get() + 1);
+    }
+
+    /// What the last frame's GPU did, the same on any GPU, as the inspector's `profile` and `replay` say it: how many
+    /// device pixels each kind of thing it drew covered, what it copied of the frames before, and the bytes it uploaded.
+    pub fn work(&self) -> serde_json::Value {
+        let work = self.work.get();
+        let px = |area: f64| area.round() as u64;
+        serde_json::json!({
+            "quads": px(work.quads),
+            "shadows": px(work.shadows),
+            "sprites": px(work.sprites),
+            "backdrops": px(work.backdrops),
+            "rasters": px(work.rasters),
+            "copied": px(work.copied),
+            "uploaded": work.uploaded,
+        })
+    }
+
+    /// The device pixels batch `batch` covers, each thing in it cut to what it's drawn inside, added to its kind's.
+    fn covered(&self, batch: &PrimitiveBatch<'_>) {
+        fn area<'a>(all: impl Iterator<Item = (&'a Bounds<ScaledPixels>, &'a ContentMask<ScaledPixels>)>) -> f64 {
+            all.map(|(bounds, mask)| bounds.intersect(&mask.bounds)).map(|cut| f64::from(cut.size.width.0) * f64::from(cut.size.height.0)).sum()
+        }
+        let mut work = self.work.get();
+        match batch {
+            PrimitiveBatch::Quads(quads) => work.quads += area(quads.iter().map(|quad| (&quad.bounds, &quad.content_mask))),
+            PrimitiveBatch::Underlines(lines) => work.quads += area(lines.iter().map(|line| (&line.bounds, &line.content_mask))),
+            PrimitiveBatch::Shadows(shadows) => work.shadows += area(shadows.iter().map(|shadow| (&shadow.bounds, &shadow.content_mask))),
+            PrimitiveBatch::MonochromeSprites { sprites, .. } => work.sprites += area(sprites.iter().map(|sprite| (&sprite.bounds, &sprite.content_mask))),
+            PrimitiveBatch::PolychromeSprites { sprites, .. } => work.sprites += area(sprites.iter().map(|sprite| (&sprite.bounds, &sprite.content_mask))),
+            PrimitiveBatch::Backdrops(backdrops) => work.backdrops += area(backdrops.iter().map(|backdrop| (&backdrop.bounds, &backdrop.content_mask))),
+            PrimitiveBatch::Rasters(rasters) => work.rasters += area(rasters.iter().map(|raster| (&raster.bounds, &raster.content_mask))),
+        }
+        self.work.set(work);
     }
 
     pub fn sprite_atlas(&self) -> &Arc<Atlas> {
@@ -581,6 +637,7 @@ impl Renderer {
     pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
         self.atlas.before_frame();
         self.draws.set(0);
+        self.work.set(Work { uploaded: self.atlas.uploaded(), ..Work::default() });
         let (frame, view, texture) = match &self.target {
             Target::Surface { surface, config } => {
                 // A surface its window has outgrown, or lost, is configured again and its frame taken from that, so the
@@ -767,6 +824,9 @@ impl Renderer {
         let from = match &self.kept {
             Some(kept) => {
                 encoder.copy_texture_to_texture(kept.texture.as_image_copy(), texture.as_image_copy(), wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 });
+                let mut work = self.work.get();
+                work.copied += f64::from(size.0) * f64::from(size.1);
+                self.work.set(work);
                 kept.drawn.batches.len()
             }
             None => 0,
@@ -827,6 +887,7 @@ impl Renderer {
         });
         pass.set_bind_group(0, globals, &[]);
         for &at in run {
+            self.covered(&batches[at]);
             if let PrimitiveBatch::Shadows(shadows) = &batches[at] {
                 self.draw_shadows(&mut pass, shadows, &instances.group, instances.offsets[at]);
                 continue;
