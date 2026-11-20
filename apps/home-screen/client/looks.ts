@@ -65,7 +65,6 @@ export const looks = styles({
   faded: (opacity: number, scale: number) => ({ opacity, scale }),
   drifted: (opacity: number, translateY: number) => ({ opacity, translateY }),
   shifted: (translateX: number) => ({ translateX }),
-  slid: (translateX: number, opacity: number) => ({ translateX, opacity }),
   moved: (translateX: number, translateY: number) => ({ translateX, translateY }),
   popup: (start: number, width: number) => ({ start, width }),
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
