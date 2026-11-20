@@ -295,7 +295,11 @@ impl Subscription {
         }
         let (response, revalidate) = match self.client.cached(method, &params) {
             Some(cached) => (cached, true),
-            None => (self.client.fresh(method, &params).await?, false),
+            None => {
+                // Said in the app's log, as a read a window waits on: one a server holds, as it starts, holds the window.
+                eprintln!("{} had nothing kept, so it waits for a server", asked(method, &params));
+                (self.client.fresh(method, &params).await?, false)
+            }
         };
         let mut responses = self.responses.lock().expect("no view panics");
         // Another read of the same may have been answered meanwhile, and asked again behind it.
@@ -361,14 +365,22 @@ impl Subscription {
     async fn reads(&self, method: &str, params: &Value) -> bool {
         match method {
             method if crate::resolve::READS.contains(&method) => true,
-            "tools/call" => self
-                .client
-                .reads(&json!({"method": method, "params": params}))
-                .await
-                .unwrap_or(false),
+            "tools/call" => match self.client.reads(&json!({"method": method, "params": params})).await {
+                Ok(reads) => reads,
+                // Asked as a write, which waits for a server, as the app's log says.
+                Err(error) => {
+                    eprintln!("{} is asked as a write, since this client can't say whether it only reads: {error:#}", asked(method, params));
+                    false
+                }
+            },
             _ => false,
         }
     }
+}
+
+/// What was asked, as the app's log says it: `tools/call settings_badge`, `resources/list`.
+fn asked(method: &str, params: &Value) -> String {
+    params["name"].as_str().map_or_else(|| method.to_owned(), |tool| format!("{method} {tool}"))
 }
 
 fn matches_app(method: &str, params: &Value, prefix: Option<&str>) -> bool {
