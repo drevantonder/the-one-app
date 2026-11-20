@@ -115,8 +115,10 @@ defmodule OneCore.Apps.Deploy do
   defp breadth(_user), do: 0
 
   # After `latest`: its author has it installed by the installation machine's own move for an app they deployed, and
-  # the servers of whoever has it take it, this one at once, with the version the deploy loaded. It supersedes the
-  # narrower copies of itself, once it's answered.
+  # the servers of whoever has it take it, this one at once, with the version the deploy loaded. The deploy answers
+  # once this one runs it, as the others load it: one restarting onto a new build answers nothing until it's up, and
+  # held every deploy that long (133 s while a network updated). It supersedes the narrower copies of itself, once
+  # it's answered.
   defp committed(owner, name, number, %Version{artifact: artifact} = version, install, began) do
     forget()
     moved = step("installed", fn -> if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{} end)
@@ -124,16 +126,14 @@ defmodule OneCore.Apps.Deploy do
     owners = Enum.uniq([owner | Installed.installed_for(artifact)])
     trace = OpenTelemetry.Ctx.get_current()
 
-    notified =
-      Task.async(fn ->
-        OpenTelemetry.Ctx.attach(trace)
-        step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact], deployed: %{name => began}}) end)
-      end)
+    Task.Supervisor.start_child(OneCore.Asks, fn ->
+      OpenTelemetry.Ctx.attach(trace)
+      step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact], deployed: %{name => began}}) end)
+    end)
 
     step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}], [artifact]) end)
     # This server's clients are told it moved, and when its deploy began, as the others tell theirs.
     if install, do: Apps.changed([owner], nil, %{name => began})
-    Task.await(notified, :infinity)
 
     case moved do
       {:error, why} ->
