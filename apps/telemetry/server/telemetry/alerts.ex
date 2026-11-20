@@ -6,9 +6,9 @@ defmodule Telemetry.Alerts do
 
   | Kind | Fires when | Clears when |
   | --- | --- | --- |
-  | `server` | One of the network's servers, as the relay says (`active`): its machine's `one serve run` said its server didn't start or stopped without being asked, and it hasn't started since, for 5 min, unless the relay says it's ready; or it said its server ended unasked 3 times in 10 min (`one.server.crash_loop`) | It says it started, or the relay says it's ready, and it hasn't looped for 10 min |
+  | `server` | One of the network's servers, as the relay says (`active`): its machine's `one serve run` said its server didn't start or stopped without being asked, and it hasn't started since, for 5 min, unless the relay says it's ready; or it said its server ended unasked 3 times in 10 min (`one.server.crash_loop`) | It says it started, or the relay says it's ready, or a server on the same machine started after it failed (its machine's server has a new key), and it hasn't looped for 10 min |
   | `update` | The network's update (`core/edge/updater/updater.ts`) is held: a server went back, or didn't finish in time | The update is under way again, or done |
-  | `error` | A kind of error logged that wasn't in the last 14 days: its first line, numbers and ids aside. A fault, a crash or a client's exception, not a tool refusing (a `RuntimeError`) | It stops being new an hour later |
+  | `error` | A kind of error logged that wasn't in the last 14 days: its first line, numbers and ids aside. A fault, a crash or a client's exception, not a tool refusing (a `RuntimeError`) | It isn't logged for 10 min, or it stops being new an hour after it was first |
   | `failing` | Half or more of an app's tool calls failed, of 10 or more in 10 min | 10 min with fewer |
   | `unanswered` | An app didn't answer, in 2 or more of the last 5 minutes: a hook it didn't answer in time (`one.hook.timeouts`), or its database's server kept a call waiting without running it (`one.database.lease.wait`, `not_answered`) | 5 min without |
 | `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
@@ -33,6 +33,8 @@ defmodule Telemetry.Alerts do
   # hour's blob 10 minutes after it ends (`Store.prune/1`), and the rules look back no further.
   @gap 5 * 60_000
   @minute 60_000
+  # How long an error kind isn't logged before its alert resolves: its recovery window, as Grafana's and Datadog's.
+  @recovery 10 * @minute
 
   @schema [
     "create table looked (id integer primary key check (id = 1), at integer not null)",
@@ -345,8 +347,14 @@ defmodule Telemetry.Alerts do
   defp conditions(db, now, asked) do
     called = fn "one" -> "The network's own tools"; app -> Map.get(asked.names, app, app) end
 
+    rows = query(db, "select * from servers", [])
+    # Each machine's latest start, by whichever key its server had: a machine's server given a new key leaves its
+    # old one down for good, which a start under the new one answers.
+    started = rows |> Enum.group_by(& &1["name"]) |> Map.new(fn {name, rows} -> {name, rows |> Enum.map(&(&1["started"] || 0)) |> Enum.max()} end)
+
     servers =
-      query(db, "select * from servers", [])
+      rows
+      |> Enum.reject(&(&1["name"] && &1["failing"] && started[&1["name"]] > &1["failing"]))
       |> Enum.flat_map(fn row ->
         case server(row, row["name"] || "A server", now, asked.presence[row["server"]]) do
           nil -> []
@@ -367,7 +375,7 @@ defmodule Telemetry.Alerts do
       end
 
     errors =
-      for row <- query(db, "select * from seen where new = 1 and first > ?", [now - 60 * @minute]), into: %{} do
+      for row <- query(db, "select * from seen where new = 1 and first > ? and last > ?", [now - 60 * @minute, now - @recovery]), into: %{} do
         {{"error", row["kind"]}, %{title: "New error: #{String.slice(row["message"], 0, 100)}", text: row["place"]}}
       end
 
@@ -457,7 +465,10 @@ defmodule Telemetry.Alerts do
   # Moves every alert on by what fires now, `conditions`: a new one fires, one still firing is kept up to date,
   # and one whose symptom has been gone for its kind's while clears, unless it couldn't be asked this time (`unknown`).
   defp step(db, now, conditions, unknown) do
-    open = Map.new(query(db, "select * from alerts where state = 'firing'", []), &{{&1["kind"], &1["key"]}, &1})
+    firing = query(db, "select * from alerts where state = 'firing' order by id", [])
+    # One alert per kind and key, the newest: any other left firing beside it, as one from before a server's
+    # restart, is resolved with the rest below.
+    open = Map.new(firing, &{{&1["kind"], &1["key"]}, &1})
 
     for {{kind, key} = id, condition} <- conditions do
       case open[id] do
@@ -478,7 +489,9 @@ defmodule Telemetry.Alerts do
       end
     end
 
-    for {{kind, _key} = id, row} <- open, not Map.has_key?(conditions, id), not unknown.(id), now - row["last"] >= @cool[kind] do
+    for %{"kind" => kind, "key" => key} = row <- firing,
+        id = {kind, key},
+        open[id]["id"] != row["id"] or (not Map.has_key?(conditions, id) and not unknown.(id) and now - row["last"] >= @cool[kind]) do
       query(db, "update alerts set state = 'resolved', ended = ? where id = ?", [now, row["id"]])
     end
   end
