@@ -1,7 +1,7 @@
 // Telemetry: what a person acts on of what the network recorded, laid out as a trace and
 // metrics viewer is, cut down. The alerts first, then calls over time, what's failing,
-// what's slowest and what AI cost, over the range picked above them, and last what's kept. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
-// long it took over time. What's fine is silent: with nothing failing, there's no Failing.
+// what's slowest and what AI cost, over the range picked above them, and last what's kept. An alert opens beside the list, saying when it fired and cleared; a failure opens its trace, as a
+// waterfall; a slow tool opens how long it took over time. What's fine is silent: with nothing failing, there's no Failing.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { call, changed, Empty, Icon, List, Problem, render, Row, Screen, Section, since, size, Skeleton, Split, styles, Tabs, Text, tokens, View } from "ui"
 import { sizes } from "./sizes.ts"
@@ -102,10 +102,12 @@ interface Alert {
   title: string
   text?: string | null
   began: number
+  /** When its symptom was last seen. */
+  last: number
   ended?: number | null
 }
 
-/** What `telemetry_alerts` answers: the alerts open or resolved in the last day, each kind, and where a copy goes. */
+/** What `telemetry_alerts` answers: the alerts open or resolved in the range picked, each kind, and where a copy goes. */
 interface Alerts {
   alerts: Alert[]
   kinds: { kind: string; about: string }[]
@@ -120,11 +122,11 @@ const RANGES = [
 ]
 const [hours, setHours] = createSignal("24")
 const overview = createMemo(() => call("telemetry_overview", { hours: Number(hours()) }).then((text): Overview => JSON.parse(text)))
-const alerts = createMemo(() => call("telemetry_alerts", {}).then((text): Alerts => JSON.parse(text)))
+const alerts = createMemo(() => call("telemetry_alerts", { hours: Number(hours()) }).then((text): Alerts => JSON.parse(text)))
 changed(() => (refresh(overview), refresh(alerts)))
 
-/// What's open beside the list: a failure's trace, `{ trace }`, or a slow tool or app, `{ slow }`.
-const [open, setOpen] = createSignal<{ failure?: Failure; slow?: Slowest & { key: string } }>()
+/// What's open beside the list: an alert, `{ alert }`, a failure's trace, `{ failure }`, or a slow tool or app, `{ slow }`.
+const [open, setOpen] = createSignal<{ alert?: Alert & { about?: string }; failure?: Failure; slow?: Slowest & { key: string } }>()
 const keyOf = (failure: Failure) => `${failure.where}|${failure.message}`
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
@@ -261,6 +263,23 @@ function Failed(props: { failure: Failure; names: Record<string, string> }) {
   )
 }
 
+/// An alert: what it says, when it fired and cleared, and what fires its kind.
+function Alerting(props: { alert: Alert & { about?: string } }) {
+  const alert = () => props.alert
+  return (
+    <Screen heading={alert().title} back>
+      <Show when={alert().text}>{(text) => <Text style={[look.message, alert().state !== "resolved" && look.wrong]}>{text()}</Text>}</Show>
+      <List>
+        <Row heading="Began" end={since(alert().began)} />
+        <Show when={alert().ended} fallback={<Row heading="Last Seen" end={since(alert().last)} />}>
+          {(ended) => <Row heading="Resolved" end={since(ended())} />}
+        </Show>
+      </List>
+      <Show when={alert().about}>{(about) => <Text style={look.readableNote}>{`Fires when: ${about()}.`}</Text>}</Show>
+    </Screen>
+  )
+}
+
 /// How long a tool or an app took over the range: its 95th percentile over time, and its percentiles.
 function Slow(props: { slow: Slowest }) {
   return (
@@ -329,8 +348,12 @@ function Telemetry(props: { all: Overview }) {
       detail={
         <Show when={opened()} fallback={<Show when={failing().length || slowest().length}><Empty>{failing().length ? "Pick a failure to see what happened." : "Pick a tool to see how long it takes."}</Empty></Show>}>
           {(shown) => (
-            <Show when={shown().failure} fallback={<Slow slow={shown().slow!} />}>
-              {(failure) => <Failed failure={failure()} names={all().names} />}
+            <Show when={shown().alert} fallback={
+              <Show when={shown().failure} fallback={<Slow slow={shown().slow!} />}>
+                {(failure) => <Failed failure={failure()} names={all().names} />}
+              </Show>
+            }>
+              {(alert) => <Alerting alert={alert()} />}
             </Show>
           )}
         </Show>
@@ -400,6 +423,8 @@ function Alerted() {
                   heading={alert().title}
                   text={alert().text ?? undefined}
                   end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
+                  current={open()?.alert?.id === alert().id}
+                  onPress={() => setOpen({ alert: { ...alert(), about: alerts().kinds.find((kind) => kind.kind === alert().kind)?.about } })}
                 />
               )}
             </List>

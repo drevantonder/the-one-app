@@ -170,7 +170,8 @@
             "state": "firing",
             "title": "Gmail is failing",
             "text": "6 calls failed in the last hour.",
-            "began": 1767224400000
+            "began": 1767224400000,
+            "last": 1767225600000
           },
           {
             "id": 2,
@@ -178,7 +179,8 @@
             "state": "resolved",
             "title": "Disk was nearly full",
             "began": 1767189600000,
-            "ended": 1767204000000
+            "ended": 1767204000000,
+            "last": 1767203400000
           }
         ],
         "kinds": [
@@ -238,6 +240,16 @@
     "like": "Overview",
     "taps": [
       "Git Repos › clone"
+    ]
+  },
+  "Alert": {
+    "like": "Overview",
+    "taps": [
+      "Gmail is failing"
+    ],
+    "size": [
+      1024,
+      720
     ]
   },
   "All Quiet": {

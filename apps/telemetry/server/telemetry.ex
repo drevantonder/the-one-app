@@ -315,8 +315,8 @@ defmodule Telemetry do
         name: "alerts",
         read_only: true,
         description:
-          "The alerts for what needs a person, open and resolved in the last day, newest first, each kind of alert with what fires it, and where a copy of what's kept is sent",
-        inputs: %{type: "object", properties: %{}},
+          "The alerts for what needs a person, open and resolved in the last hours (kept 7 days), newest first, each kind of alert with what fires it, and where a copy of what's kept is sent",
+        inputs: %{type: "object", properties: %{hours: hours}},
         outputs: %{
           type: "object",
           properties: %{
@@ -501,7 +501,7 @@ defmodule Telemetry do
     if endpoint && !inputs["item"], do: raise("Name the Vault item its headers are filled in from, as item.")
     Forward.set(call, endpoint, inputs["item"], inputs["headers"])
   end
-  def call("alerts", _inputs, call), do: Alerts.list(call)
+  def call("alerts", inputs, call), do: Alerts.list(call, inputs["hours"] || 24)
   def call("evaluate", _inputs, call) do
     Alerts.evaluate(call)
     %{}

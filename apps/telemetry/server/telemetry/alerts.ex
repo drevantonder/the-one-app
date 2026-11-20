@@ -80,11 +80,11 @@ defmodule Telemetry.Alerts do
   def kinds, do: @kinds
 
   @doc """
-  The alerts not resolved, and those resolved in the last day, newest first, each kind of alert, and where a copy is
-  sent (`Telemetry.Forward`).
+  The alerts not resolved, and those resolved in the last `hours`, newest first, each kind of alert, and where a copy
+  is sent (`Telemetry.Forward`).
   """
-  def list(call) do
-    day = System.os_time(:millisecond) - 86_400_000
+  def list(call, hours) do
+    since = System.os_time(:millisecond) - hours * 3_600_000
 
     transaction(call, fn db ->
       alerts =
@@ -94,7 +94,7 @@ defmodule Telemetry.Alerts do
           select id, kind, key, state, title, text, began, last, ended from alerts
           where state = 'firing' or ended > ? order by began desc
           """,
-          [day]
+          [since]
         )
 
       kinds = for {kind, about} <- Enum.sort(@kinds), do: %{kind: kind, about: about}
