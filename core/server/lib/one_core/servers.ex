@@ -6,9 +6,9 @@ defmodule OneCore.Servers do
   acting for the network, and only if there's no list. A server on a list adds another.
 
   A server's own blobs sit under `servers/<its key>/`, and only it writes them. Its `address` is how to reach it,
-  and its `name` what its machine is called, which it writes each time it starts, since it may start somewhere
-  else. Its `members` are who it acts for: its owner first, whom it was started for, and then whoever its owner
-  chose. A new one is for its owner alone.
+  its `name` what its machine is called, and `battery` whether that machine has one, which it writes each time it
+  starts, since it may start somewhere else. Its `members` are who it acts for: its owner first, whom it was started
+  for, and then whoever its owner chose. A new one is for its owner alone.
 
   So a server acts for someone once both said so: they put it on their list, which is what gives it their blobs,
   and its owner chose them as a member, which is what has it run their apps on its machine.
@@ -99,6 +99,38 @@ defmodule OneCore.Servers do
 
   @doc "What the machine the server whose key is `key` runs on is called, as it said when it last started."
   def name(key), do: cached({:name, key}, fn -> read("servers/#{key}/name", nil) end)
+
+  @doc """
+  Whether the machine the server whose key is `key` runs on has a battery, as it said when it last started: a
+  laptop's, a tablet's or a phone's, which sleeps when it's closed and goes wherever it's carried, where a desktop
+  or a server stays on, where it is. `nil` where it never said.
+  """
+  def battery?(key), do: cached({:battery, key}, fn -> read("servers/#{key}/battery", nil) end)
+
+  # Whether this machine has a battery of its own, as its system says: Linux's power supplies of type `Battery`
+  # that power the system (a mouse's has scope `Device`), a Mac's `InternalBattery`, Windows' `Win32_Battery`.
+  defp battery do
+    case :os.type() do
+      {:unix, :linux} ->
+        supplies = "/sys/class/power_supply"
+
+        # A container may have no such folder.
+        listed = with({:ok, listed} <- File.ls(supplies), do: listed, else: (_none -> []))
+
+        Enum.any?(listed, fn supply ->
+          read = &String.trim(File.read!(Path.join([supplies, supply, &1])))
+          read.("type") == "Battery" and (not File.exists?(Path.join([supplies, supply, "scope"])) or read.("scope") != "Device")
+        end)
+
+      {:unix, :darwin} ->
+        {said, 0} = System.cmd("pmset", ["-g", "batt"])
+        said =~ "InternalBattery"
+
+      {:win32, _} ->
+        {said, 0} = System.cmd("powershell", ["-NoProfile", "-Command", "@(Get-CimInstance Win32_Battery).Count"])
+        String.trim(said) != "0"
+    end
+  end
 
   @doc """
   Whether the server whose key is `key` is ready, as the relay at the network's address says of every server and
@@ -427,6 +459,7 @@ defmodule OneCore.Servers do
     [
       fn -> say("servers/#{key}/address", address) end,
       fn -> say("servers/#{key}/name", JSON.encode!(name)) end,
+      fn -> say("servers/#{key}/battery", JSON.encode!(battery())) end,
       fn -> Builds.say(key) end,
       fn -> Bucket.write("servers/#{key}/members", JSON.encode!([owner])) end
     ]
@@ -500,7 +533,7 @@ defmodule OneCore.Servers do
   """
   def reload(owner) do
     Cache.invalidate(__MODULE__, {:listed, owner})
-    servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}, {:name, key}], do: what
+    servers = for key <- listed(owner), what <- [{:members, key}, {:installed, key}, {:name, key}, {:battery, key}], do: what
     Enum.each(if(owner == @network, do: [:first_owner | servers], else: servers), &Cache.invalidate(__MODULE__, &1))
   end
 
