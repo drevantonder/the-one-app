@@ -1,6 +1,8 @@
 // What a passkey does on the sign-in page, done from a device that holds the key instead, for a network being built,
 // where nobody has a passkey, and once on a live one to encrypt a group's or the network's key to its owner's:
 //
+//     bun tooling/keys.ts make [scope]      makes the key of whoever `one` acts as, or of <scope>, held by this device,
+//                                           as a passkey's first unlock does; only with ONE_AS, on a network being built
 //     bun tooling/keys.ts wrap <scope>      encrypts <scope>'s key to the key of whoever `one` acts as, both of which this
 //                                           device holds, so their passkey opens it (`encryption`'s `store`, `wrapped`)
 //     bun tooling/keys.ts servers [scope]   hands the keys of what's encrypted for whoever `one` acts as, or for
@@ -16,7 +18,7 @@ import { homedir } from "node:os"
 
 // passkey.ts asks a passkey's PRF for its network's host as it loads, which nothing here uses.
 Object.assign(globalThis, { location: { host: "" } })
-const { forServers, fromDevice, wrap } = await import("../apps/sign-in/edge/page/passkey.ts")
+const { check, forDevice, forServers, fromDevice, wrap } = await import("../apps/sign-in/edge/page/passkey.ts")
 
 const [command, scope] = process.argv.slice(2)
 const one = process.env.ONE_PROGRAM ?? "one"
@@ -41,7 +43,14 @@ async function held(subject?: string) {
   return { key, owner: holds.owner as string, holds }
 }
 
-if (command === "wrap" && scope) {
+if (command === "make") {
+  if (!process.env.ONE_AS) throw new Error("Only on a network being built, with ONE_AS: on any other, a passkey makes it.")
+  const holds = tool("encryption key", scope)
+  if (holds.check) throw new Error(`${holds.owner} has a key already.`)
+  const key = crypto.getRandomValues(new Uint8Array(32))
+  tool("encryption store", scope, { check: await check(key), device: { key: holds.device, name: "This client", ...(await forDevice(key, holds.owner, holds.device)) } })
+  console.log(`${holds.owner}'s key is made, held by this device.`)
+} else if (command === "wrap" && scope) {
   const [mine, theirs] = [await held(), await held(scope)]
   tool("encryption store", scope, { wrapped: await wrap(theirs.key, mine.key, mine.owner, scope) })
   console.log(`${scope}'s key is encrypted to ${mine.owner}'s.`)
@@ -58,6 +67,6 @@ if (command === "wrap" && scope) {
   if (artifacts.length) tool("encryption store", scope, { artifacts })
   console.log(`${artifacts.length} artifact${artifacts.length === 1 ? "" : "s"} of ${holds.owner}'s handed to the servers waiting.`)
 } else {
-  console.error("bun tooling/keys.ts wrap <scope> | servers [scope]")
+  console.error("bun tooling/keys.ts make [scope] | wrap <scope> | servers [scope]")
   process.exit(2)
 }

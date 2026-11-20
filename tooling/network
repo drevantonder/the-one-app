@@ -169,7 +169,7 @@ fi
 ready() {
   export ONE_AS=$1 ONE_HOME=$folder/client
   [[ $("$one" encryption key | jq -r .check) == null ]] || return 0
-  "$one" encryption approve >/dev/null
+  ONE_PROGRAM=$one bun "$root/tooling/keys.ts" make >/dev/null
   "$one" vault list >/dev/null 2>&1 || true
   ONE_PROGRAM=$one bun "$root/tooling/keys.ts" servers >/dev/null
 }

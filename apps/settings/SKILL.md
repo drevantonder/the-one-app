@@ -31,7 +31,7 @@ An app adds to Settings by hooking into `settings.sections`, answering with its 
     @impl true
     def hook("settings.sections", _about, _call),
       do: [
-        %{in: "settings", name: "Devices", component: "devices", icon: "client/icon.svg", group: "network", order: 1, badge: "waiting"},
+        %{in: "settings", name: "Devices", component: "devices", icon: "client/icon.svg", group: "network", order: 1},
         %{in: "device", component: "awake", service: true}
       ]
 

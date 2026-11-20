@@ -598,11 +598,10 @@ defmodule OneCore.Mcp do
     end
 
   # The tools a script has, and that `search` finds among: those every client is listed but code mode's own, and but
-  # those a device fills in with what only it holds, its own key or its copy of its owner's, which a script on a server
-  # has none of. An agent calls those as plain tools on the device (`one mcp`, `one encryption …`).
+  # those a device fills in with what only it holds, its own key, which a script on a server has none of. An agent calls those as plain tools on the device (`one mcp`, `one encryption …`).
   defp scripted(who), do: Enum.reject(listed(who, false, :mcp), &on_device?/1)
 
-  @on_device ~w(device device-name owner-key artifact-keys)
+  @on_device ~w(device device-name)
 
   defp on_device?(tool),
     do: Enum.any?(Map.values(tool.inputSchema[:properties] || %{}), &(&1[:format] in @on_device))

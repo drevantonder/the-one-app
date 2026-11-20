@@ -1079,17 +1079,6 @@
           }
         ]
       },
-      "sign-in_waiting": {
-        "waiting": [
-          {
-            "request": "w1",
-            "device": "dev9",
-            "name": "Pixel Tablet",
-            "at": "2025-12-31T23:58:00Z",
-            "place": "Sydney"
-          }
-        ]
-      },
       "builds": {
         "network": {
           "network_update_status": "up_to_date",
@@ -2630,17 +2619,6 @@
           }
         ]
       },
-      "sign-in_waiting": {
-        "waiting": [
-          {
-            "request": "w1",
-            "device": "dev9",
-            "name": "Pixel Tablet",
-            "at": "2025-12-31T23:58:00Z",
-            "place": "Sydney"
-          }
-        ]
-      },
       "builds": {
         "network": {
           "network_update_status": "up_to_date",
@@ -2774,17 +2752,6 @@
             "added": "2025-12-30T10:00:00Z",
             "prf_key": null,
             "unlocks": false
-          }
-        ]
-      },
-      "sign-in_waiting": {
-        "waiting": [
-          {
-            "request": "w1",
-            "device": "dev9",
-            "name": "Pixel Tablet",
-            "at": "2025-12-31T23:58:00Z",
-            "place": "Sydney"
           }
         ]
       },

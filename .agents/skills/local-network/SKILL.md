@@ -36,8 +36,10 @@ network's address as any device is; `ONE_AS` picks the user it acts as, which a 
 believes; `ONE_SUBJECT=groups/<name>` or `ONE_SUBJECT=network` runs a call for a group or the network.
 
 `owner`, `alice` and `bob` start with their encryption set up, their keys on `<folder>/client`'s device, so the
-Vault opens at once in `one` and in the app run with that home. Anyone else is set up with `one encryption approve`
-then `one vault grant --servers <key>` (`one vault security` lists them).
+Vault opens at once in `one` and in the app run with that home. Anyone else is set up as a passkey would, from that
+device: `ONE_AS=<name> bun tooling/keys.ts make`, then `ONE_AS=<name> one vault list` (which lists their Vault for
+its servers) and `ONE_AS=<name> bun tooling/keys.ts servers`. To try the passkey itself, a headless Chromium with
+a CDP virtual authenticator that has PRF joins by `one sign-in invite`'s link and opens `unlock_with_passkey`'s.
 
 ## Signing a device in
 
@@ -50,9 +52,8 @@ open it, and it shows a code. Then, as whoever it's to be, one step:
 On a network being built anyone may be named, the owner too, with no `--owner` and no passkey. For an emulator,
 `adb reverse tcp:<port> tcp:<port>` first, `adb shell run-as app.theone.client sh -c 'cat > network'` writes its
 `network`, and `adb shell pm grant app.theone.client android.permission.POST_NOTIFICATIONS` skips Android's question.
-The app says its code in `adb logcat -s RustStdoutStderr`, as `this device's session: SignIn { … code: "…" }`. To
-open the Vault there too, let it hold the key from here: `ONE_AS=alice one encryption approve --device <its id in
-one sign-in devices>`.
+The app says its code in `adb logcat -s RustStdoutStderr`, as `this device's session: SignIn { … code: "…" }`. A
+device's key is only ever handed over by a passkey (Unlock with Passkey), so to open the Vault there, use one there.
 
 ## Looking inside the server
 
