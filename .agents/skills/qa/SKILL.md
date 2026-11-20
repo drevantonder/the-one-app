@@ -129,9 +129,12 @@ What a device does with the app itself, not one page (its launcher, an app's win
 again, a second start, an update's restart, pages gone stale as it starts), is checked by the app harness: the app
 on the fake platform, its windows drawn offscreen, against a network of its own, driven by the inspector:
 
-    tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|restart]…
+    systemd-run --user --scope -p MemoryMax=3G -p MemorySwapMax=0 timeout 20m \
+      tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart]…
 
-Each check says `ok` or `FAILED` with why (a few minutes for all, the first a few more to start the network). A bug
+capped, as every network and app an agent starts on a machine others share is (one render grew to 28 GB and froze
+the whole container, 21 Nov). Each check says `ok` or `FAILED` with why (a few minutes for all, the first a few more
+to start the network). A bug
 a device found in the app around its windows is made to fail here first, as a check of its own, then fixed. The
 seed picks when things happen; a failure says the moment, and its seed is run again after the fix.
 
