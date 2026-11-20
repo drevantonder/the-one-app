@@ -76,7 +76,8 @@ fn x11() {
     let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo gives it"));
     let named = out.join("libxkbcommon-x11.so");
     let _ = std::fs::remove_file(&named);
-    std::os::unix::fs::symlink(library, &named).expect("OUT_DIR is ours");
+    // A copy, which a machine of any kind makes: its build script runs on whatever builds it, Windows' too.
+    std::fs::copy(library, &named).expect("OUT_DIR is ours");
     println!("cargo::rustc-link-search=native={}", out.display());
 }
 
