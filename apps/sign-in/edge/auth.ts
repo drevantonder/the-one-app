@@ -131,10 +131,16 @@ export const BELIEVED = 60;
 /** How long an invitation lasts, in milliseconds. */
 const INVITED_FOR = 7 * 24 * 60 * 60 * 1000;
 /**
- * How many codes no device shows a person may try to let in by, and over how long, in seconds. A code is one of
- * 32⁸, so this only stops guessing at speed. It's counted in the table Better Auth keeps its own limits in.
+ * How many codes no device shows a person may look up or let in by, and over how long, in seconds: on the sign-in
+ * page (`/device`) and by the `approve` ask alike, counted for the person, never for the address they ask from, which
+ * a household or an office shares. A code is one of 32⁸, so this only stops guessing at speed, and a code a device
+ * shows is never counted. It's counted in the table Better Auth keeps its own limits in.
  */
 const WRONG_CODES = { max: 5, window: 15 * 60 };
+/** What `WRONG_CODES` counts for `user`. */
+const wrongCodes = (adapter: Adapter, user: { id: string }) => limit(adapter, `wrong-codes/${user.id}`, WRONG_CODES);
+/** What a person who tried too many codes no device shows is told. */
+const tooManyCodes = (minutes: number) => `That's too many codes no device showed. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
 /** How long a request to sign in waits for its person once its device names them, in seconds (`RequestState`). */
 const ASKS_FOR = 5 * 60;
 /**
@@ -465,6 +471,17 @@ const devices = () => ({
         }),
       },
       {
+        // A device's code is looked up only for someone signed in, and only so many codes no device shows
+        // (`WRONG_CODES`), for them: Better Auth's own limit counts every lookup from an address.
+        matcher: (ctx) => ctx.path === "/device",
+        handler: createAuthMiddleware(async (ctx) => {
+          const session = await getSessionFromCtx(ctx);
+          if (!session) throw new APIError("UNAUTHORIZED", { message: "Sign in to approve a device." });
+          const missed = await wrongCodes(ctx.context.adapter, session.user);
+          if (missed.count >= WRONG_CODES.max) throw new APIError("TOO_MANY_REQUESTS", { message: tooManyCodes(missed.minutes) });
+        }),
+      },
+      {
         // Approving a device makes it its person's from then on, so it's asked of a passkey just now.
         matcher: (ctx) => ctx.path === "/device/approve",
         handler: createAuthMiddleware(signedInJustNow),
@@ -484,6 +501,14 @@ const devices = () => ({
         handler: createAuthMiddleware(async (ctx) => {
           const name = String(ctx.body.name ?? "").trim().slice(0, 100) || "A device";
           await ctx.context.adapter.update({ model: "deviceCode", where: [{ field: "deviceCode", value: (ctx.context.returned as { device_code: string }).device_code }], update: { name } });
+        }),
+      },
+      {
+        // A code no device shows counts against whoever looked it up (`WRONG_CODES`).
+        matcher: (ctx) => ctx.path === "/device" && (ctx.context.returned as { body?: { error?: string } } | undefined)?.body?.error === "invalid_request",
+        handler: createAuthMiddleware(async (ctx) => {
+          const session = await getSessionFromCtx(ctx);
+          if (session) await (await wrongCodes(ctx.context.adapter, session.user)).again();
         }),
       },
       {
@@ -599,7 +624,9 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
     },
     // Better Auth limits how often an address asks only where NODE_ENV says production, which a Worker's doesn't,
     // and counts in memory, which each copy of a Worker has its own of.
-    rateLimit: { enabled: true, storage: "database" },
+    // Better Auth's own limit on looking up a device's code counts every lookup from an address, which a household
+    // or an office shares: that one is counted for the person instead (`WRONG_CODES`).
+    rateLimit: { enabled: true, storage: "database", customRules: { "/device": false } },
     // Cloudflare says where a request came from in a header of its own. Its cookies are named the One App's, since a
     // browser sends a parent domain's cookies too, and another Better Auth there names its own `better-auth.*`,
     // which it would send first: a network at v2.ptcau.app wasn't signed in by its own after another's on ptcau.app.
@@ -933,9 +960,8 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     // Better Auth's device authorization answers a code only for a browser that's signed in, so this is what its
     // `/device` and `/device/approve` check, in one change that only a code nobody else has opened makes: it's
     // answered once. The device then learns its answer from Better Auth as it would have.
-    const missed = await limit(adapter, `approve/${user.id}`, WRONG_CODES);
-    if (missed.count >= WRONG_CODES.max)
-      return { error: `That's too many codes no device showed. Try again in ${missed.minutes} minute${missed.minutes === 1 ? "" : "s"}.` };
+    const missed = await wrongCodes(adapter, user);
+    if (missed.count >= WRONG_CODES.max) return { error: tooManyCodes(missed.minutes) };
     const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(about.code) }] });
     // Better Auth forgets a code once its device has learned it was answered, stopped or ended.
     if (!code) {
