@@ -554,10 +554,11 @@ for kind in "${servers[@]}"; do
   # and publisher, which Windows Firewall asks a person about as the server takes connections and Task Manager lists,
   # rather than Erlang, which nobody there knows they have. Its file is `one-server.exe` (the release's scripts that start
   # it, and the sandbox, say so), since Windows keeps the name and icon it first showed for a path.
+  # The scripts are One Core's code, which is packed from the first kind built and is the same for every kind.
+  sed -i 's/erl\.exe/one-server.exe/g' "$release"/releases/*/elixir.bat "$release"/releases/*/iex.bat
   if [[ $kind == windows-* ]]; then
     erts=$(echo "$release"/erts-*/bin)
     mv "$erts/erl.exe" "$erts/one-server.exe"
-    sed -i 's/erl\.exe/one-server.exe/g' "$release"/releases/*/elixir.bat "$release"/releases/*/iex.bat
     DESCRIPTION="the One App server" tooling/windows-name "$erts/one-server.exe"
   else
     "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
