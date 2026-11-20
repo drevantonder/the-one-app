@@ -71,7 +71,6 @@
         insert: renderer.insert,
         remove: renderer.remove,
         drop: (/** @type {number} */ id) => (streams.dropped(id), renderer.drop(id)),
-        unsupported: renderer.unsupported,
         frame: false,
         list: 2,
         video: true,

@@ -18,8 +18,6 @@ pub enum Mutation {
     Insert { parent: Id, id: Id, before: Option<Id> },
     Remove { parent: Id, id: Id },
     Drop { id: Id },
-    /// The page uses `what`, which a native host doesn't draw yet.
-    Unsupported { what: String },
 }
 
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -42,8 +40,8 @@ pub enum Kind {
     Picker,
     Input,
     RawText,
-    /// A screen's live video over WebRTC, drawn in its box as big as fits: the web's, which the browser connects and plays
-    /// (`platform::web`, `clients/web/renderer/video.js`).
+    /// A screen's live video over WebRTC, drawn in its box as big as fits: on the web the browser connects and plays it
+    /// (`platform::web`, `clients/web/renderer/video.js`), and natively its own connection does (`video`).
     Video,
     /// Another app's page (`src`), for `subject`, drawn in its box by a sandbox of its own, as an iframe is (`Screen`'s
     /// frames): its own JS, calling as its own app.
@@ -116,17 +114,6 @@ impl Node {
     }
 }
 
-/// What a page uses that this host can't draw yet, which its window says in its place, and why.
-#[derive(Debug)]
-pub struct Mismatch(pub String);
-
-impl std::fmt::Display for Mismatch {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(&self.0)
-    }
-}
-
-impl std::error::Error for Mismatch {}
 
 pub struct Tree {
     pub nodes: HashMap<Id, Node>,
@@ -302,12 +289,10 @@ impl Tree {
         }
     }
 
-    /// Applies the app's mutations, in order. One that uses what this host doesn't draw yet is refused, and so is what
-    /// comes after it (`Mismatch`).
+    /// Applies the app's mutations, in order.
     pub fn apply(&mut self, mutations: impl IntoIterator<Item = Mutation>) -> anyhow::Result<()> {
         for mutation in mutations {
             match mutation {
-                Mutation::Unsupported { what } => return Err(Mismatch(format!("it uses {what}, which a native host doesn't draw yet")).into()),
                 Mutation::Create { id, kind, value } => {
                     self.nodes.insert(id, Node::new(kind, value));
                     if kind == Kind::Input {
@@ -456,6 +441,8 @@ impl Tree {
         let name = node
             .str("aria-label")
             .or_else(|| node.str("alt"))
+            // A video's, what it shows (renderer.ts's `label`), as an image's `alt`.
+            .or_else(|| node.str("label"))
             .map(str::to_owned)
             .or_else(|| text.then(|| self.text(id)))
             .or_else(|| (node.str("role") == Some("button") || node.str("role") == Some("radio")).then(|| self.label(id)));

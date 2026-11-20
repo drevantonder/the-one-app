@@ -20,6 +20,8 @@ pub mod text;
 pub mod tokens;
 pub mod tree;
 pub(crate) mod view;
+#[cfg(not(target_arch = "wasm32"))]
+mod video;
 
 pub use style::load_styles;
 pub use view::inspected::Reply;

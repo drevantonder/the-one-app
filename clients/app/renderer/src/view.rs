@@ -30,6 +30,8 @@ mod finger;
 pub use bridge::TextInputConnection;
 mod frames;
 mod list;
+#[cfg(not(target_arch = "wasm32"))]
+mod videos;
 mod paint;
 mod pictures;
 mod selection;
@@ -221,6 +223,16 @@ pub struct Screen {
     /// The frame the pointer's over, and the one a press it holds went down in.
     pointing: Option<Id>,
     captured_frame: Option<Id>,
+    /// Each video's connection (`videos`), the one a press went down on, the one keys go to, and how far the wheel
+    /// over one has turned that isn't yet a step.
+    #[cfg(not(target_arch = "wasm32"))]
+    videos: HashMap<Id, crate::video::Video>,
+    #[cfg(not(target_arch = "wasm32"))]
+    video_pressed: Option<Id>,
+    #[cfg(not(target_arch = "wasm32"))]
+    video_keys: Option<Id>,
+    #[cfg(not(target_arch = "wasm32"))]
+    video_turned: Point<f32>,
     /// As Colour Mode says, or as the device is (`None`).
     pub theme: Option<Appearance>,
     /// As the device is, which the window says.
@@ -352,7 +364,7 @@ pub struct Screen {
     layer: bool,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
-    /// What its page uses that this host can't draw (`tree::Mismatch`), or that it refused, which its window says in
+    /// What its page made that this host refused (a mutation it can't apply), which its window says in
     /// its place.
     pub mismatched: Option<String>,
     /// What the frame painted last cost, for the inspector's `profile` (`Cost`).
@@ -391,6 +403,14 @@ impl Screen {
             left: None,
             pointing: None,
             captured_frame: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            videos: HashMap::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            video_pressed: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            video_keys: None,
+            #[cfg(not(target_arch = "wasm32"))]
+            video_turned: point(0.0, 0.0),
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
@@ -700,6 +720,10 @@ impl Screen {
         let posted;
         (posted, self.editing.heard) = self.js.take();
         let mut came = !posted.is_empty() || self.started.is_none() || self.pictures.take();
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            came |= self.video_pump();
+        }
         let chosen = std::mem::take(&mut *self.chosen_files.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
         for (id, files) in chosen {
             self.js.send("message", json!({"jsonrpc": "2.0", "id": id, "result": {"files": files_told(&files)}}));
@@ -728,7 +752,11 @@ impl Screen {
                 // What comes after what this host can't draw, or refused, isn't drawn: the window says why in its place,
                 // rather than draw a page that's no longer what it says.
                 Posted::Mutation(_) if self.mismatched.is_some() => {}
-                Posted::Mutation(mutation) => match self.tree.apply([mutation]) {
+                Posted::Mutation(mutation) => match {
+                    #[cfg(not(target_arch = "wasm32"))]
+                    self.video_mutation(&mutation);
+                    self.tree.apply([mutation])
+                } {
                     Err(error) => self.mismatched = Some(format!("{error:#}")),
                     Ok(()) => {
                         self.cost.applied += 1;
@@ -823,6 +851,8 @@ impl Screen {
             }
             self.sync_fields();
             self.sync_frames();
+            #[cfg(not(target_arch = "wasm32"))]
+            self.sync_videos();
         }
         // The inspector's answers wait for what they did to have run.
         if !self.replies.is_empty() && !self.busy() {
@@ -1083,6 +1113,8 @@ impl Screen {
             kept_regions: Vec::new(),
             frames: &self.frames,
             framed: Vec::new(),
+            #[cfg(not(target_arch = "wasm32"))]
+            videos: &mut self.videos,
             layers: &mut self.layers,
             layered,
             still,
@@ -1424,6 +1456,8 @@ impl Screen {
 
     pub fn pointer_moved(&mut self, at: Point<f32>) {
         self.frame_moved(at);
+        #[cfg(not(target_arch = "wasm32"))]
+        self.video_moved(at);
         self.pointer = Some(at);
         let chain = self.hover(at);
         let target = match self.captured {
@@ -1508,6 +1542,10 @@ impl Screen {
             return;
         }
         if self.frame_down(at, button, shift) {
+            return;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.video_down(at, button, shift) {
             return;
         }
         let chain = self.under(at);
@@ -1608,6 +1646,10 @@ impl Screen {
         if self.frame_up(at, button) {
             return;
         }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.video_up(at, button) {
+            return;
+        }
         let target = match self.captured.take() {
             Some(captured) => self.chain_from(captured),
             None => self.under(at),
@@ -1639,6 +1681,10 @@ impl Screen {
             return Some(frame);
         }
         if self.drag_wheel(at, delta, phase) {
+            return None;
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.video_scroll(at, delta) {
             return None;
         }
         let chain = self.under(at);
@@ -1762,6 +1808,10 @@ impl Screen {
                 self.shortcut = Some((held, web_time::Instant::now()));
                 return focused;
             }
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        if self.video_key(key) {
+            return focused;
         }
         // A frame with the keyboard: its page has the key, and Tab off its page's end goes on from the frame here.
         if let Some(None) = self.frame_key(key) {

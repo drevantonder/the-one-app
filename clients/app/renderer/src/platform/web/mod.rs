@@ -1059,11 +1059,6 @@ pub fn drop_node(id: f64) {
     posted(Posted::Mutation(Mutation::Drop { id: id as u64 }));
 }
 
-#[wasm_bindgen(js_name = unsupported)]
-pub fn unsupported(what: String) {
-    posted(Posted::Mutation(Mutation::Unsupported { what }));
-}
-
 /// `host.post`: a JSON-RPC message for the page's client, as JSON.
 #[wasm_bindgen(js_name = post)]
 pub fn post(json: String) {

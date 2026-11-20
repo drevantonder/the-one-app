@@ -98,7 +98,6 @@ impl Atlas {
 
     /// Writes `data`, `size` pixels in its format (a video's frame, BGRA), into `tile`, inside its clear pixel all round,
     /// before the next frame that draws it.
-    #[cfg(target_arch = "wasm32")]
     pub(crate) fn write(&self, tile: &AtlasTile, size: Size<DevicePixels>, data: Vec<u8>) {
         let bounds = crate::geometry::Bounds { origin: crate::geometry::point(tile.bounds.origin.x + DevicePixels(1), tile.bounds.origin.y + DevicePixels(1)), size };
         self.0.lock().uploads.push(PendingUpload { id: tile.texture_id, bounds, data });

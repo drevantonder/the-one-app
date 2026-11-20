@@ -318,6 +318,9 @@ pub(super) struct Painter<'a> {
     pub(super) fill: Option<Hsla>,
     /// Each frame's page, as it last drew itself, and where each frame was drawn now, in the window.
     pub(super) frames: &'a HashMap<Id, frames::Child>,
+    /// Each video's connection natively, whose latest frame it draws (`paint_video`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(super) videos: &'a mut HashMap<Id, crate::video::Video>,
     pub(super) framed: Vec<(Id, Bounds<f32>)>,
     /// Where what's drawn says a press moves the window, and where what's in that says it doesn't (`appRegion`).
     pub(super) drag_regions: Vec<(Id, Bounds<f32>)>,
@@ -993,11 +996,8 @@ impl Painter<'_> {
             }
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
-            // Its latest frame, as the web's browser plays it; a native host draws none (its pages aren't given one).
-            #[cfg(target_arch = "wasm32")]
+            // Its latest frame, as the web's browser plays it, or as its connection decoded it natively.
             Kind::Video => self.paint_video(id, content, radii, opacity, mask),
-            #[cfg(not(target_arch = "wasm32"))]
-            Kind::Video => {}
             Kind::Picker => {}
             // A frame's page, drawn as it last drew itself, in its box, where the frame comes in this scene's order.
             Kind::Frame => {
@@ -1405,10 +1405,13 @@ impl Painter<'_> {
     }
 
     /// A video's latest frame, as big as fits in `content`, in the middle, as a `<video>` draws it.
-    #[cfg(target_arch = "wasm32")]
     pub(super) fn paint_video(&mut self, id: Id, content: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
+        #[cfg(target_arch = "wasm32")]
         let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
+        #[cfg(target_arch = "wasm32")]
         let Some((tile, frame)) = crate::platform::web::video(id, content, device, self.atlas) else { return };
+        #[cfg(not(target_arch = "wasm32"))]
+        let Some((tile, frame)) = self.videos.get_mut(&id).and_then(|video| video.tile(id, content, self.atlas)) else { return };
         let fit = (content.size.width / frame.width as f32).min(content.size.height / frame.height as f32);
         let size = Size { width: frame.width as f32 * fit, height: frame.height as f32 * fit };
         let bounds = Bounds { origin: point(content.origin.x + (content.size.width - size.width) / 2.0, content.origin.y + (content.size.height - size.height) / 2.0), size };

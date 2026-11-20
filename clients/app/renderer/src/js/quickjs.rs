@@ -558,8 +558,8 @@ fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs
     mutations.set("remove", Function::new(ctx.clone(), move |parent: Id, id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Remove { parent, id })))?)?;
     let to = posted.clone();
     mutations.set("drop", Function::new(ctx.clone(), move |id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Drop { id })))?)?;
-    let to = posted.clone();
-    mutations.set("unsupported", Function::new(ctx.clone(), move |what: String| to.borrow_mut().push(Posted::Mutation(Mutation::Unsupported { what })))?)?;
+    // It draws a `video`, a screen's live video over WebRTC (`video`).
+    mutations.set("video", true)?;
     // It draws a `frame`, another app's page in a sandbox of its own (`view::frames`).
     mutations.set("frame", true)?;
     // It draws a `list`, holding only the rows near the window, each at its own place (`view::list`): version 2.

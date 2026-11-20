@@ -57,7 +57,7 @@ export type Id = number
  *   down and up (1 to 3) and a wheel's steps (4 to 7) with the modifiers held, the keys that aren't text (as X names
  *   them), and what's typed or pasted, which takes a field of its own so a phone's keyboard comes up as it's pressed,
  *   or as its `autofocus` is set. The device's full screen keys (F11, ⌃⌘F) aren't sent: they go on as `keydown` to the node it's in. A host that
- *   doesn't draw it says so (`Mutations.video`), and the page that uses it is opened another way.
+ *   doesn't draw it says so (`Mutations.video`), and the page's video shows a problem in its place.
  * - `frame`: another app's page (`src`, `<app>/<page>[#<fragment>]`, for `subject`), drawn in its box as an iframe's
  *   is: its own JS in a sandbox of its own, asking its client as its own app, as tall as it says its content is
  *   (`ui/notifications/size-changed`) where its style says no height, and taking the pointer, the keyboard and Tab

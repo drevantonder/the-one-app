@@ -83,6 +83,11 @@ writeable = "0.6"
 jiff = "0.2"
 # Its compiled modules' bytecode, kept by their address and source.
 sha2 = "0.11"
+# A page's live video (`video`), as WebRTC's sender sends it (apps/webrtc/server/bin/stream): str0m's WebRTC, with
+# Rust's own crypto, reaching the screen through TURN over TCP, and Cisco's OpenH264, built from its source, decoding it.
+str0m = { version = "0.25", default-features = false, features = ["rust-crypto"] }
+turn-client-proto = "0.8"
+openh264 = "0.9"
 
 # The web's: a page's canvas, drawn by wgpu on the browser's WebGPU, in a Worker with an OffscreenCanvas, called by
 # the page's JS through wasm-bindgen (`platform/web`).
