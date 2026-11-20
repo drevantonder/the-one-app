@@ -43,9 +43,6 @@ defmodule IphoneSimulator do
   end
 
   @impl true
-  def jobs, do: [%{tool: "stop_idle", every: 3600}]
-
-  @impl true
   def hooks, do: ["computer-use.screens"]
 
   @impl true
@@ -179,7 +176,7 @@ defmodule IphoneSimulator do
       %{
         name: "stop_idle",
         description:
-          "Shut down every running simulator, anyone's, that has gone unused for #{@idle_hours} hours, on each Mac. It's run every hour, and gives the ones it shut down.",
+          "Shut down every running simulator, anyone's, that has gone unused for #{@idle_hours} hours, on each Mac. Its person's timer calls it as their first running one would have gone unused that long, and it gives the ones it shut down.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -223,11 +220,13 @@ defmodule IphoneSimulator do
     }
 
     Service.call(call, Simulator, :create, [spec], server)
+    timed(call)
     Enum.find(listed(call), &(&1["name"] == name))
   end
 
   def call(tool, %{"simulator" => name} = inputs, call) when tool in ~w(start stop remove) do
     on(call, inputs, String.to_existing_atom(tool))
+    if tool == "start", do: timed(call)
     %{simulator: name}
   end
 
@@ -280,7 +279,19 @@ defmodule IphoneSimulator do
     %{done: did(action, inputs)}
   end
 
-  def call("stop_idle", _inputs, call), do: %{stopped: Service.stop_idle(call, Simulator, @idle_hours * 3_600_000)}
+  def call("stop_idle", _inputs, call) do
+    stopped = Service.stop_idle(call, Simulator, @idle_hours * 3_600_000)
+    timed(call)
+    %{stopped: stopped}
+  end
+
+  # Has its person's timer call `stop_idle` when the first of their running simulators would have gone unused for
+  # @idle_hours, set as one is created or started and again each time it's called (`Database.timer/5`).
+  defp timed(call) do
+    used = for %{"state" => "running", "last_used" => at} <- listed(call), do: at
+    next = if used != [], do: div(Enum.min(used), 1000) + @idle_hours * 3600 + 1
+    Call.app(call, "database").timer(call, "stop_idle", %{}, next)
+  end
 
   # Computer Use asks for the caller's screens: each running simulator of theirs is one, called what it is, and acted
   # on with `screen`.
