@@ -4,9 +4,8 @@
 // its own), per-monitor DPI aware, its keys from WM_KEYDOWN and WM_CHAR, what's typed and composed through Flutter's
 // text input plugin and its IMM32 input method (`text_input.cc`, in place of events.rs's), its mouse and wheel, its cursor, and its
 // frame and caption buttons Windows' own, coloured as the page's background, light or dark as the system is. A panel
-// (a launcher's) is a popup with no frame, topmost and out of the taskbar, over Windows 11's Acrylic with its round
-// corners, as GPUI's `WindowBackgroundAppearance::Blurred` asks DWM for a system backdrop. No client-side title bar,
-// drag and drop or touch yet.
+// (a launcher's) is a popup with no frame, topmost and out of the taskbar, over Acrylic cut to its round corners
+// (`Display::glass`). No client-side title bar, drag and drop or touch yet.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
@@ -34,7 +33,12 @@ use windows::Win32::UI::Controls::WM_MOUSELEAVE;
 /// Sent as the pointer leaves the non-client area `TrackMouseEvent` was asked about (winuser.h's `WM_NCMOUSELEAVE`).
 const WM_NCMOUSELEAVE: u32 = 0x02A2;
 use windows::Win32::UI::WindowsAndMessaging::*;
-use windows::core::{BOOL, HSTRING, PCWSTR, w};
+use windows::core::{BOOL, HSTRING, Interface as _, PCWSTR, w};
+use windows::UI::Composition::Desktop::DesktopWindowTarget;
+use windows::UI::Composition::{CompositionBrush, CompositionRoundedRectangleGeometry, CompositionStretch, Compositor};
+use windows::Win32::Graphics::DirectComposition::{COMPOSITIONOBJECT_READ, COMPOSITIONOBJECT_WRITE, DCompositionCreateSurfaceHandle};
+use windows::Win32::System::WinRT::Composition::{ICompositorDesktopInterop, ICompositorInterop};
+use windows::Win32::System::WinRT::{CreateDispatcherQueueController, DQTAT_COM_NONE, DQTYPE_THREAD_CURRENT, DispatcherQueueOptions};
 
 use super::keyboard;
 use crate::Cursor;
@@ -51,6 +55,9 @@ pub struct Display {
     queue: Queue,
     cursors: RefCell<HashMap<Cursor, HCURSOR>>,
     frames: std::sync::Arc<Frames>,
+    /// Windows' visual layer, which a panel's glass and page are in (`glass`), on this thread's dispatcher queue.
+    compositor: Compositor,
+    _queue: windows::System::DispatcherQueueController,
 }
 
 /// The display's frames, as a thread of their own waits for each by the compositor's clock (Windows 11's), while one
@@ -96,6 +103,10 @@ struct State {
     /// its shape, its width, height and corners' radius in pixels, as it was last cut to (`round`).
     placed: Cell<Option<Point<f32>>>,
     shape: Cell<(i32, i32, i32)>,
+    /// A panel's, or its part's: its glass and page (`Display::glass`), and whether it's kept off the screen until its
+    /// next frame is drawn (`cloak`).
+    glass: std::cell::OnceCell<Glass>,
+    cloaked: Cell<bool>,
     /// A panel's parts, which move with it.
     parts: RefCell<Vec<HWND>>,
     /// The Colour Mode its frame is drawn in, where its page says one (`set_appearance`).
@@ -151,8 +162,11 @@ impl NativeWindow {
         Handle { hwnd: self.hwnd, scale: self.scale() }
     }
 
-    /// What wgpu draws into: the window, by its raw handles.
+    /// What wgpu draws into: a panel's composition surface (`Display::glass`), or the window, by its raw handles.
     pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
+        if let Some(glass) = self.state.glass.get() {
+            return Ok(wgpu::SurfaceTargetUnsafe::SurfaceHandle(glass.surface.0));
+        }
         // Safety: a window's renderer is let go before the window is.
         Ok(unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(self, self)? })
     }
@@ -180,7 +194,7 @@ impl NativeWindow {
         self.size.set(size);
     }
 
-    /// Whether what isn't drawn on it is see-through: a panel's Acrylic shows where it isn't.
+    /// Whether what isn't drawn on it is see-through: a panel's glass shows where it isn't.
     pub fn transparent(&self) -> bool {
         self.panel
     }
@@ -220,7 +234,11 @@ impl Display {
                 let _ = unsafe { PostThreadMessageW(thread, WM_NULL, WPARAM(0), LPARAM(0)) };
             }
         })?;
-        Ok(Display { queue: Queue::default(), cursors: RefCell::default(), frames })
+        // Windows' visual layer runs on a dispatcher queue of the thread's, which its messages pump (`events`).
+        let options = DispatcherQueueOptions { dwSize: size_of::<DispatcherQueueOptions>() as u32, threadType: DQTYPE_THREAD_CURRENT, apartmentType: DQTAT_COM_NONE };
+        let queue = unsafe { CreateDispatcherQueueController(options) }.context("CreateDispatcherQueueController failed")?;
+        let compositor = Compositor::new().context("Windows' compositor didn't start")?;
+        Ok(Display { queue: Queue::default(), cursors: RefCell::default(), frames, compositor, _queue: queue })
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
@@ -236,6 +254,8 @@ impl Display {
             panel: options.panel.is_some(),
             placed: Cell::new(None),
             shape: Cell::new((0, 0, 0)),
+            glass: std::cell::OnceCell::new(),
+            cloaked: Cell::new(false),
             parts: RefCell::default(),
             theme: Cell::new(None),
             frame: options.frame.clone(),
@@ -285,7 +305,7 @@ impl Display {
             let _ = SetWindowPos(hwnd, None, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
         if panel {
-            glass(hwnd);
+            let _ = state.glass.set(self.glass(hwnd)?);
         } else {
             colour_frame(hwnd, &state);
         }
@@ -370,6 +390,11 @@ impl Display {
             if before != window.hwnd {
                 window.before.set(before);
             }
+            // Off the screen until its frame is drawn (`arrange`): its surfaces let go of their images as it went.
+            cloak(window.hwnd, true);
+            for part in window.state.parts.borrow().iter() {
+                cloak(*part, true);
+            }
             let _ = SetWindowPos(window.hwnd, Some(HWND_TOPMOST), x, y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
             let _ = SetForegroundWindow(window.hwnd);
         }
@@ -405,6 +430,8 @@ impl Display {
             panel: true,
             placed: Cell::new(None),
             shape: Cell::new((0, 0, 0)),
+            glass: std::cell::OnceCell::new(),
+            cloaked: Cell::new(false),
             parts: RefCell::default(),
             theme: Cell::new(None),
             frame: None,
@@ -416,7 +443,9 @@ impl Display {
         let module = unsafe { GetModuleHandleW(None) }.ok().map(Into::into);
         let hwnd = unsafe { CreateWindowExW(ex_style, WINDOW_CLASS_NAME, w!(""), WS_POPUP, 0, 0, 1, 1, Some(parent.hwnd), None, module, Some(Rc::as_ptr(&state) as *const _)) }
             .context("CreateWindowExW failed")?;
-        glass(hwnd);
+        let _ = state.glass.set(self.glass(hwnd)?);
+        // Off the screen until its first frame is drawn (`arrange`).
+        cloak(hwnd, true);
         parent.state.parts.borrow_mut().push(hwnd);
         Ok(NativeWindow { hwnd, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), state, panel: true, before: Cell::new(HWND::default()), owner: Cell::new(HWND::default()), maximized: false })
     }
@@ -458,6 +487,10 @@ impl Display {
             }
         }
         draw();
+        // On the screen once its frame is, as Chromium and WinUI show a window only after its first present.
+        for (handle, ..) in placed {
+            cloak(handle.hwnd, false);
+        }
     }
 
     /// Moves panel `hwnd`'s parts with it, where it's moved to.
@@ -730,39 +763,90 @@ fn register_window_class() {
     });
 }
 
-/// A panel's material: Windows 11's Acrylic under what its page doesn't draw (DWM's transient window backdrop, over
-/// the whole window as its frame), light or dark as the system is. Its corners and its edge are its page's, as on a
-/// Mac: Windows 11 neither rounds it nor draws its border round it (each would be a second edge, its corners 8 points
-/// where its page's are its own), and it's cut to its page's corners (`round`).
-fn glass(hwnd: HWND) {
-    use windows::Win32::Graphics::Dwm::{
-        DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
-        DwmExtendFrameIntoClientArea,
-    };
-    use windows::Win32::UI::Controls::MARGINS;
-    let dark = BOOL::from(super::appearance() == crate::Appearance::Dark);
-    let (backdrop, corners, border) = (DWMSBT_TRANSIENTWINDOW, DWMWCP_DONOTROUND, DWMWA_COLOR_NONE);
-    let whole = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
-    unsafe {
-        let _ = DwmExtendFrameIntoClientArea(hwnd, &whole);
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, std::ptr::from_ref(&dark).cast(), size_of::<BOOL>() as u32);
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, std::ptr::from_ref(&backdrop).cast(), size_of_val(&backdrop) as u32);
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&corners).cast(), size_of_val(&corners) as u32);
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, std::ptr::from_ref(&border).cast(), size_of_val(&border) as u32);
+/// A panel's, or its part's, glass and page, in Windows' visual layer, kept while its window is.
+struct Glass {
+    _target: DesktopWindowTarget,
+    /// Its shape, which its glass and page are cut to (`round`).
+    shape: CompositionRoundedRectangleGeometry,
+    /// The composition surface wgpu draws its page into (`NativeWindow::surface`).
+    surface: windows::Win32::Foundation::HANDLE,
+}
+
+impl Drop for Glass {
+    fn drop(&mut self) {
+        unsafe {
+            let _ = windows::Win32::Foundation::CloseHandle(self.surface);
+        }
     }
 }
 
-/// Cuts a panel's window, `width` by `height` pixels, to round corners of `radius` pixels, its page's, so its Acrylic
-/// is only under what its page draws; again only as its shape changes.
+impl Display {
+    /// A panel's material and page, as Windows 11's own flyouts have theirs: in Windows' visual layer, what's behind
+    /// it blurred (its host backdrop brush, Acrylic's own) and tinted as Acrylic is, light or dark as the system is,
+    /// with its page's frames over it, the three cut to its page's round corners (`round`). Its corners and edge are
+    /// its page's, as on a Mac: Windows 11 neither rounds it nor draws its border round it. DWM's own system backdrop
+    /// isn't cut by a window region: it was a square under each part, grey under a part that never takes the keyboard,
+    /// Acrylic's colour for a window that isn't active.
+    fn glass(&self, hwnd: HWND) -> anyhow::Result<Glass> {
+        use windows::Win32::Graphics::Dwm::{DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_USE_HOSTBACKDROPBRUSH, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND};
+        let (backdrop, corners, border) = (BOOL::from(true), DWMWCP_DONOTROUND, DWMWA_COLOR_NONE);
+        unsafe {
+            let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_HOSTBACKDROPBRUSH, std::ptr::from_ref(&backdrop).cast(), size_of_val(&backdrop) as u32);
+            let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&corners).cast(), size_of_val(&corners) as u32);
+            let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, std::ptr::from_ref(&border).cast(), size_of_val(&border) as u32);
+        }
+        let compositor = &self.compositor;
+        let target = unsafe { compositor.cast::<ICompositorDesktopInterop>()?.CreateDesktopWindowTarget(hwnd, false) }?;
+        let whole = windows_numerics::Vector2 { X: 1.0, Y: 1.0 };
+        let root = compositor.CreateContainerVisual()?;
+        root.SetRelativeSizeAdjustment(whole)?;
+        let shape = compositor.CreateRoundedRectangleGeometry()?;
+        root.SetClip(&compositor.CreateGeometricClipWithGeometry(&shape)?)?;
+        // WinUI's Acrylic for a window's backdrop, its tint over the blur: #FCFCFC at 85% light, #2C2C2C at 96% dark.
+        let tint = match super::appearance() {
+            crate::Appearance::Dark => windows::UI::Color { A: 245, R: 0x2c, G: 0x2c, B: 0x2c },
+            crate::Appearance::Light => windows::UI::Color { A: 217, R: 0xfc, G: 0xfc, B: 0xfc },
+        };
+        let surface = unsafe { DCompositionCreateSurfaceHandle((COMPOSITIONOBJECT_READ | COMPOSITIONOBJECT_WRITE) as u32, None) }?;
+        let page = compositor.CreateSurfaceBrushWithSurface(&unsafe { compositor.cast::<ICompositorInterop>()?.CreateCompositionSurfaceForHandle(surface) }?)?;
+        // Its frames at their own size from its top left, never stretched to the window's as it changes size.
+        page.SetStretch(CompositionStretch::None)?;
+        page.SetHorizontalAlignmentRatio(0.0)?;
+        page.SetVerticalAlignmentRatio(0.0)?;
+        let brushes: [CompositionBrush; 3] = [compositor.CreateHostBackdropBrush()?.cast()?, compositor.CreateColorBrushWithColor(tint)?.cast()?, page.cast()?];
+        for brush in brushes {
+            let layer = compositor.CreateSpriteVisual()?;
+            layer.SetRelativeSizeAdjustment(whole)?;
+            layer.SetBrush(&brush)?;
+            root.Children()?.InsertAtTop(&layer)?;
+        }
+        target.SetRoot(&root)?;
+        Ok(Glass { _target: target, shape, surface })
+    }
+}
+
+/// Cuts a panel's glass and page, `width` by `height` pixels, to round corners of `radius` pixels, its page's; again
+/// only as its shape changes.
 fn round(hwnd: HWND, width: i32, height: i32, radius: i32) {
     let Some(state) = state(hwnd) else { return };
+    let Some(glass) = state.glass.get() else { return };
     if state.shape.replace((width, height, radius)) == (width, height, radius) {
         return;
     }
+    let _ = glass.shape.SetSize(windows_numerics::Vector2 { X: width as f32, Y: height as f32 });
+    let _ = glass.shape.SetCornerRadius(windows_numerics::Vector2 { X: radius as f32, Y: radius as f32 });
+}
+
+/// Keeps a panel's window `hwnd` off the screen while it's shown, or puts it back (DWM's cloak), as it was last asked.
+fn cloak(hwnd: HWND, cloaked: bool) {
+    use windows::Win32::Graphics::Dwm::DWMWA_CLOAK;
+    let Some(state) = state(hwnd) else { return };
+    if state.cloaked.replace(cloaked) == cloaked {
+        return;
+    }
+    let cloaked = BOOL::from(cloaked);
     unsafe {
-        // The region's right and bottom edges are outside it, so it's a pixel larger; it's the window's once set.
-        let region = windows::Win32::Graphics::Gdi::CreateRoundRectRgn(0, 0, width + 1, height + 1, 2 * radius, 2 * radius);
-        let _ = windows::Win32::Graphics::Gdi::SetWindowRgn(hwnd, Some(region), true);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_CLOAK, std::ptr::from_ref(&cloaked).cast(), size_of::<BOOL>() as u32);
     }
 }
 
