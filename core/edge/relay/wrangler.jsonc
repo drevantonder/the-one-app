@@ -15,8 +15,7 @@
     ],
     "code_update_strategy": { "mode": "deferred", "max_delay": 5 }
   },
-  // v1 moved it, with what it keeps, from the edge's Worker.
-  "migrations": [{ "tag": "v1", "transferred_classes": [{ "from": "Relay", "from_script": "network-edge", "to": "Relay" }] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay"] }],
   // Who the network's own are, as the edge says.
   "services": [{ "binding": "NETWORK", "service": "network-edge", "entrypoint": "Network" }]
 }
