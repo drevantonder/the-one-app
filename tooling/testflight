@@ -35,6 +35,9 @@ if [[ ${1:-} == --on-mac ]]; then
   cd "$(dirname "$0")/../clients/app"
   network=$HOME/scratch/testflight-network/app
   git clean -qfdx gen/apple
+  # Its name is the commit's, said before the build changes the Xcode project's files git tracks, which would make
+  # every phone's build `.dirty` (`core/client/build.rs`).
+  ONE_BUILD=$(../../tooling/version) && export ONE_BUILD
   gen/apple/generate "$network/tauri.conf.json"
   TAURI_ONE_ADDRESS=$(cat "$network/address") APPLE_DEVELOPMENT_TEAM=$team \
     cargo tauri ios build --archive-only --no-sign --config "$network/tauri.conf.json"

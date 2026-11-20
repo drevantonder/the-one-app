@@ -15,8 +15,13 @@ fn main() {
     for watched in ["HEAD", branch.as_str()].into_iter().filter(|path| !path.is_empty()) {
         println!("cargo:rerun-if-changed={}", git(&["rev-parse", "--path-format=absolute", "--git-path", watched]));
     }
-    let named = std::process::Command::new("sh").arg("../../tooling/version").output().expect("tooling/version names the build");
-    let build = String::from_utf8(named.stdout).expect("a build's name is text").trim().to_owned();
+    // A release names it itself where it builds from files a build changes, as a phone's Xcode project is
+    // (`tooling/testflight`), from the commit before they're changed: otherwise every such build is `.dirty`.
+    println!("cargo:rerun-if-env-changed=ONE_BUILD");
+    let build = std::env::var("ONE_BUILD").unwrap_or_else(|_| {
+        let named = std::process::Command::new("sh").arg("../../tooling/version").output().expect("tooling/version names the build");
+        String::from_utf8(named.stdout).expect("a build's name is text").trim().to_owned()
+    });
     println!("cargo:rustc-env=ONE_BUILD={build}");
 
     // What the app is to the system it's on is its build's Tauri identifier: `clients/app/tauri.conf.json`'s, or the
