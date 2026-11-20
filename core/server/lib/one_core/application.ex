@@ -45,8 +45,9 @@ defmodule OneCore.Application do
         # lease it held before it stopped among them. `Servers.Report` says so as it starts, before them.
         Servers.Report,
         Apps,
-        # A message is answered once the apps are there, since they say whose a device is: so whoever asks while
-        # they start waits for them, and isn't told the server can't be reached.
+        # A message is answered once the server is up, its apps there and running, since they say whose a device is
+        # and hold its leases: so whoever asks while it starts waits for it, and isn't told the server can't be
+        # reached, that their device isn't signed in, or that it's starting.
         {Server, handle: &answer/3, wake: &OneCore.Hooks.wake/1, started: &Apps.changed/0},
         Services,
         Jobs,
@@ -78,6 +79,8 @@ defmodule OneCore.Application do
 
   defp answer(message, from, ask) do
     Apps.started()
+    # One stopping answers what it took already, and takes nothing new (`prep_stop/1`).
+    Release.await(&(&1["server_daemon_status"] != "starting"))
     OneCore.Mcp.handle(message, from, ask)
   end
 
