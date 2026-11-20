@@ -518,7 +518,7 @@ fn kept(here: &Here, key: &str, program: &Path, env: Vec<(&str, String)>) -> cli
     client::system::Program {
         name: SERVER.to_owned(),
         key: key.to_owned(),
-        description: "the One App's server, which `one serve off` removes.".to_owned(),
+        description: "the One App server, which `one serve off` removes.".to_owned(),
         command,
         env,
         folder: here.folder.clone(),

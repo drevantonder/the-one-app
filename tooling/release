@@ -553,7 +553,7 @@ for kind in "${servers[@]}"; do
   # Windows' VM keeps its debugging symbols apart already. It's the One App's there, by name, icon and publisher, which
   # Windows Firewall asks a person about as the server takes connections, rather than Erlang, which nobody there knows
   # they have.
-  if [[ $kind == windows-* ]]; then tooling/windows-name "$(echo "$release"/erts-*/bin/erl.exe)"; else
+  if [[ $kind == windows-* ]]; then DESCRIPTION="the One App server" tooling/windows-name "$(echo "$release"/erts-*/bin/erl.exe)"; else
     "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
   # A Mac's VM is signed with the Developer ID, on the Mac and in the background there, as macOS's firewall lets
   # signed software take connections without asking. Without the hardened runtime, which would need entitlements for

@@ -30,7 +30,8 @@ for (const file of process.argv.slice(2)) {
     version.setStringValues(language, {
       CompanyName: "the One App",
       ProductName: "the One App",
-      FileDescription: "the One App",
+      // What Task Manager and Windows Firewall call a program: the app, or with DESCRIPTION what else of the One App it is.
+      FileDescription: process.env.DESCRIPTION ?? "the One App",
       LegalCopyright: theirs ? `${copyright}. ${theirs}` : copyright,
       OriginalFilename: basename(file),
     });
