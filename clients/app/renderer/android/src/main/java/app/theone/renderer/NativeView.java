@@ -52,7 +52,6 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
      */
     private VelocityTracker speed;
     private final OverScroller fling;
-    private boolean panning;
     private int flungX, flungY;
     private final Runnable flinging = this::flinging;
     /**
@@ -105,6 +104,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
             JSONObject c = new JSONObject(command);
             if (c.has("menu")) menu(c.optJSONObject("menu"));
             if (c.has("magnifier")) magnify(c.optJSONObject("magnifier"));
+            if (c.optBoolean("fling")) fling();
             if (c.has("pick")) pick(c.getJSONObject("pick"));
             if (c.has("share")) NativeHost.share(c.getString("share"));
             if (c.has("haptic")) NativeHost.haptic(this, c.getString("haptic"));
@@ -215,7 +215,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         if (speed != null) speed.addMovement(e);
         // How long ago Android says it happened, which how fast the finger went is worked out from.
         float ago = android.os.SystemClock.uptimeMillis() - e.getEventTime();
-        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped, ago, ViewConfiguration.getLongPressTimeout());
+        nativeTouch(id, action, e.getX(), e.getY(), slop, stopped, ago, ViewConfiguration.getLongPressTimeout());
         // What's dragged is drawn where Android predicts the finger will be as the next frame shows, so it keeps up.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && action != MotionEvent.ACTION_CANCEL) {
             if (predictor == null) predictor = new MotionPredictor(getContext());
@@ -223,19 +223,23 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
             MotionEvent ahead = action == MotionEvent.ACTION_MOVE && predictor.isPredictionAvailable(e.getDeviceId(), e.getSource()) ? predictor.predict(System.nanoTime() + FRAME_NANOS) : null;
             if (ahead != null) nativePredicted(id, ahead.getX(), ahead.getY());
         }
-        if (action == MotionEvent.ACTION_MOVE) panning = pans;
-        if (action == MotionEvent.ACTION_UP && panning && speed != null) {
-            ViewConfiguration configuration = ViewConfiguration.get(getContext());
-            speed.computeCurrentVelocity(1000, configuration.getScaledMaximumFlingVelocity());
-            float vx = speed.getXVelocity(), vy = speed.getYVelocity();
-            if (Math.hypot(vx, vy) > configuration.getScaledMinimumFlingVelocity()) {
-                flungX = flungY = 0;
-                fling.fling(0, 0, (int) -vx, (int) -vy, Integer.MIN_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MAX_VALUE);
-                postOnAnimation(flinging);
-            }
-        }
-        if (action != MotionEvent.ACTION_MOVE) panning = false;
         return true;
+    }
+
+    /**
+     * A pan lifted, as Rust took the lift (`fling`): at once, or once its page caught up where the lift waited for it.
+     * What it panned flings on at the finger's speed, Android's own (`VelocityTracker`, from the events' own times, so a
+     * lift taken late flings as fast), as a ScrollView's does. A finger landing meanwhile cleared it, so stops it.
+     */
+    private void fling() {
+        if (speed == null) return;
+        ViewConfiguration configuration = ViewConfiguration.get(getContext());
+        speed.computeCurrentVelocity(1000, configuration.getScaledMaximumFlingVelocity());
+        float vx = speed.getXVelocity(), vy = speed.getYVelocity();
+        if (Math.hypot(vx, vy) <= configuration.getScaledMinimumFlingVelocity()) return;
+        flungX = flungY = 0;
+        fling.fling(0, 0, (int) -vx, (int) -vy, Integer.MIN_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MAX_VALUE);
+        postOnAnimation(flinging);
     }
 
     /** A display frame's step of the fling: what it panned stops it at its end. */
@@ -365,7 +369,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native boolean nativeBack(long id);
     private native boolean nativeCovered(long id);
     private native void nativeActive(long id, boolean active);
-    private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped, float ago, float hold);
+    private native void nativeTouch(long id, int action, float x, float y, float slop, boolean stopped, float ago, float hold);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
     private native void nativePredicted(long id, float x, float y);
     private native void nativeMenuClosed(long id);

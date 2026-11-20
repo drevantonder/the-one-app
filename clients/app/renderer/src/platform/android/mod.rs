@@ -378,6 +378,11 @@ impl NativeWindow {
         apply(&self.view, command);
     }
 
+    /// What a pan let go of flings on, by Android's own fling (`NativeView.fling`).
+    pub fn fling(&self) {
+        self.apply(json!({"fling": true}));
+    }
+
     /// What Android does for window `id`'s page through its view: its picker, share sheet and haptics.
     pub fn device(&self, _: WindowId) -> Box<dyn crate::view::Device> {
         Box::new(Device(self.view.clone()))
@@ -611,12 +616,11 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeCovered(_: JNIE
 
 /// A finger: `action` is MotionEvent's (0 down, 1 up, 2 move, 3 cancel), at `x`, `y` in device pixels, `ago` ms before
 /// now, taken as every phone's host takes one (`view::touch`) with Android's own slop (`slop`, in device pixels), and
-/// its fling, which Java runs (`OverScroller`) and a finger landing `stopped`. → whether it pans, which Java flings as
-/// it lifts.
+/// its fling, which Java runs (`OverScroller`, as a pan lifts: `NativeWindow::fling`) and a finger landing `stopped`.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean, ago: jfloat, hold: jfloat) -> jboolean {
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean, ago: jfloat, hold: jfloat) {
     let id = id as WindowId;
-    let panning = with_windows(|windows| {
+    with_windows(|windows| {
         let density = windows.windows.get(&id)?.parts[0].native.density;
         let phase = match action {
             0 => Phase::Down,
@@ -625,9 +629,9 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
             _ => Phase::Cancelled,
         };
         let fingers = Fingers { slop: slop / density, flings: true, stopped: stopped != 0, edge: None, hold: f64::from(hold) };
-        Some(windows.touch(id, 0, point(x / density, y / density), phase, Some(f64::from(ago).max(0.0)), fingers))
+        windows.touch(id, 0, point(x / density, y / density), phase, Some(f64::from(ago).max(0.0)), fingers);
+        Some(())
     });
-    panning.flatten().unwrap_or(false).into()
 }
 
 /// A step of a fling Java runs (`OverScroller`, in NativeView): what's under `x`, `y`, where the finger went down,

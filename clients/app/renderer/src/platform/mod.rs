@@ -1074,6 +1074,10 @@ impl Windows {
         let touched = screen.touch(&fingers, finger, at, phase, time);
         screen.happened(None);
         match touched {
+            // Lifted from a pan, on a host that flings it itself (Android's `OverScroller`), as the lift is taken here:
+            // at once, or once its page caught up, where it waited (`waits`).
+            #[cfg(target_os = "android")]
+            Touched::Panning if phase == crate::view::touch::Phase::Up => native.fling(),
             Touched::Panning => return true,
             Touched::Keyboard => self.display.text_input(native, &[crate::editing::TextInput::Show]),
             #[cfg(any(target_os = "ios", feature = "fake"))]
