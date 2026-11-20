@@ -1,10 +1,10 @@
 // Runs a network's edge on this machine, with nothing deployed, or deploys it to Cloudflare:
 //
 //     bun edge.js dev [what `wrangler dev` takes]
-//     bun edge.js deploy [https://<the network's address>]
+//     bun edge.js deploy https://<the network's address>
 //
 // Deployed with the network's address, the edge answers there: Cloudflare attaches that name to it, making its DNS
-// record and certificate, if the name is on a zone of the same account. Without one it answers only at workers.dev.
+// record and certificate, as the name is on a zone of the account it's deployed to.
 //
 // That's the edge's Worker (`wrangler.jsonc`, `edge.ts`), with the web client's files (`clients/web`) as its assets,
 // the relay's (`relay/wrangler.jsonc`, `relay/worker.ts`), and each app's edge function: an app that has one holds an
@@ -31,15 +31,32 @@ import { $, Glob } from "bun";
 const here = import.meta.dir;
 const root = resolve(here, "../..");
 const [what, ...rest] = process.argv.slice(2);
-if (!["dev", "deploy"].includes(what)) throw new Error("bun edge.js dev, or bun edge.js deploy [https://<address>]");
-const at = what === "deploy" && rest[0] ? new URL(rest[0]) : null;
+if (!["dev", "deploy"].includes(what)) throw new Error("bun edge.js dev, or bun edge.js deploy https://<address>");
+if (what === "deploy" && !rest[0]) throw new Error("bun edge.js deploy https://<address>: a deploy is to a network, by its address");
+const at = what === "deploy" ? new URL(rest[0]) : null;
 if (at && (at.protocol !== "https:" || at.pathname !== "/")) throw new Error("A network's address is https://<name>, with no path");
-// Wrangler reads the Cloudflare token from the environment: CLOUDFLARE_API_TOKEN when it's set, else 1Password's, read
-// into this process only.
-if (what === "deploy" && !process.env.CLOUDFLARE_API_TOKEN) {
-  const read = await $`op read ${"op://van-tonder-nosudo/CLOUDFLARE_API_TOKEN/credential"}`.quiet().nothrow();
-  if (read.exitCode !== 0 || !read.text().trim()) throw new Error("No Cloudflare token: set CLOUDFLARE_API_TOKEN, or sign in to 1Password (`op`) for van-tonder-nosudo/CLOUDFLARE_API_TOKEN");
-  process.env.CLOUDFLARE_API_TOKEN = read.text().trim();
+// Each network's edge is in its own Cloudflare account, which only its own token reaches: the 1Password item "The One App
+// edge deploy (<its name>)", or CLOUDFLARE_API_TOKEN. Wrangler deploys to the account of the zone the address is on, as
+// Cloudflare says to that token, and nothing is deployed where the token can't see the zone: a token taken for another
+// network's, as Andre's was the only one read, once deployed one network's Workers in place of another's (20 Nov).
+if (at) {
+  if (!process.env.CLOUDFLARE_API_TOKEN) {
+    const title = `The One App edge deploy (${at.hostname})`;
+    const items = await $`op item list --format json`.quiet().nothrow();
+    if (items.exitCode !== 0) throw new Error(`No Cloudflare token: set CLOUDFLARE_API_TOKEN, or sign in to 1Password (\`op\`) to read "${title}"`);
+    const item = JSON.parse(items.text()).find((/** @type {{title: string}} */ item) => item.title === title);
+    if (!item) throw new Error(`No Cloudflare token for ${at.hostname}: 1Password has no item "${title}", and CLOUDFLARE_API_TOKEN isn't set`);
+    process.env.CLOUDFLARE_API_TOKEN = (await $`op read ${`op://${item.vault.id}/${item.id}/credential`}`.quiet()).text().trim();
+  }
+  const labels = at.hostname.split(".");
+  let zone;
+  for (let from = 0; !zone && from < labels.length - 1; from++) {
+    const asked = await fetch(`https://api.cloudflare.com/client/v4/zones?name=${labels.slice(from).join(".")}`, { headers: { authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}` } });
+    zone = asked.ok ? (await asked.json()).result?.[0] : undefined;
+  }
+  if (!zone) throw new Error(`The Cloudflare token for ${at.hostname} reaches no zone it's on, so nothing was deployed: it's another network's token, or it can't read the zone`);
+  process.env.CLOUDFLARE_ACCOUNT_ID = zone.account.id;
+  console.log(`Deploying to ${zone.account.name}, the account of ${zone.name}`);
 }
 
 /** The first part of each path a piece of the edge answers (`edge.ts`). The web client's files are the rest. */
