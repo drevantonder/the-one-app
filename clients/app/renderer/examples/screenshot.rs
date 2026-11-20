@@ -14,7 +14,7 @@
 //! whatever GPU Vulkan finds (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json` picks Mesa's software Vulkan,
 //! lavapipe, where there's no GPU), or on Windows Direct3D 12's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
-//! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. What a person does (`tap`, `key`,
+//! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. What a person does (`tap`, `hover`, `key`,
 //! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, a panel's `put_away` and `summon`, and the
 //! device's `back`)
 //! comes as the display's input, each event at its own time, a click held down 80 ms,
@@ -512,7 +512,7 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's. And what the
 /// platform's keyboard was told (`keyboard`), and what its menu for text and magnifier were asked to show, with the
 /// handles drawn (`text_selection`), which only the fake platform knows.
-const INPUT: [&str; 16] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard", "text_selection"];
+const INPUT: [&str; 17] = ["tap", "hover", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard", "text_selection"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -578,6 +578,13 @@ fn point_of(windows: &mut Windows, id: renderer::platform::WindowId, request: &r
 /// What a person's input request does, played as the display's events (`INPUT`).
 fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &renderer::inspect::Request) -> anyhow::Result<Value> {
     match request.op.as_str() {
+        // The pointer moved onto what it selects, or a point, as Playwright's hover does.
+        "hover" => {
+            let (x, y) = point_of(windows, id, request)?;
+            press(windows, id, x, y, Phase::Moved);
+            windows.run(0.0);
+            Ok(json!({"hovered": {"x": x, "y": y}}))
+        }
         "tap" => {
             let (x, y) = point_of(windows, id, request)?;
             let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3);

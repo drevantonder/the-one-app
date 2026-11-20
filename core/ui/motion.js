@@ -585,6 +585,7 @@ function requests(steps, folder) {
     else if (step.answers) out.push({ request: { op: "changed", answers: step.answers } })
     // An agent's press comes the inspector's way, as to a device's window, though nobody could press it (a panel put away).
     else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold, clicks: step.clicks, ...(step.agent ? { inspector: true } : {}) } })
+    else if (step.hover) out.push({ request: { op: "hover", ...selector(step.hover) } })
     else if (step.down) out.push({ request: { op: "down", ...selector(step.down) } })
     else if (step.up) out.push({ request: { op: "up" } })
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })

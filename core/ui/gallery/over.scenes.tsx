@@ -37,6 +37,29 @@ const Chosen = () => {
   )
 }
 
+/// A toast with an action, and what its action did, as text, so a check can say.
+const Toasts = () => {
+  const [restored, setRestored] = createSignal(false)
+  return (
+    <View>
+      <Button onPress={() => toast("Note deleted", { action: { label: "Undo", run: () => setRestored(true) } })}>Delete Note</Button>
+      <Text>{restored() ? "Restored" : "Not restored"}</Text>
+    </View>
+  )
+}
+
+/// What people expect of a toast, from the UI SDK's own tests (tests/specs/toast.spec.ts at the commit toast.ts names):
+/// it goes by itself after its time (8 s, with an action), not while the pointer rests on it nor while the page isn't
+/// seen, and its action runs and closes it. It's found by its action, which only it has: its words are a screen
+/// reader's too, read out as it comes (`announce`), where they stay.
+const undo = { role: "button", name: "Undo" }
+const toastChecks = {
+  "It goes by itself after its time": ["Delete Note", { expect: { shown: undo } }, { wait: 7500 }, { expect: { shown: undo } }, { wait: 1000 }, { expect: { gone: undo } }],
+  "Hovered, it stays, and goes once the pointer leaves": ["Delete Note", { hover: undo }, { wait: 9000 }, { expect: { shown: undo } }, { hover: { x: 195, y: 420 } }, { wait: 8500 }, { expect: { gone: undo } }],
+  "Its action runs and closes it": ["Delete Note", { wait: 300 }, undo, { expect: { text: "Restored" } }, { expect: { gone: undo } }],
+  "In the background, its time stands still": ["Delete Note", { away: 9000 }, { expect: { shown: undo } }],
+}
+
 /// A menu whose items are asked for again and again, each answer new objects, as a page's data refreshing does (the
 /// Home Screen's owners, asked for as it shows), kept by their keys (`For`'s `keyed`) so a press reaches what's under
 /// it however often they come: made afresh instead, a press that goes down on one and up on its new one is lost, as on
@@ -76,6 +99,7 @@ const menuChecks = {
   "A letter goes to the next item it starts": [{ key: "Tab" }, { key: "Enter" }, { key: "r" }, { expect: { focused: item("Rename") } }, { wait: 1000 }, { key: "d" }, { expect: { focused: item("Delete") } }],
   "Enter chooses, closes it and gives its button the keyboard back": [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Enter" }, { expect: { text: "Chosen: family" } }, { expect: { gone: { role: "menu" } } }, { expect: { focused: trigger } }],
   "A press on an item chooses it and closes it": ["Open Menu", { wait: 300 }, item("Rename"), { expect: { text: "Chosen: rename" } }, { expect: { gone: { role: "menu" } } }],
+  "Hovered, an item has the keyboard": ["Open Menu", { wait: 300 }, { hover: item("Rename") }, { expect: { focused: item("Rename") } }],
   "A press on an item that's off does nothing": ["Open Menu", { wait: 300 }, item("Turn Off"), { expect: { shown: { role: "menu" } } }, { key: "Escape" }, { expect: { text: "Chosen: nothing" } }],
   "Opened again, it's drawn where it opens": ["Open Menu", { expect: { shown: { role: "menu" } } }, { key: "Escape" }, { expect: { gone: { role: "menu" } } }, "Open Menu", { expect: { shown: { role: "menu" } } }],
   "Closed and opened again at once by its keys, it's drawn where it opens": [{ key: "Tab" }, { key: "Enter" }, { wait: 300 }, { key: "Escape" }, { key: "Enter" }, { expect: { shown: { role: "menu" } } }],
@@ -146,6 +170,7 @@ export default {
     taps: ["Delete Note"],
     render: () => <Button onPress={() => toast("Note deleted", { action: { label: "Undo", run: () => {} } })}>Delete Note</Button>,
   },
+  "Over the page/Toast, by itself": { render: () => <Toasts />, checks: toastChecks },
   "Over the page/A tool's error as a toast": {
     alone: true,
     taps: ["Sync"],

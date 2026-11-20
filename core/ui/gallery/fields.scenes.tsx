@@ -65,6 +65,24 @@ const Echoed = (props: { label: string; value?: string; multiline?: boolean }) =
 }
 
 /// A select alone, and what's chosen, as text.
+/// Radios, one of them off, and the field after them, with what's checked as text, so a check can say.
+const Plans = () => {
+  const [plan, setPlan] = createSignal<string>()
+  const plans = [{ value: "free", label: "Free" }, { value: "pro", label: "Pro" }, { value: "team", label: "Team", disabled: true }, { value: "enterprise", label: "Enterprise" }]
+  return (
+    <View style={look.form}>
+      <Field label="Plan">
+        <RadioGroup value={plan()} options={plans} onValueChange={setPlan} />
+      </Field>
+      <Field label="Email">
+        <Input />
+      </Field>
+      <Text>{`Plan: ${plan() ?? "none"}`}</Text>
+    </View>
+  )
+}
+const radio = (name: string) => ({ role: "radio", name })
+
 const Picked = () => {
   const [fruit, setFruit] = createSignal("apple")
   const items = [...fruits, { value: "grape", label: "Grape", disabled: true }, { value: "lemon", label: "Lemon" }]
@@ -133,6 +151,18 @@ export default {
       "Escape closes it, choosing nothing": [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Escape" }, { expect: { text: "Chosen: apple" } }, { expect: { gone: { role: "listbox" } } }, { expect: { focused: face } }],
       "Closed, the arrows choose": [{ key: "Tab" }, { key: "ArrowDown" }, { expect: { text: "Chosen: pear" } }, { expect: { gone: { role: "listbox" } } }],
       "A press outside closes it": [face, { wait: 300 }, { x: 380, y: 830 }, { expect: { gone: { role: "listbox" } } }, { expect: { text: "Chosen: apple" } }],
+    },
+  },
+  // What people expect of radios, from the UI SDK's own tests (tests/specs/radio.spec.ts at the commit field.ts names).
+  "Fields/Radios and what's checked": {
+    render: () => <Plans />,
+    checks: {
+      "A press checks it": [radio("Pro"), { expect: { text: "Plan: pro" } }],
+      "A press on one that's off does nothing": [radio("Team"), { expect: { text: "Plan: none" } }],
+      "Tab comes to the first, checking nothing": [{ key: "Tab" }, { expect: { focused: radio("Free") } }, { expect: { text: "Plan: none" } }],
+      "They're one Tab stop, which comes back to the one checked": [radio("Enterprise"), { key: "Tab" }, { expect: { focused: { role: "textbox", name: "Email" } } }, { key: "Tab", shift: true }, { expect: { focused: radio("Enterprise") } }],
+      "The arrows move and check, past what's off, round the ends": [{ key: "Tab" }, { key: "ArrowDown" }, { expect: { focused: radio("Pro") } }, { expect: { text: "Plan: pro" } }, { key: "ArrowRight" }, { expect: { focused: radio("Enterprise") } }, { key: "ArrowDown" }, { expect: { focused: radio("Free") } }, { expect: { text: "Plan: free" } }, { key: "ArrowUp" }, { expect: { text: "Plan: enterprise" } }],
+      "Space checks, Enter doesn't": [{ key: "Tab" }, { key: "Enter" }, { expect: { text: "Plan: none" } }, { key: " " }, { expect: { text: "Plan: free" } }],
     },
   },
   "Fields/Every kind": () => <Fields />,
