@@ -65,7 +65,10 @@ defmodule Encryption do
         with {:refuse, _why} <- refused, do: GenServer.call(keys, :forget)
         should = should(name)
         held = servers(artifact)
-        :no_response = Call.forward(call, Enum.filter(held, &(&1 in should)))
+        # Only a server that both holds its keys and acts for whose it is runs the call. With none but this one, it
+        # isn't passed on: one passed here already would come back as a loop, and say no server answered.
+        others = Enum.filter(held, &(&1 in should)) -- [call.server]
+        if others != [], do: :no_response = Call.forward(call, others)
         raise unopened(name, should, held)
     end
   end
