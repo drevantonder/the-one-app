@@ -303,31 +303,23 @@ defmodule OneCore.Mcp do
       else: Map.put(result, key, value)
   end
 
-  # A service's functions are its app's own, asked only by a server that runs that app: one acting for someone it's
-  # installed for.
-  defp result("services/call", %{"app" => app, "service" => service} = params, from, _principal, forwarded) do
-    runs = Enum.any?(Apps.installed_for(app), &Servers.acts_for?(from, &1))
-    between(runs && forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
+  # What another server asks of this one for whoever it acts for, which `Principal.asking/3` checked, as one check
+  # for every kind: a service's function, an app's function or scheduled job, that someone keeps their own data with
+  # an app, and a hook.
+  defp result("services/call", %{"app" => app, "service" => service} = params, _from, _principal, forwarded) do
+    between(forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
   end
 
-  # An app's own functions and jobs are asked of it only by a server that runs it too: one acting for whoever it's
-  # installed for, or for a network's app, one of the person's own whom it's for, which runs the network's apps for
-  # them (`Apps.runs?/4`).
-  defp result("apps/call", %{"installed" => at, "app" => app} = params, from, {_actor, subject} = principal, forwarded) do
-    function = fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end
-    asks = Servers.acts_for?(from, at) or (at == "network" and User.owner(subject) in Servers.acts_for(from))
-    between(asks && forwarded, function)
+  defp result("apps/call", %{"installed" => at, "app" => app} = params, _from, principal, forwarded) do
+    between(forwarded, fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end)
   end
 
-  # A person's own server has one of the network's say that they keep their own data with its app
-  # (`Installed.subject/3`): only they, as it acts for them.
-  defp result("apps/subject", %{"installed" => at, "app" => name}, from, {_actor, subject}, forwarded) do
-    who = User.owner(subject)
-    between(who in Servers.acts_for(from) && forwarded, fn -> {:ok, Installed.subject(at, name, who)} end)
+  defp result("apps/subject", %{"installed" => at, "app" => name}, _from, {_actor, subject}, forwarded) do
+    between(forwarded, fn -> {:ok, Installed.subject(at, name, User.owner(subject))} end)
   end
 
-  defp result("apps/schedule", %{"installed" => at, "app" => app}, from, {_actor, subject}, forwarded) do
-    between(Servers.acts_for?(from, at) && forwarded, fn -> Calls.schedule(at, app, subject, true) end)
+  defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, {_actor, subject}, forwarded) do
+    between(forwarded, fn -> Calls.schedule(at, app, subject, true) end)
   end
 
   defp result(
