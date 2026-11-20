@@ -82,8 +82,11 @@ impl Context {
             // integrated GPU); a frame binds a few hundred.
             required_limits: wgpu::Limits { max_non_sampler_bindings: 65_536, ..adapter.limits() },
             experimental_features: wgpu::ExperimentalFeatures::disabled(),
-            // A window's textures are small: memory kept low, not allocated in large blocks ahead.
-            memory_hints: wgpu::MemoryHints::MemoryUsage,
+            // Textures and buffers are placed in heaps of 8 MB (4 MB for those the CPU writes), and a bigger one,
+            // such as a window-sized texture, in one of its own, freed with it. `MemoryUsage` grew each new heap to
+            // twice the one before, up to 64 MB, and a heap goes only once nothing's left in it, so a few small
+            // textures that stayed held most of them: a Surface's Direct3D 12 kept 67 to 134 MB for 9 to 32 MB.
+            memory_hints: wgpu::MemoryHints::Manual { suballocated_device_memory_block_size: 8 << 20..8 << 20 },
             trace: wgpu::Trace::Off,
         })
         .await
