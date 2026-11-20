@@ -95,8 +95,12 @@ export function LiveScreen(props: { label: string; screen?: (inputs: ScreenInput
   )
 }
 
-/** What happens to a live screen's connection, as its machine is told it. */
-type Happened = { type: "lost" } | { type: "looked" } | { type: "unseen"; why: string | Error } | { type: "again" }
+/** What happens to a live screen's connection, as its machine is told it: its video `lost`, or ended to connect again
+ * at its new size (`resized`). */
+type Happened = { type: "lost" } | { type: "resized" } | { type: "looked" } | { type: "unseen"; why: string | Error } | { type: "again" }
+
+/** Why, as words: an error's message, or what was said. */
+const said = (why: string | Error | undefined) => (why instanceof Error ? why.message : (why ?? ""))
 
 function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Promise<unknown>; watch?: boolean }) {
   // What it's of, for good: what's still on its way once it's gone goes to it.
@@ -171,8 +175,12 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
         return () => clearInterval(timer)
       }),
     },
-    // Why it isn't video: what went wrong connecting, or getting a picture.
-    actions: { why: assign({ why: ({ event }) => ("why" in event ? event.why : ((event as { error?: Error }).error ?? "")) }) },
+    // Why it isn't video: what went wrong connecting, or getting a picture. Each time it goes wrong, Telemetry's told
+    // too (`reportError`, which the page's client records), by what happened, then why.
+    actions: {
+      why: assign({ why: ({ event }) => ("why" in event ? event.why : ((event as { error?: Error }).error ?? "")) }),
+      tell: (_, what: string) => reportError(new Error(what)),
+    },
     delays: { retry: ({ context }) => RETRIES[Math.min(context.tries, RETRIES.length - 1)] },
     guards: { lasting: ({ context }) => context.unseen + 1 >= LASTING },
   }).createMachine({
@@ -180,21 +188,31 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
     initial: "connecting",
     states: {
       connecting: {
-        invoke: { src: "connect", onDone: "live", onError: { target: "pictures", actions: "why" } },
+        invoke: { src: "connect", onDone: "live", onError: { target: "pictures", actions: ["why", { type: "tell", params: ({ event }) => `Live video didn't connect: ${said(event.error as Error)}` }] } },
       },
       live: {
         id: "live",
         entry: assign({ tries: 0, unseen: 0, why: undefined }),
-        on: { lost: "reconnecting" },
+        on: {
+          lost: { target: "reconnecting", actions: { type: "tell", params: "Live video was lost as it played" } },
+          resized: "reconnecting",
+        },
       },
       reconnecting: {
-        invoke: { src: "connect", onDone: "live", onError: { target: "pictures", actions: "why" } },
+        invoke: {
+          src: "connect",
+          onDone: "live",
+          onError: { target: "pictures", actions: ["why", { type: "tell", params: ({ event }) => `Live video didn't connect again: ${said(event.error as Error)}` }] },
+        },
       },
       pictures: {
         invoke: { src: "look", input: { every: 1000 } },
         on: {
           looked: { actions: assign({ unseen: 0 }) },
-          unseen: [{ guard: "lasting", target: "unreachable", actions: "why" }, { actions: assign({ unseen: ({ context }) => context.unseen + 1 }) }],
+          unseen: [
+            { guard: "lasting", target: "unreachable", actions: ["why", { type: "tell", params: ({ event }) => `The screen gave no picture either: ${said(event.why)}` }] },
+            { actions: assign({ unseen: ({ context }) => context.unseen + 1 }) },
+          ],
         },
         initial: "waiting",
         states: {
@@ -277,7 +295,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
   }
   const fit = () => {
     clearTimeout(resizing)
-    resizing = setTimeout(() => (queue = queue.then(async () => (await resize()) && (live() ? connection.send({ type: "lost" }) : take()))), 250)
+    resizing = setTimeout(() => (queue = queue.then(async () => (await resize()) && (live() ? connection.send({ type: "resized" }) : take()))), 250)
   }
   /// Where it's drawn, as it's laid out and each time that changes: its first place is the one the screen is resized
   /// to before it's connected to, so it isn't connected to twice.
@@ -420,7 +438,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       </Show>
       <View style={look.bar}>
         <Show when={state().matches("pictures")}>
-          <Text style={look.note}>Live video isn't connecting, so this updates each second.</Text>
+          <Text style={look.note}>Live video didn't connect, so this updates each second: {said(state().context.why)}</Text>
         </Show>
         <BarEnd value={true}>
           <Button variant="ghost" size="icon" aria-label={messages.fullScreen} onPress={toggle}>
