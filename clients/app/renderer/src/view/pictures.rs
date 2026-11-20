@@ -30,7 +30,10 @@ fn run(job: Job) {
             std::thread::Builder::new()
                 .name("pictures".into())
                 .spawn(move || {
-                    while let Ok(job) = receive.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv() {
+                    // The lock is let go before the job runs, as a `while let` wouldn't, so the threads decode at once.
+                    loop {
+                        let job = receive.lock().unwrap_or_else(std::sync::PoisonError::into_inner).recv();
+                        let Ok(job) = job else { break };
                         job();
                     }
                 })
