@@ -53,28 +53,24 @@ defmodule ComputerUse.Desktop do
 
   @doc """
   The caller's computers that are on, each a screen as Computer Use lists them, with its server's key as `desktop`,
-  and why each that couldn't say its own couldn't, by its name: each computer's screen is its own server's, so one
-  that doesn't answer takes away only its own.
+  and why each that couldn't say its own couldn't, by its name, all asked at once (`OneCore.Asks.each/3`): each
+  computer's screen is its own server's, so one that doesn't answer takes away only its own.
   """
   def screens(call) do
-    listed =
-      for %{"name" => name, "desktop" => server} = screen <- named(call) do
-        try do
-          status = OneCore.Service.call(call, __MODULE__, :status, [], server)
+    {answers, failed} = OneCore.Asks.each(named(call), &OneCore.Service.call(call, __MODULE__, :status, [], &1["desktop"]))
 
-          Map.merge(screen, %{
-            "description" =>
-              "#{name}'s own screen, as its person sees it" <>
-                if(status["missing"] == [], do: "", else: "; macOS doesn't allow #{Enum.join(status["missing"], " or ")} for #{called()} yet"),
-            "width" => status["width"],
-            "height" => status["height"]
-          })
-        rescue
-          problem -> {name, Exception.message(problem)}
-        end
+    screens =
+      for {%{"name" => name} = screen, status} <- answers do
+        Map.merge(screen, %{
+          "description" =>
+            "#{name}'s own screen, as its person sees it" <>
+              if(status["missing"] == [], do: "", else: "; macOS doesn't allow #{Enum.join(status["missing"], " or ")} for #{called()} yet"),
+          "width" => status["width"],
+          "height" => status["height"]
+        })
       end
 
-    {Enum.filter(listed, &is_map/1), Map.new(Enum.reject(listed, &is_map/1))}
+    {screens, Map.new(failed, fn {screen, why} -> {screen["name"], why} end)}
   end
 
   @doc """

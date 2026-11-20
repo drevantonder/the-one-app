@@ -73,7 +73,7 @@ defmodule ComputerUse do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.34.133", "sign-in" => "to name a phone as its person knows it", "webrtc" => "to show a computer's screen live"}
+  def requires, do: %{"core" => ">= 0.34.174", "sign-in" => "to name a phone as its person knows it", "webrtc" => "to show a computer's screen live"}
 
   @impl true
   def offers do
@@ -340,7 +340,8 @@ defmodule ComputerUse do
 
     {phones, failed} =
       try do
-        {Phone.screens(call), failed}
+        {phones, unanswered} = Phone.screens(call)
+        {phones, Map.merge(failed, Map.new(unanswered, fn {name, why} -> {"computer-use/#{name}", why} end))}
       rescue
         problem -> {[], Map.put(failed, "computer-use", Exception.message(problem))}
       end

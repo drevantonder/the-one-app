@@ -17,7 +17,7 @@ defmodule Settings do
   def entrypoints, do: [%{page: "client/index.html", category: "settings", subject: "user", badge: "badge", runtime_version: 4}]
 
   @impl true
-  def requires, do: %{"core" => ">= 0.32.107"}
+  def requires, do: %{"core" => ">= 0.34.174"}
 
   @impl true
   def offers do
@@ -135,13 +135,10 @@ defmodule Settings do
   def call("apps", _inputs, call) do
     listed = Call.apps(call)
     # Whether whoever asks owns what each is installed for, asked once for each of those (the network, a group, them),
-    # all at once: each is a question for the app that decides who may reach what.
-    owns =
-      listed
-      |> Enum.map(& &1.installed)
-      |> Enum.uniq()
-      |> Task.async_stream(&{&1, Call.owns?(%{call | subject: &1})}, timeout: :infinity)
-      |> Map.new(fn {:ok, owns} -> owns end)
+    # all at once: each is a question for the app that decides who may reach what. One it didn't answer in time isn't
+    # removable from here now.
+    {owns, _failed} = OneCore.Asks.each(Enum.uniq(Enum.map(listed, & &1.installed)), &Call.owns?(%{call | subject: &1}))
+    owns = Map.new(owns)
 
     apps =
       for app <- listed do
@@ -152,7 +149,7 @@ defmodule Settings do
           title: app.title || app.name,
           icon: Apps.Icons.address(app.icon),
           category: app.category,
-          removes: owns[app.installed]
+          removes: owns[app.installed] == true
         }
       end
 

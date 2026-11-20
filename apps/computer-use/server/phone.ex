@@ -10,38 +10,43 @@ defmodule ComputerUse.Phone do
   """
   alias OneCore.{Artifact, Call, Hooks, Server}
 
-  @doc "The phones the caller may use, each with what it is and its screenshot's size, awake or not."
+  @doc """
+  The phones the caller may use, each with what it is and its screenshot's size, awake or not, and why each device
+  whose app is watching that didn't answer in time couldn't, by its name, all asked at once (`OneCore.Asks.each/3`).
+  One that didn't answer is listed as it was kept, as one that's asleep is.
+  """
   def screens(call) do
     kept = Map.new(Artifact.list(call.own, "phones/"), &{String.replace_prefix(&1, "phones/", ""), nil})
     devices = Map.keys(kept) |> Enum.concat(Server.devices()) |> Enum.uniq() |> Enum.filter(&may?(call, &1))
+    {answers, failed} = OneCore.Asks.each(Enum.filter(Server.devices(), &(&1 in devices)), &ask(&1, "screen", %{}, false))
 
     awake =
-      Server.devices()
-      |> Enum.filter(&(&1 in devices))
-      |> Task.async_stream(&{&1, ask(&1, "screen", %{}, false)}, timeout: :infinity, ordered: false)
-      |> Map.new(fn
-        {:ok, {device, {:ok, %{"structuredContent" => %{"name" => _} = screen}}}} -> {device, kept(call, device, screen)}
+      Map.new(answers, fn
+        {device, {:ok, %{"structuredContent" => %{"name" => _} = screen}}} -> {device, kept(call, device, screen)}
         # A device that isn't a phone, whose app has no screen to give, or a phone whose app went away.
-        {:ok, {device, _}} -> {device, nil}
+        {device, _} -> {device, nil}
       end)
 
-    for device <- devices, phone = awake[device] || asleep(call, device, kept), phone != nil do
-      %{
-        "name" => phone["name"],
-        "description" =>
-          "#{phone["name"]}'s own screen, " <>
-            if(phone["tv"], do: "an Android TV, which its remote's D-pad drives: `key` Up, Down, Left and Right move the focus, and Return presses what has it", else: "an Android phone") <>
-            ", as its person sees it" <>
-            cond do
-              awake[device] == nil -> "; its app isn't running, and it's woken as it's used"
-              not phone["on"] -> "; its person hasn't turned on the One App in Settings → Accessibility yet"
-              true -> ""
-            end,
-        "width" => phone["width"],
-        "height" => phone["height"],
-        "phone" => device
-      }
-    end
+    screens =
+      for device <- devices, phone = awake[device] || asleep(call, device, kept), phone != nil do
+        %{
+          "name" => phone["name"],
+          "description" =>
+            "#{phone["name"]}'s own screen, " <>
+              if(phone["tv"], do: "an Android TV, which its remote's D-pad drives: `key` Up, Down, Left and Right move the focus, and Return presses what has it", else: "an Android phone") <>
+              ", as its person sees it" <>
+              cond do
+                awake[device] == nil -> "; its app isn't running, and it's woken as it's used"
+                not phone["on"] -> "; its person hasn't turned on the One App in Settings → Accessibility yet"
+                true -> ""
+              end,
+          "width" => phone["width"],
+          "height" => phone["height"],
+          "phone" => device
+        }
+      end
+
+    {screens, Map.new(failed, fn {device, why} -> {(asleep(call, device, kept) || %{})["name"] || device, why} end)}
   end
 
   def use(_call, _phone, "stream", _inputs), do: raise("A phone's screen has no live video yet: it's shown a picture at a time.")

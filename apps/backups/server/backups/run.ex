@@ -400,17 +400,25 @@ defmodule Backups.Run do
       else: %{destination: destination["name"], backup: nil}
   end
 
+  # How long a destination has to give back one object as a check reads it: the largest a blob is (64 MB, a message's
+  # most) over a slow link.
+  @reads_within 300_000
+
   defp check(call, destination, opened, began, backup, objects) do
     %{"name" => name, "digest" => listed_digest, "listed" => listed} = backup
     blobs = listed(listed)
     held = blobs |> Enum.map(& &1["object"]) |> Enum.uniq()
 
     # Each object is hashed as it's read and let go, so a check holds a few objects at a time, however large the
-    # backup.
+    # backup. One the destination doesn't give back in time, as a machine that's there but stuck, fails the check,
+    # saying so: what it couldn't read isn't known to be wrong.
     read =
       held
-      |> Task.async_stream(&read_back(opened, &1), max_concurrency: 8, timeout: :infinity)
-      |> Enum.map(fn {:ok, read} -> read end)
+      |> Task.async_stream(&read_back(opened, &1), max_concurrency: 8, timeout: @reads_within, on_timeout: :kill_task, zip_input_on_exit: true)
+      |> Enum.map(fn
+        {:ok, read} -> read
+        {:exit, {object, :timeout}} -> raise "#{destination["name"]} didn't give back #{object} within #{div(@reads_within, 60_000)} minutes"
+      end)
 
     wrong = for {object, _bytes, digest} <- read, digest != objects[object], into: MapSet.new(), do: object
     listed_ok = digest(Destination.get(opened, "backups/" <> name) || "") == listed_digest

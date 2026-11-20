@@ -86,7 +86,7 @@ defmodule Containers do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.34.133",
+      "core" => ">= 0.34.174",
       "database" => "to keep your containers",
       "webrtc" => "to show a container's screen live"
     }
@@ -456,18 +456,17 @@ defmodule Containers do
   end
 
   def call("machines", _inputs, call) do
-    servers = Service.servers(call, Podman)
+    listed = Enum.zip(Service.machines(call, Podman), Service.servers(call, Podman))
+    on = for {m, server} <- listed, m.on, do: server
+    {answers, failed} = OneCore.Asks.each(on, &Service.call(call, Podman, :progress, [], &1))
+    progress = Map.new(answers)
 
     machines =
-      for {m, server} <- Enum.zip(Service.machines(call, Podman), servers) do
-        if m.on do
-          try do
-            Map.put(m, :desktop, Service.call(call, Podman, :progress, [], server))
-          rescue
-            problem -> Map.put(m, :failed, Exception.message(problem))
-          end
-        else
-          m
+      for {m, server} <- listed do
+        cond do
+          Map.has_key?(progress, server) -> Map.put(m, :desktop, progress[server])
+          Map.has_key?(failed, server) -> Map.put(m, :failed, failed[server])
+          true -> m
         end
       end
 

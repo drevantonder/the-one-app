@@ -13,7 +13,7 @@ defmodule Inspector do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.25.4"}
+  def requires, do: %{"core" => ">= 0.34.174"}
 
   @device %{type: "string", description: "the device, by its key or name, as `windows` lists it; the only one with a native window open if not given"}
   @window %{type: "integer", description: "the window, as `windows` lists it; the device's only native window if not given"}
@@ -38,9 +38,13 @@ defmodule Inspector do
         name: "windows",
         read_only: true,
         description:
-          "The app windows, drawn natively, open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none.",
+          "The app windows, drawn natively, open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none. Each device is asked at once, for up to eight seconds: one that didn't answer is in `failed`, with why, by its key.",
         inputs: %{type: "object", properties: %{device: @device}},
-        outputs: %{type: "object", properties: %{windows: %{type: "array", items: %{type: "object"}}}, required: ["windows"]}
+        outputs: %{
+          type: "object",
+          properties: %{windows: %{type: "array", items: %{type: "object"}}, failed: %{type: "object", additionalProperties: %{type: "string"}}},
+          required: ["windows", "failed"]
+        }
       },
       op("tree", true, "The window's semantic tree, as a screen reader reads it: each node's id, role, name, value, states, actions and rect.", %{}),
       op(
@@ -186,19 +190,19 @@ defmodule Inspector do
   def call("windows", inputs, call) do
     devices = if inputs["device"], do: [device(call, inputs["device"])], else: mine(call)
 
+    {answers, failed} = OneCore.Asks.each(devices, &ask(&1, "windows", %{}))
+
     windows =
-      devices
-      |> Task.async_stream(&{&1, ask(&1, "windows", %{})}, timeout: :infinity, ordered: false)
-      |> Enum.flat_map(fn
-        {:ok, {device, {:ok, %{"structuredContent" => %{"windows" => windows} = listed}}}} ->
+      Enum.flat_map(answers, fn
+        {device, {:ok, %{"structuredContent" => %{"windows" => windows} = listed}}} ->
           for window <- windows, do: Map.merge(window, %{"device" => device, "name" => listed["device"]})
 
         # A device whose app has no native windows to give: a phone, or one on a build before them.
-        {:ok, _} ->
+        _ ->
           []
       end)
 
-    %{"windows" => windows}
+    %{"windows" => windows, "failed" => failed}
   end
 
   def call(tool, inputs, call) do
@@ -251,11 +255,12 @@ defmodule Inspector do
           _ -> {:error, "The device's app answered what isn't a tool's result"}
         end
 
+      # Raised, as what didn't answer, which `windows` says of the device in `failed`.
       :unreachable ->
-        {:error, "The device's app isn't running, or didn't answer."}
+        raise "The device's app isn't running, or didn't answer."
 
       :stopped ->
-        {:error, "The device's app went away before it answered, so it may or may not have done it."}
+        raise "The device's app went away before it answered, so it may or may not have done it."
     end
   end
 end
