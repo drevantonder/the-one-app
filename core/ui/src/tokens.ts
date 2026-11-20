@@ -156,10 +156,11 @@ const motions = {
   quick: motion(120, out),
   settle: motion(200, out),
   travel: motion({ default: 300, reducedMotion: 200 }, { default: [0.32, 0.72, 0, 1], reducedMotion: out }),
-  /** Springs, by SwiftUI's names. Snappy: what changes size or place and can be turned back midway, a little past where
-   * it goes. Smooth: what fades or settles beside it, with no bounce. */
-  snappy: spring(460, 0.15),
-  smooth: spring(340, 0),
+  /** Springs, by SwiftUI's names and with its values (`Animation.snappy`, `.smooth`: half a second). Snappy: what
+   * changes size or place and can be turned back midway, a little past where it goes. Smooth: what fades or settles
+   * beside it, with no bounce. */
+  snappy: spring(500, 0.15),
+  smooth: spring(500, 0),
 }
 
 // By role.

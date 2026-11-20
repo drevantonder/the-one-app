@@ -1,9 +1,26 @@
-import { List, Row, styles, Text, tokens, View, type Scenes } from "ui"
+import { createSignal } from "solid-js"
+import { Button, List, Row, styles, Text, tokens, View, type Scenes } from "ui"
 
 const look = styles({
   card: { padding: tokens.grid[4], borderRadius: tokens.radius.large, backgroundColor: tokens.colour.card, boxShadow: tokens.shadow.lifted, gap: tokens.grid[1] },
   page: { padding: tokens.grid[4], gap: tokens.grid[4] },
+  box: { width: 64, height: 64, borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.blue },
+  smooth: (translateX: number) => ({ translateX, transitionProperty: ["translateX"], transition: tokens.motion.smooth }),
+  snappy: (translateX: number) => ({ translateX, transitionProperty: ["translateX"], transition: tokens.motion.snappy }),
 })
+
+const Springs = () => {
+  const [moved, setMoved] = createSignal(false)
+  return (
+    <View style={look.page}>
+      <Button onPress={() => setMoved(!moved())}>Move</Button>
+      <Text>Smooth</Text>
+      <View aria-label="Smooth" style={[look.box, look.smooth(moved() ? 200 : 0)]} />
+      <Text>Snappy</Text>
+      <View aria-label="Snappy" style={[look.box, look.snappy(moved() ? 200 : 0)]} />
+    </View>
+  )
+}
 
 const notes = Array.from({ length: 200 }, (_, at) => `Note ${at + 1}`)
 
@@ -24,6 +41,8 @@ export default {
       </View>
     ),
   },
+  // The springs the tokens name, each moving a box 200 pt as Move is pressed: SwiftUI's `.smooth` and `.snappy`.
+  "Motion/Springs": Springs,
   "Motion/Long list": {
     touch: true,
     motions: {
