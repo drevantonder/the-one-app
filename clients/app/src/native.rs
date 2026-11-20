@@ -597,11 +597,13 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         Kind::Launcher(..) | Kind::Sheet(_) | Kind::Unopened(_) => None,
     };
     let tokens_page = load(&tables)?;
+    Opening::step(&view, "tables loaded");
     // An app's window, and a phone's Home Screen, shows its last frame as it opens again.
     let snapshot = (app_window || (launcher && cfg!(mobile))).then(|| snapshot_file(entrypoint, subject, &module, &tables)).flatten();
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
+    Opening::step(&view, "JS thread started");
     let (to, asked) = (begun.to.clone(), begun.asked.clone());
 
     // Where the device is with its network, as a page asks as it opens: the Colour Mode chosen on it, if one was.
