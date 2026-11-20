@@ -20,6 +20,7 @@ export const [messages, setMessages] = createStore({
   loading: "Loading",
   more: "More",
   noActions: "No actions",
+  notifications: "Notifications",
   notDrawnHere: "This One App doesn't draw it yet. It shows in a browser.",
   ok: "OK",
   open: "Open",

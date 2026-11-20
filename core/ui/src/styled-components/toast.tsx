@@ -17,10 +17,9 @@ const look = styles({
     start: 0,
     end: 0,
     bottom: tokens.length.safeBottom,
-    alignItems: "center",
-    gap: tokens.grid[2],
     padding: tokens.length.gutter,
   },
+  list: { alignItems: "center", gap: tokens.grid[2] },
   // A pill, as Raycast's toasts are: one line, its action after a hairline.
   toast: {
     flexDirection: "row",
@@ -67,24 +66,28 @@ function Toaster(props: { toaster: ReturnType<typeof createToaster> }) {
   return (
     <Show when={props.toaster.toasts().length}>
       <Portal>
-        <View style={look.stack}>
-          <For each={props.toaster.toasts()} keyed={(one) => one.id}>
-            {(one) => (
-              <View {...props.toaster.region()} style={[look.toast, !one().action && look.alone]}>
-                <Text style={look.title}>{one().title}</Text>
-                <Show when={one().action}>
-                  {(action) => (
-                    <>
-                      <View style={look.rule} />
-                      <Button variant="ghost" onPress={() => (props.toaster.dismiss(one().id), action().run())}>
-                        {action().label}
-                      </Button>
-                    </>
-                  )}
-                </Show>
-              </View>
-            )}
-          </For>
+        {/* Their own landmark, a list of them, each named by what it says, as upstream's are, which a screen reader
+            moves to; each is read out as it comes (`announce`), not by its place in the page. */}
+        <View role="region" aria-label={messages.notifications} style={look.stack}>
+          <View role="list" style={look.list}>
+            <For each={props.toaster.toasts()} keyed={(one) => one.id}>
+              {(one) => (
+                <View {...props.toaster.region()} role="listitem" aria-label={one().title} style={[look.toast, !one().action && look.alone]}>
+                  <Text style={look.title}>{one().title}</Text>
+                  <Show when={one().action}>
+                    {(action) => (
+                      <>
+                        <View style={look.rule} />
+                        <Button variant="ghost" onPress={() => (props.toaster.dismiss(one().id), action().run())}>
+                          {action().label}
+                        </Button>
+                      </>
+                    )}
+                  </Show>
+                </View>
+              )}
+            </For>
+          </View>
         </View>
       </Portal>
     </Show>

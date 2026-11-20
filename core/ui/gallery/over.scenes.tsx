@@ -50,14 +50,16 @@ const Toasts = () => {
 
 /// What people expect of a toast, from the UI SDK's own tests (tests/specs/toast.spec.ts at the commit toast.ts names):
 /// it goes by itself after its time (8 s, with an action), not while the pointer rests on it nor while the page isn't
-/// seen, and its action runs and closes it. It's found by its action, which only it has: its words are a screen
-/// reader's too, read out as it comes (`announce`), where they stay.
+/// seen, and its action runs and closes it. A toast is found as upstream's tests find one, a list item in the
+/// Notifications region named by what it says: its words alone are also what a screen reader was read (`announce`),
+/// which stays after it goes.
 const undo = { role: "button", name: "Undo" }
+const deleted = { role: "listitem", name: "Note deleted" }
 const toastChecks = {
-  "It goes by itself after its time": ["Delete Note", { expect: { shown: undo } }, { wait: 7500 }, { expect: { shown: undo } }, { wait: 1000 }, { expect: { gone: undo } }],
-  "Hovered, it stays, and goes once the pointer leaves": ["Delete Note", { hover: undo }, { wait: 9000 }, { expect: { shown: undo } }, { hover: { x: 195, y: 420 } }, { wait: 8500 }, { expect: { gone: undo } }],
-  "Its action runs and closes it": ["Delete Note", { wait: 300 }, undo, { expect: { text: "Restored" } }, { expect: { gone: undo } }],
-  "In the background, its time stands still": ["Delete Note", { away: 9000 }, { expect: { shown: undo } }],
+  "It goes by itself after its time": ["Delete Note", { expect: { shown: deleted } }, { wait: 7500 }, { expect: { shown: deleted } }, { wait: 1000 }, { expect: { gone: deleted } }],
+  "Hovered, it stays, and goes once the pointer leaves": ["Delete Note", { hover: undo }, { wait: 9000 }, { expect: { shown: deleted } }, { hover: { x: 195, y: 420 } }, { wait: 8500 }, { expect: { gone: deleted } }],
+  "Its action runs and closes it": ["Delete Note", { wait: 300 }, undo, { expect: { text: "Restored" } }, { expect: { gone: deleted } }],
+  "In the background, its time stands still": ["Delete Note", { away: 9000 }, { expect: { shown: deleted } }],
 }
 
 /// A menu whose items are asked for again and again, each answer new objects, as a page's data refreshing does (the
