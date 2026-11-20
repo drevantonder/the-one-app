@@ -386,7 +386,10 @@ impl Screen {
         if self.settling.is_empty() {
             return;
         }
-        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), self.transitions.len(), self.js.framing() || self.coasting(), self.changed.is_some(), self.busy());
+        // Put away or in the background, it's given no frames: what moves a frame at a time, or by the renderer, can't end
+        // by itself till it's shown, when it's where its time has taken it.
+        let (moving, animating) = if self.visible { (self.transitions.len(), self.js.framing() || self.coasting()) } else { (0, false) };
+        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), moving, animating, self.changed.is_some(), self.busy());
         // What a frame's page asked and hasn't heard back is this one's to wait for too.
         for child in self.frames.values() {
             pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, child.screen.js.framing(), false, false));

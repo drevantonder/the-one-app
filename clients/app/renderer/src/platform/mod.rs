@@ -778,6 +778,8 @@ impl Windows {
         window.visible = false;
         window.summoned = None;
         window.placing = false;
+        // Painted once more, put away, so what was on its way is where it was going (`Screen::shown`).
+        window.dirty = true;
         // Its surfaces let go of their images, or on a Mac its next frame's taken while it's still on the screen, so
         // it's drawn at once as it's summoned (`Renderer::put_away`).
         for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {

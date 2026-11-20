@@ -255,6 +255,8 @@ pub(super) struct Painter<'a> {
     pub(super) layered: &'a HashSet<Id>,
     /// Nothing moves this frame, so what's about to (`will-change`) is drawn into its layer ahead.
     pub(super) still: bool,
+    /// The window isn't shown (a panel put away, an app in the background): what moves is where it's going at once.
+    pub(super) unseen: bool,
     pub(super) recording: Option<Id>,
     /// The parts of the layer being drawn so far, before its scene now.
     pub(super) parts: Vec<Part>,
@@ -417,7 +419,7 @@ impl Painter<'_> {
                 at = parent;
             }
             let bounds = Bounds { origin, size: Size { width: laid.size.width, height: laid.size.height } };
-            self.transitions.laid_out(id, shared.as_deref(), bounds, self.time, self.frame, self.conditions.reduced_motion);
+            self.transitions.laid_out(id, shared.as_deref(), bounds, self.time, self.frame, self.conditions.reduced_motion || self.unseen);
         }
     }
 
@@ -430,7 +432,7 @@ impl Painter<'_> {
         // What's just been added starts from its `entering` state, to move from.
         let entering = (computed.transition.is_some() && self.transitions.entering(id)).then(|| style::of(node, State { entering: true, ..state }, self.conditions));
         let size = self.layout.kept.get(&id).and_then(|kept| self.layout.taffy.layout(kept.node).ok()).map_or(Size::default(), |laid| Size { width: laid.size.width, height: laid.size.height });
-        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion, size);
+        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion, self.unseen, size);
         self.transitions.animate(id, &mut computed, self.time, self.conditions);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();

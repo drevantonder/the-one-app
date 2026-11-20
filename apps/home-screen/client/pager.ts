@@ -5,7 +5,8 @@
 // its motion would have carried them nearest to, as an iPhone's Home Screen decides, so a short quick flick and a slow
 // drag past half way both turn it. A finger that lands while they move
 // catches them where they are. For whoever asked for less motion, they cross-fade to where they're going instead.
-import { createVelocityTracker, projected, reducedMotion } from "ui"
+import { createEffect } from "solid-js"
+import { createVelocityTracker, projected, reducedMotion, visible } from "ui"
 
 /** One axis of the pages: where they are, in points, where they're going, and how fast. `draw` puts them there, and
  * `fade`, where it's given, how opaque they are as they cross-fade. */
@@ -48,9 +49,16 @@ function step(now: number) {
   frame = moving.size ? requestAnimationFrame(step) : 0
 }
 
+// Put away or in the background, nothing's seen and the window gives no frames, so what's on its way is there at once:
+// shown again, it's where it went, as a person expects, not on its way from where it was.
+createEffect(visible, (shown) => {
+  if (!shown) for (const one of moving) jump(one, one.target)
+})
+
 /// Takes `one` to `target`, leaving at `velocity`; for whoever asked for less motion, a quick cross-fade there, or
-/// there at once where it doesn't fade.
+/// there at once where it doesn't fade; while nothing's seen, there at once.
 export function glide(one: Spring, target: number, velocity = one.velocity) {
+  if (!visible()) return jump(one, target)
   if (reducedMotion()) return one.fade && one.value !== target ? crossFade(one, target) : jump(one, target)
   one.target = target
   one.velocity = velocity

@@ -387,9 +387,11 @@ impl Transitions {
 
     /// Node `id`'s style as it's drawn at `now` (ms on the screen's clock): each property its transition names on its
     /// way from where it was, or from `entering`'s value for a node just added, to `computed`'s, setting off when it
-    /// changed (`since`). `reduced`: the person asked for less motion. `size`: how big it was last laid out, which a
-    /// part of it it's moved by is of.
-    pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, since: f64, reduced: bool, size: Size<f32>) {
+    /// changed (`since`). `reduced`: the person asked for less motion. `unseen`: the window isn't shown, so it's where
+    /// it's going at once, as nobody sees it on its way, and nothing waits for it to get there. `size`: how big it was
+    /// last laid out, which a part of it it's moved by is of.
+    #[allow(clippy::too_many_arguments)]
+    pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, since: f64, reduced: bool, unseen: bool, size: Size<f32>) {
         self.drawn.insert(id);
         let dragged = self.drag(id, computed, now, size);
         let Some(transition) = computed.transition.clone() else { return };
@@ -407,6 +409,10 @@ impl Transitions {
                 continue;
             };
             let was = self.values.insert(key, to.clone());
+            if unseen {
+                self.moving.remove(&key);
+                continue;
+            }
             // What it's drawn as now, and how fast it's going: where a move has it, else where it was going, else where
             // it entered from, at rest.
             let (from, velocity) = match self.moving.get(&key) {
@@ -439,7 +445,7 @@ impl Transitions {
         }
         // Coming in, with less motion: what would have slid or grown in fades in instead.
         let moved_in = entering.is_some_and(|entering| PROPERTIES.iter().any(|(property, moves)| *moves && get(entering, property) != get(computed, property)));
-        if reduced && moved_in && !self.moving.contains_key(&(id, "opacity")) {
+        if reduced && !unseen && moved_in && !self.moving.contains_key(&(id, "opacity")) {
             let curve = Curve::Eased { start: since, duration: transition.duration, easing: transition.easing };
             let moving = Moving { from: Value::Number(0.0), to: Value::Number(computed.look.opacity), curve };
             set(computed, "opacity", moving.at(now));

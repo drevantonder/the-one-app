@@ -1168,6 +1168,7 @@ impl Screen {
             layers: &mut self.layers,
             layered,
             still,
+            unseen: !self.visible,
             recording: None,
             parts: Vec::new(),
             unsettled: None,
