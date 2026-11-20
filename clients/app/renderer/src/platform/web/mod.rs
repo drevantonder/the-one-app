@@ -356,6 +356,11 @@ impl Thread {
         STARTED.with_borrow(Clone::clone)
     }
 
+    /// Never: a page the browser runs that crashes is its browser's to say (Chrome's "Aw, Snap!").
+    pub fn crashed(&self) -> Option<String> {
+        None
+    }
+
     pub fn busy(&self) -> bool {
         STARTED.with_borrow(Option::is_none) || RAN.get() < self.sent
     }

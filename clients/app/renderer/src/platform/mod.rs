@@ -109,6 +109,8 @@ pub enum Event {
     Mismatched(String),
     /// Its page's module didn't run, so it says only that its app didn't open: why.
     Failed(String),
+    /// Its page crashed after it started (`Screen::crashed`), so it shows nothing of it: why.
+    Crashed(String),
     /// A panel was summoned and its frame is on screen: how long after it was asked to show (`summon`).
     Shown(std::time::Duration),
     /// Something on it moved and is still now: how smoothly its frames went.
@@ -1304,6 +1306,12 @@ impl Windows {
                 window.screen = Err(format!("{} didn't open", window.title));
                 window.dirty = true;
                 (window.on_event)(Event::Failed(why));
+            }
+            // One whose page crashed shows nothing of it, never what it drew last as if it were alive.
+            if let Some(why) = window.screen.as_ref().ok().and_then(Screen::crashed) {
+                window.screen = Err(format!("{} stopped working", window.title));
+                window.dirty = true;
+                (window.on_event)(Event::Crashed(why));
             }
         }
         // The system's own parts of a window (a Mac's glass and title bar, Windows' frame, a Linux window manager's)

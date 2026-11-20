@@ -88,6 +88,7 @@ fn main() -> anyhow::Result<()> {
         Some(answers) => serde_json::from_str(&std::fs::read_to_string(answers)?)?,
         None => json!({}),
     };
+
     let latency: f64 = flag("--latency").and_then(|ms| ms.parse().ok()).unwrap_or(0.0);
     if let Some(times) = flag("--slower").and_then(|times| times.parse().ok()) {
         renderer::decoding_takes(times);
@@ -211,10 +212,14 @@ fn main() -> anyhow::Result<()> {
     let options = WindowOptions { title: "screenshot".into(), app_id: "screenshot".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
     let said = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let saying = said.clone();
+    // Why its page crashed, if it did, which fails the run: a page never dies quietly.
+    let crashed = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let crashing = crashed.clone();
     let id = windows.open(options, Ok(screen), move |event| match event {
         // A window would open it in a web view instead.
         Event::Mismatched(why) => saying.borrow_mut().push(format!("it opens in a web view: {why}")),
         Event::Failed(why) => saying.borrow_mut().push(format!("its page didn't start: {why}")),
+        Event::Crashed(why) => *crashing.borrow_mut() = Some(why),
         _ => {}
     })?;
     if panel.is_some() {
@@ -328,6 +333,9 @@ fn main() -> anyhow::Result<()> {
         eprintln!("{said}");
     }
     eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {w}x{h} px");
+    if let Some(why) = crashed.borrow().as_ref() {
+        anyhow::bail!("its page crashed: {why}");
+    }
     // What the display showed that it mustn't have, last, as its failure.
     let wrong = windows.wrong();
     if !wrong.is_empty() {

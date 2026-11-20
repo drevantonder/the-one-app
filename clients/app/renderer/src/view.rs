@@ -603,6 +603,11 @@ impl Screen {
         self.started.as_ref()?.as_ref().err().map(String::as_str)
     }
 
+    /// Why its page crashed after it started (`Thread::crashed`), once it has: what it shows is no longer alive.
+    pub fn crashed(&self) -> Option<String> {
+        self.js.crashed()
+    }
+
     /// Waits for its app's JS to run all it's been sent, and what the host answers at once of what that asked, applying
     /// what it posts: for a harness, which draws what a step left once it's done. → whether anything came.
     pub fn idle(&mut self) -> bool {

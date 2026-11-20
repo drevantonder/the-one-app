@@ -221,7 +221,13 @@ impl Sandbox {
                 match block_on(self.runtime.execute_pending_job()) {
                     Ok(true) => {}
                     Ok(false) => break,
-                    Err(error) => block_on(error.0.with(|ctx| eprintln!("a job threw: {:?}", ctx.catch()))),
+                    Err(error) => {
+                        let caught = block_on(error.0.with(|ctx| caught(rquickjs::CaughtError::from_error(&ctx, rquickjs::Error::Exception))));
+                        if caught.is::<OutOfMemory>() {
+                            return Err(caught);
+                        }
+                        eprintln!("a job threw: {caught:#}");
+                    }
                 }
             }
             let rejected = std::mem::take(&mut *self.rejected.borrow_mut());
@@ -349,6 +355,8 @@ struct Posts {
     ran: u64,
     started: Option<Result<(), String>>,
     ended: bool,
+    /// Why it crashed, if it did (`crashed`).
+    crashed: Option<String>,
     /// When its next timer is due, on its clock, and each of its timers (`Sandbox::timers`), as its last turn left them.
     due: Option<f64>,
     timers: Vec<serde_json::Value>,
@@ -390,14 +398,31 @@ impl Thread {
             };
             // Whether it's run something since it last collected.
             let (mut threw, mut ran, mut collect, mut spent) = (Vec::new(), 0, true, Duration::ZERO);
+            // How many turns in a row have thrown, and whether this one ran anything: one that only collected says nothing.
+            let (mut failing, mut worked) = (0, false);
             loop {
                 // A timer due now runs now, its clock paused or not.
                 let firing = crate::platform::on_cpu();
+                // One that throws without running (it can't clear itself) runs again next turn, never in a loop here.
                 while sandbox.due().is_some_and(|due| due <= 0.0) {
-                    threw.extend(sandbox.fire().err());
-                    collect = true;
+                    (collect, worked) = (true, true);
+                    if let Err(error) = sandbox.fire() {
+                        threw.push(error);
+                        break;
+                    }
                 }
                 spent += crate::platform::on_cpu().saturating_sub(firing);
+                // A page that's crashed stops, its runtime and all it held let go of, and its window says so.
+                if std::mem::take(&mut worked) {
+                    failing = if threw.is_empty() { 0 } else { failing + 1 };
+                }
+                if let Some(why) = crashed(&threw, failing) {
+                    eprintln!("{page}'s JS crashed: {why}");
+                    return on.post(|posts| {
+                        posts.posted.extend(threw.drain(..).map(|error| Posted::Threw(format!("{error:#}"))));
+                        posts.crashed = Some(why);
+                    });
+                }
                 let (due, timers, framing) = (sandbox.due(), sandbox.timers(), sandbox.framing());
                 let now = time.now();
                 // It's started once what its module posted as it ran is here too, so its window shows that.
@@ -441,6 +466,7 @@ impl Thread {
                 let apart = || roll(&mut on.split.lock().unwrap_or_else(std::sync::PoisonError::into_inner), 3) == 0;
                 for call in first.into_iter().chain(std::iter::from_fn(|| (!apart()).then(|| queue.try_recv().ok()).flatten())) {
                     ran += call.len();
+                    worked |= !matches!(call, Call::Fire);
                     call.run(&sandbox, &mut threw);
                 }
                 spent += crate::platform::on_cpu().saturating_sub(running);
@@ -557,6 +583,11 @@ impl Thread {
     /// Whether its module has run (`Ok`), or why it didn't, once it's known.
     pub fn started(&self) -> Option<Result<(), String>> {
         self.shared.posts().started.clone()
+    }
+
+    /// Why its page crashed after it started, once it has (`crashed`): its thread has ended, and what it held is gone.
+    pub fn crashed(&self) -> Option<String> {
+        self.shared.posts().crashed.clone()
     }
 
     /// Whether its thread has something it was sent to run yet, or hasn't started: what it then posts is on its way.
@@ -745,7 +776,42 @@ fn js<'js>(ctx: &Ctx<'js>, data: &serde_json::Value) -> rquickjs::Result<Value<'
 
 /// What JS threw, as an error with its message and stack.
 fn run<'js, T>(ctx: &Ctx<'js>, result: rquickjs::Result<T>) -> anyhow::Result<T> {
-    result.catch(ctx).map_err(|error| anyhow!("{error}"))
+    result.catch(ctx).map_err(caught)
+}
+
+/// What a page's JS threw, as an error: `OutOfMemory` where QuickJS ran out of the memory it may have, which it says with
+/// an InternalError, or, where it hadn't the memory for even that, with nothing (null).
+fn caught(error: rquickjs::CaughtError) -> anyhow::Error {
+    match &error {
+        rquickjs::CaughtError::Exception(exception) if exception.message().as_deref() == Some("out of memory") => anyhow::Error::new(OutOfMemory),
+        rquickjs::CaughtError::Value(value) if value.is_null() => anyhow::Error::new(OutOfMemory),
+        _ => anyhow!("{error}"),
+    }
+}
+
+/// QuickJS ran out of the memory a page may have (`MEMORY`).
+#[derive(Debug)]
+struct OutOfMemory;
+
+impl std::fmt::Display for OutOfMemory {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "it ran out of memory ({} MB)", MEMORY >> 20)
+    }
+}
+
+impl std::error::Error for OutOfMemory {}
+
+/// How many turns in a row may throw before its page has crashed.
+const FAILING: u32 = 3;
+
+/// Why a page whose last turn threw `threw`, its `failing`th in a row to throw, has crashed, if it has, as a browser's
+/// tab does (Chrome's "Aw, Snap!"): it ran out of memory, after which what it was running is half done (an effect half
+/// run, a timer that couldn't clear itself), or every turn of its last few threw, so it does nothing its person asks.
+fn crashed(threw: &[anyhow::Error], failing: u32) -> Option<String> {
+    if let Some(error) = threw.iter().find(|error| error.is::<OutOfMemory>()) {
+        return Some(error.to_string());
+    }
+    (failing >= FAILING).then(|| format!("each of its last {FAILING} turns threw: {:#}", threw[threw.len() - 1]))
 }
 
 /// Where an import is: beside what imports it, or from the network's root, where the UI library's renderer and

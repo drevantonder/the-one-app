@@ -261,15 +261,15 @@ impl std::fmt::Display for Load {
 }
 
 /// Opens a window for `entrypoint`, at `link`, for `subject`, that says only why its page isn't there, as Telemetry
-/// hears (`open`): one this program can't draw, or that didn't open. It's the problem box DESIGN.md has, with Try
-/// Again, on the client's own page (`UNOPENED`); where that can't be drawn either, as with no UI library to draw it
-/// with, it's said in words alone.
-pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String, why: String) {
+/// hears (`open`): one this program can't draw, that didn't open, or that `crashed` once it had. It's the problem box
+/// DESIGN.md has, with Try Again, or Reload where it crashed, on the client's own page (`UNOPENED`); where that can't be
+/// drawn either, as with no UI library to draw it with, it's said in words alone.
+pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String, why: String, crashed: bool) {
     crate::spawn(async move {
         let name = named(&entrypoint, subject.as_deref()).await;
-        let said = format!("{name} didn't open: {why}");
+        let said = if crashed { format!("{name} stopped working: {why}") } else { format!("{name} didn't open: {why}") };
         // It's the app's window, as its client knows it, so the app opened again brings it forward.
-        let unopened = Unopened { entrypoint: entrypoint.clone(), subject: subject.clone(), link: link.clone(), name: name.clone(), why };
+        let unopened = Unopened { entrypoint: entrypoint.clone(), subject: subject.clone(), link: link.clone(), name: name.clone(), why, crashed };
         match window(Instant::now(), &entrypoint, subject.as_deref(), &link, Kind::Unopened(unopened)).await {
             Ok(true) => return,
             Ok(false) => {}
@@ -429,7 +429,7 @@ async fn unopened_launcher(_: &str, _: String) -> Option<WindowId> {
 async fn unopened_launcher(entrypoint: &str, why: String) -> Option<WindowId> {
     let name = named(entrypoint, None).await;
     let said = format!("{name} didn't open: {why}");
-    let unopened = Unopened { entrypoint: entrypoint.to_owned(), subject: None, link: entrypoint.to_owned(), name, why: why.clone() };
+    let unopened = Unopened { entrypoint: entrypoint.to_owned(), subject: None, link: entrypoint.to_owned(), name, why: why.clone(), crashed: false };
     if let Some(id) = launcher_instead(Instead::Unopened(unopened)).await {
         return Some(id);
     }
@@ -533,13 +533,15 @@ pub(crate) struct Unopened {
     link: String,
     name: String,
     why: String,
+    /// Whether it crashed after it opened, rather than not opening.
+    crashed: bool,
 }
 
 impl Unopened {
     /// The Home Screen, which didn't open for `why` before its page was known.
     #[cfg(desktop)]
     pub(crate) fn launcher(why: String) -> Self {
-        Unopened { entrypoint: UNOPENED.trim_start_matches('/').to_owned(), subject: None, link: String::new(), name: "The Home Screen".to_owned(), why }
+        Unopened { entrypoint: UNOPENED.trim_start_matches('/').to_owned(), subject: None, link: String::new(), name: "The Home Screen".to_owned(), why, crashed: false }
     }
 }
 
@@ -730,6 +732,26 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                         let _ = told.send(false);
                     }
                 }
+                // A page that crashed after it started is gone, and Telemetry hears why, as an error: an app's window
+                // closes and its app is forgotten, so it opens afresh, and the client's own page says it stopped, with
+                // Reload, as a browser's crashed tab does; the launcher opens again, as a phone's app is relaunched.
+                Event::Crashed(why) => {
+                    eprintln!("{entrypoint} crashed: {why}");
+                    if let Ok(views) = crate::views() {
+                        views.client.report(json!({"name": "one.client.native.crash", "error": why, "attributes": {"one.view": app}}));
+                    }
+                    #[cfg(desktop)]
+                    if launcher {
+                        return computer::reload_native();
+                    }
+                    #[cfg(mobile)]
+                    if launcher {
+                        return computer::native(None);
+                    }
+                    close(&shown);
+                    crate::hosts::forget(&entrypoint, subject.as_deref());
+                    self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, true);
+                }
                 // A window whose page didn't start says so, and Telemetry hears why: an app's in the client's own
                 // window with its problem box in its place (`unopened`), and a phone's launcher is then its page's.
                 Event::Failed(why) => {
@@ -746,7 +768,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     if app_window {
                         close(&shown);
                         crate::hosts::forget(&entrypoint, subject.as_deref());
-                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why);
+                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, false);
                     }
                 }
                 // A computer's window says why it didn't open, as one that didn't start does, and Telemetry hears; a
@@ -762,7 +784,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     if app_window {
                         close(&shown);
                         crate::hosts::forget(&entrypoint, subject.as_deref());
-                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why);
+                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why, false);
                     }
                     #[cfg(mobile)]
                     if launcher {
@@ -1384,7 +1406,7 @@ fn respond(
         // in its place.
         method if method == "one/unopened" || method == "one/unopened/retry" => match &state.unopened {
             None => Some(Err(json!({"code": -32601, "message": format!("Only the client's own page asks {method}")}))),
-            Some(unopened) if method == "one/unopened" => Some(Ok(json!({"name": unopened.name, "why": unopened.why}))),
+            Some(unopened) if method == "one/unopened" => Some(Ok(json!({"name": unopened.name, "why": unopened.why, "crashed": unopened.crashed}))),
             // The launcher opens again in its panel's place, as it does once its page is updated.
             #[cfg(desktop)]
             Some(_) if state.launcher => {

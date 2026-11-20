@@ -242,7 +242,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(),
             Err(why) => why,
         };
         HOSTS.open.lock().expect("no host panics").remove(&key);
-        crate::native::unopened(entrypoint, subject, link, why);
+        crate::native::unopened(entrypoint, subject, link, why, false);
     });
     Ok(())
 }
