@@ -28,14 +28,6 @@ const SAYS: f32 = 8.0;
 /// The spring: critically damped, landing in 400 ms from still, as the page's move's.
 const SPRING: Spring = Spring { stiffness: 27.0 * 27.0, damping: 2.0 * 27.0 };
 
-/// Where a finger on a window is, as its platform says.
-#[derive(Clone, Copy, PartialEq)]
-pub enum Phase {
-    Down,
-    Moved,
-    Up,
-    Cancelled,
-}
 
 /// How a window is drawn as it's pulled: grown by `scale` about its middle, then moved by `x`, `y` points, as
 /// opaque as `opacity`, with corners of `corner` points (before it's grown), and what's under it dimmed by `dim`

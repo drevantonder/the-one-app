@@ -460,7 +460,7 @@ export type Scene =
 /** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
  * press held `hold` ms, a button held `down` on something and let go (`up`), input played as a device delivered it
  * (`trace`, a JSON file of `{ ms, kind, … }` beside the scenes, as the harness's `trace` takes it: a trackpad's swipe
- * with its phases and momentum, the pointer's nudges), time passing (`wait`, ms), or the app in the background that
+ * with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its `phase`), time passing (`wait`, ms), or the app in the background that
  * long and back (`away`, ms), which fails where it draws meanwhile, as a phone's GPU refuses that; or what must
  * hold then (`expect`), waited for a second, or `within` ms. */
 export type CheckStep = Tap | { press: Tap; hold: number } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { expect: Expect; within?: number }

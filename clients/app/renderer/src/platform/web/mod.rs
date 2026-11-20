@@ -20,6 +20,7 @@ use super::{Input, Job, Native, WindowId, WindowOptions, Windows};
 use crate::geometry::{DevicePixels, Pixels, Size, point};
 use crate::js::{Clock, Posted};
 use crate::tree::{Kind, Mutation};
+use crate::view::touch::{Fingers, Phase};
 use crate::{Appearance, Screen};
 
 /// Where a job is sent: the queue the next microtask runs.
@@ -45,8 +46,6 @@ thread_local! {
     /// field, as the frame was last told (`selected`).
     static SPOKEN: RefCell<String> = const { RefCell::new(String::new()) };
     static SELECTED: RefCell<Option<String>> = const { RefCell::new(None) };
-    /// The finger on the canvas, as the iPhone's host has it (`platform::ios`).
-    static TOUCH: RefCell<Option<Touch>> = const { RefCell::new(None) };
     /// What the DOM said happened to the canvas, for the windows' next turn (`Display::events`).
     static EVENTS: RefCell<Vec<(WindowId, usize, Input)>> = const { RefCell::new(Vec::new()) };
     /// How many device pixels the canvas has to a CSS pixel, as the frame last said it (`resized`): the display's, and
@@ -915,96 +914,22 @@ pub fn act(id: f64, action: &str) {
     });
 }
 
-/// How far a finger moves before it pans rather than presses, in CSS pixels: UIScrollView's, as the iPhone's host has
-/// it.
-const SLOP: f32 = 10.0;
-
-/// A finger: the browser's id for it, where it landed and was last, whether it's moved past the slop and pans, whether it
-/// landed on an input, which it presses only as it lifts, or stopped a fling, which it doesn't press, and how fast it's
-/// been going, for as it lifts.
-struct Touch {
-    finger: i32,
-    start: crate::geometry::Point<f32>,
-    last: crate::geometry::Point<f32>,
-    moved: bool,
-    panning: bool,
-    on_input: bool,
-    stopped: bool,
-    velocity: crate::motion::Velocity,
-}
-
-/// A finger at `x`, `y` (CSS pixels on the canvas), as a phone's own app has it, the iPhone host's way: one that moves
-/// further than the slop pans what scrolls under it, past its end as a rubber band, and what it pressed isn't pressed; let
-/// go, the pan carries on as a fling, or springs back (`Screen::release_scroll`). One on an input gives it the keyboard as it lifts (in the lift's own event, `flush`, which is when a phone
-/// brings up its keyboard), so one that lands there to scroll doesn't. One that lands on a fling stops it.
+/// A finger at `x`, `y` (CSS pixels on the canvas), as a phone's own app has it (`view::touch`): `kind` is the touch
+/// event's, `down`, `move`, `up` or `cancel`. One on an input gives it the keyboard as it lifts, in the lift's own event
+/// (`flush`), which is when a phone brings up its keyboard. The browser's own back swipe is its own.
 #[wasm_bindgen]
 pub fn touch(kind: &str, x: f32, y: f32, finger: i32) {
-    let (kind, at) = (kind.to_owned(), point(x, y));
+    let phase = match kind {
+        "down" => Phase::Down,
+        "move" => Phase::Moved,
+        "up" => Phase::Up,
+        _ => Phase::Cancelled,
+    };
     let _ = Native::get().map(|native| {
         native.run(move |windows| {
-            windows.with(WINDOW, |screen| touch_at(screen, &kind, at, finger));
+            windows.touch(WINDOW, finger as u64, point(x, y), phase, None, Fingers::PHONE);
         })
     });
-}
-
-fn touch_at(screen: &mut Screen, kind: &str, at: crate::geometry::Point<f32>, finger: i32) {
-    screen.touch = true;
-    let now = crate::motion::now();
-    match kind {
-        "down" => {
-            let stopped = screen.catch_scroll(at);
-            let on_input = screen.input_at(at);
-            let mut velocity = crate::motion::Velocity::default();
-            velocity.add(at, now);
-            TOUCH.set(Some(Touch { finger, start: at, last: at, moved: false, panning: false, on_input, stopped, velocity }));
-            if !on_input && !stopped {
-                screen.pointer_down(at, 0, false);
-            }
-        }
-        "move" => TOUCH.with_borrow_mut(|touch| {
-            let Some(touch) = touch.as_mut().filter(|touch| touch.finger == finger) else { return };
-            touch.velocity.add(at, now);
-            // Past the slop, it pans where what's under it scrolls that way, and is otherwise what it's on's to follow.
-            if !touch.moved && ((at.x - touch.start.x).abs() > SLOP || (at.y - touch.start.y).abs() > SLOP) {
-                touch.moved = true;
-                touch.panning = touch.on_input || touch.stopped || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
-                if touch.panning && !touch.on_input && !touch.stopped {
-                    screen.pointer_cancel(at);
-                } else if !touch.panning {
-                    screen.dragged();
-                }
-            }
-            if touch.panning {
-                screen.drag_scroll(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
-            } else if !touch.on_input && !touch.stopped {
-                screen.pointer_moved(at);
-            }
-            touch.last = at;
-        }),
-        "up" => {
-            let Some(mut touch) = TOUCH.take().filter(|touch| touch.finger == finger) else { return };
-            // How fast it was going, against the finger, as a pan scrolls.
-            touch.velocity.add(at, now);
-            let going = touch.velocity.get(now);
-            if touch.panning {
-                screen.release_scroll(touch.start, point(-going.x, -going.y));
-            } else if !touch.stopped {
-                if touch.on_input {
-                    screen.pointer_down(at, 0, false);
-                }
-                screen.pointer_up(at, 0);
-            }
-            screen.pointer_left();
-        }
-        _ => {
-            match TOUCH.take().filter(|touch| touch.finger == finger) {
-                Some(touch) if touch.panning => screen.release_scroll(touch.start, point(0.0, 0.0)),
-                Some(touch) if !touch.on_input && !touch.stopped => screen.pointer_cancel(at),
-                _ => {}
-            }
-            screen.pointer_left();
-        }
-    }
 }
 
 /// The frame got the keyboard, or lost it.

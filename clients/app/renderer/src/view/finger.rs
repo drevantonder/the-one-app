@@ -1,30 +1,18 @@
 //! A press that moves, replayed from a trace (the inspector's `drag` and `replay`): a pointer's, as a mouse's goes down,
-//! moves and comes up; or a finger's, as a phone's host takes one (`platform/ios`'s `touch_at`): past the slop it pans
-//! what scrolls that way under it, stretching past its end as a rubber band, and lifted it flings or springs back at
-//! the speed it had over its last tenth of a second; otherwise it's what it's on's to follow (a node that drags, a row
-//! swiped). Each move is at its own time, as a device's events carry theirs, so how fast it went is the trace's, not
-//! how quickly it was replayed.
+//! moves and comes up; or a finger's, as every phone's host takes one (`touch`). Each move is at its own time, as a
+//! device's events carry theirs, so how fast it went is the trace's, not how quickly it was replayed.
 
 use anyhow::Context as _;
 use serde_json::{Value, json};
 
 use super::Screen;
+use super::touch::{Fingers, Phase};
 use crate::geometry::{Point, point};
 use crate::inspect::{self, Request};
-use crate::motion::Velocity;
 
-/// How far a finger moves before it pans, in points: UIScrollView's slop, as the phones' hosts have it.
-const SLOP: f32 = 10.0;
-
-/// A press being replayed.
+/// A press being replayed, where it last was.
 pub(super) struct Finger {
-    start: Point<f32>,
     last: Point<f32>,
-    moved: bool,
-    panning: bool,
-    /// It landed on what was flung or springing back, which it only stopped.
-    stopped: bool,
-    velocity: Velocity,
 }
 
 /// A trace: where a press goes down, then each stretch it moves (`dx`, `dy`, over `ms`; a stretch with neither holds
@@ -81,55 +69,34 @@ impl Screen {
         Some(point(scrolled.x + stretch.x, scrolled.y + stretch.y))
     }
 
-    /// A press goes down at `at`, at `time` (ms on its clock).
+    /// A press goes down at `at`, at `time` (ms on its clock): a finger's as a phone's host hands it each touch
+    /// (`touch`), or the pointer's.
     pub(super) fn finger_down(&mut self, at: Point<f32>, time: f64) -> Finger {
-        let mut velocity = Velocity::default();
-        velocity.add(at, time);
-        let stopped = self.touch && self.catch_scroll(at);
-        if !self.touch {
+        if self.touch {
+            self.touch(&Fingers::PHONE, 0, at, Phase::Down, time);
+        } else {
             self.pointer_moved(at);
-        }
-        if !stopped {
             self.pointer_down(at, 0, false);
         }
-        Finger { start: at, last: at, moved: false, panning: false, stopped, velocity }
+        Finger { last: at }
     }
 
     /// The press moved to `at`, at `time`.
     pub(super) fn finger_moved(&mut self, finger: &mut Finger, at: Point<f32>, time: f64) {
-        finger.velocity.add(at, time);
-        if !self.touch {
-            finger.last = at;
-            return self.pointer_moved(at);
-        }
-        let by = point(at.x - finger.start.x, at.y - finger.start.y);
-        if !finger.moved && (by.x.abs() > SLOP || by.y.abs() > SLOP) {
-            finger.moved = true;
-            finger.panning = finger.stopped || self.pans(finger.start, by);
-            if finger.panning && !finger.stopped {
-                self.pointer_cancel(at);
-            } else if !finger.panning {
-                self.dragged();
-            }
-        }
-        if finger.panning {
-            self.drag_scroll(finger.start, point(finger.last.x - at.x, finger.last.y - at.y));
-        } else if !finger.stopped {
+        finger.last = at;
+        if self.touch {
+            self.touch(&Fingers::PHONE, 0, at, Phase::Moved, time);
+        } else {
             self.pointer_moved(at);
         }
-        finger.last = at;
     }
 
-    /// The press lifts where it last was, at `time`: a pan flings or springs back at the speed it had.
-    pub(super) fn finger_up(&mut self, mut finger: Finger, time: f64) {
-        let at = finger.last;
-        finger.velocity.add(at, time);
-        if finger.panning {
-            let going = finger.velocity.get(time);
-            return self.release_scroll(finger.start, point(-going.x, -going.y));
-        }
-        if !finger.stopped {
-            self.pointer_up(at, 0);
+    /// The press lifts where it last was, at `time`.
+    pub(super) fn finger_up(&mut self, finger: Finger, time: f64) {
+        if self.touch {
+            self.touch(&Fingers::PHONE, 0, finger.last, Phase::Up, time);
+        } else {
+            self.pointer_up(finger.last, 0);
         }
     }
 

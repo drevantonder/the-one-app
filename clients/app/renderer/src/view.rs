@@ -35,6 +35,7 @@ mod videos;
 mod paint;
 mod pictures;
 mod selection;
+pub mod touch;
 pub use frames::Make as MakeFrame;
 pub(crate) mod inspected;
 mod transition;
@@ -320,6 +321,8 @@ pub struct Screen {
     pub touch: bool,
     /// When the device says the input being handled happened, on the page's clock (`happened`).
     happened: Option<f64>,
+    /// The finger it follows, as a phone's host hands it each touch (`touch`).
+    finger: Option<touch::Finger>,
     /// Its window has the rail's home line over its page, as a phone's app window has (DESIGN.md, The rail), and
     /// whether a finger's pulling it home, which takes the line with it.
     pub rail: bool,
@@ -469,6 +472,7 @@ impl Screen {
             pointer: None,
             touch: false,
             happened: None,
+            finger: None,
             rail: false,
             pulled: false,
             captured: None,
@@ -1817,7 +1821,7 @@ impl Screen {
     }
 
     /// When the input being handled happened, on the page's clock.
-    pub(super) fn input_time(&self) -> f64 {
+    pub fn input_time(&self) -> f64 {
         self.happened.unwrap_or_else(|| self.js.clock().now())
     }
 

@@ -8,10 +8,9 @@
 //! iOS text input plugin (`text_input.mm`), which the screen speaks Flutter's text input calls to, as on every platform,
 //! and VoiceOver reads its semantic tree through AccessKit's iOS adapter (`a11y`).
 //!
-//! A finger is the pointer, as a phone's browser has it: a tap presses, and one that moves further than
-//! UIScrollView's slop pans what scrolls under it, which carries on as it's let go, slowing as a UIScrollView
-//! decelerates. One that comes in from the left edge drags the window across, the app's own showing under it, and
-//! closes it, as Back does on Android.
+//! A finger is the pointer, as a phone's browser has it, taken as every phone's host takes one (`view::touch`): one
+//! that comes in from the left edge drags the window across, the app's own showing under it, and closes it, as Back
+//! does on Android.
 
 mod a11y;
 
@@ -44,6 +43,7 @@ use super::{Input, Job, WindowId, WindowOptions, Windows, rail};
 use crate::Appearance;
 use crate::editing::{self, TextInput, TextInputClient};
 use crate::geometry::{DevicePixels, Edges, Pixels, Point, Size, point};
+use crate::view::touch::{Fingers, Phase};
 
 /// Where a job is sent: the queue `event` runs, and what wakes tao's event loop to run it.
 #[derive(Clone)]
@@ -143,14 +143,11 @@ thread_local! {
     /// Each window's id by its tao window's, and by its view.
     static IDS: RefCell<HashMap<tao::window::WindowId, WindowId>> = RefCell::new(HashMap::new());
     static VIEWS: RefCell<HashMap<usize, WindowId>> = RefCell::new(HashMap::new());
-    /// Each finger on a window, and each window's scroll carrying on after its finger let go.
-    static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
     /// Where UIKit predicts the finger down is going, as its last move came (`Predictor`).
     static PREDICTED: Cell<Option<Point<f32>>> = const { Cell::new(None) };
     /// When UIKit says the finger's latest touch happened (`UITouch.timestamp`, on `CACurrentMediaTime`'s clock), for
     /// the touch tao tells next, which says nothing of when.
     static TOUCHED: Cell<Option<f64>> = const { Cell::new(None) };
-    static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
     /// Each window whose status bar was tapped, until the windows hear it (`device.mm`).
@@ -201,42 +198,27 @@ fn handle<T>(event: &Event<'_, T>) -> bool {
 fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
     // How long ago the device says a touch happened, which how fast it went is worked out from.
     let ago = matches!(event, WindowEvent::Touch(_)).then(|| TOUCHED.take()).flatten().map(|stamp| ((CACurrentMediaTime() - stamp) * 1000.0).max(0.0));
-    if matches!(event, WindowEvent::Touch(_)) && windows.check.is_some() {
-        windows.record.input("touch", ago.and_then(|ago| Instant::now().checked_sub(Duration::from_secs_f64(ago / 1000.0))));
-    }
-    // A finger on the rail's line is the line's, which the page doesn't hear.
     if let WindowEvent::Touch(touch) = event
         && let Some(window) = windows.windows.get(&id)
     {
         let at = touch.location.to_logical::<f32>(window.parts[0].native.scale() as f64);
         let phase = match touch.phase {
-            TouchPhase::Started => rail::Phase::Down,
-            TouchPhase::Moved => rail::Phase::Moved,
-            TouchPhase::Ended => rail::Phase::Up,
-            _ => rail::Phase::Cancelled,
+            TouchPhase::Started => Phase::Down,
+            TouchPhase::Moved => Phase::Moved,
+            TouchPhase::Ended => Phase::Up,
+            _ => Phase::Cancelled,
         };
-        if windows.line(id, touch.id, point(at.x, at.y), phase) {
-            return;
+        windows.touch(id, touch.id, point(at.x, at.y), phase, ago, Fingers::PHONE);
+        // What's dragged is drawn where UIKit predicts the finger is going, so it keeps up with it.
+        if let Some(ahead) = PREDICTED.take().filter(|_| phase == Phase::Moved) {
+            windows.input(id, 0, Input::Predicted(ahead));
         }
+        return;
     }
     let Some(window) = windows.windows.get_mut(&id) else { return };
     window.dirty = true;
-    let native = &window.parts[0].native;
-    let scale = native.scale();
     let Ok(screen) = &mut window.screen else { return };
     match event {
-        WindowEvent::Touch(touch) => {
-            let at = touch.location.to_logical::<f32>(scale as f64);
-            let phase = match touch.phase {
-                TouchPhase::Started => Phase::Down,
-                TouchPhase::Moved => Phase::Moved,
-                TouchPhase::Ended => Phase::Up,
-                _ => Phase::Cancelled,
-            };
-            screen.happened(ago);
-            touch_at(screen, native, id, touch.id, point(at.x, at.y), phase, crate::motion::now() - ago.unwrap_or(0.0));
-            screen.happened(None);
-        }
         // The app going to the background leaves its windows as they are, the keyboard with what had it, as an
         // iPhone's own apps do: only in use no longer, as Android's window losing focus is.
         WindowEvent::Suspended => screen.activate(false),
@@ -249,8 +231,8 @@ fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
     }
 }
 
-/// Does `f` to the windows, made now if they aren't yet, steps each window sliding from the edge, draws what changed,
-/// and asks to be woken when the next timer is due, and for the display's next frame while one slides. A call that comes while the windows are in use (UIKit
+/// Does `f` to the windows, made now if they aren't yet, draws what changed, and asks to be woken when the next timer
+/// is due. A call that comes while the windows are in use (UIKit
 /// calling back into a view as Rust changes it) is dropped.
 fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
     WINDOWS.with(|windows| {
@@ -334,17 +316,12 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 }
             }
         }
-        slide(windows);
         windows.turn();
         for window in windows.windows.values() {
             if let Ok(screen) = &window.screen {
                 let native = &window.parts[0].native;
                 native.a11y.update(screen, native.scale());
             }
-        }
-        // A slide takes a step each frame the display shows.
-        if SLIDES.with(|slides| !slides.borrow().is_empty()) {
-            Display.request_frame(true);
         }
         schedule(windows.due());
         Some(result)
@@ -425,17 +402,13 @@ impl Display {
         // The root window, the Home Screen, is over the app's own (its page), under every app's window, as Android's is.
         let level = unsafe { UIWindowLevelNormal } + if options.root { 1.0 } else { 2.0 };
         unsafe { &*(window.ui_window() as *const UIWindow) }.setWindowLevel(level);
-        Ok(NativeWindow { window, card, layer, behind, a11y, text_input, root: options.root })
+        Ok(NativeWindow { window, card, layer, behind, a11y, text_input })
     }
 
     pub fn close(&self, native: &NativeWindow) {
         native.window.set_visible(false);
-        let id = IDS.with(|ids| ids.borrow_mut().remove(&native.window.id()));
+        IDS.with(|ids| ids.borrow_mut().remove(&native.window.id()));
         VIEWS.with(|views| views.borrow_mut().remove(&(native.window.ui_view() as usize)));
-        if let Some(id) = id {
-            TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
-            SLIDES.with(|slides| slides.borrow_mut().remove(&id));
-        }
         if let Some(behind) = &native.behind {
             behind.makeKeyWindow();
         }
@@ -556,8 +529,6 @@ pub struct NativeWindow {
     behind: Option<Retained<UIWindow>>,
     a11y: a11y::A11y,
     text_input: Plugin,
-    /// It's the root window (`WindowOptions::root`).
-    root: bool,
 }
 
 /// A window as `Display::arrange` would place it, which a phone's never does.
@@ -592,12 +563,12 @@ impl NativeWindow {
     /// Moves what it draws `across` its window, which is see-through, so the app's own window shows where it's moved
     /// from. It's moved by its transform, which lays nothing out again and leaves the window's points, where tao says
     /// a finger is, where they are.
-    fn slide(&self, across: f32) {
+    pub fn slide(&self, across: f32) {
         self.card.setTransform(CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: across as f64, ty: 0.0 });
     }
 
     /// How far across it's slid (`slide`).
-    fn slid(&self) -> f32 {
+    pub fn slid(&self) -> f32 {
         self.card.transform().tx as f32
     }
 
@@ -775,202 +746,6 @@ define_class!(
         }
     }
 );
-
-/// How far a finger moves before it pans rather than presses, in points: UIScrollView's.
-const SLOP: f32 = 10.0;
-/// How near the left edge a finger lands to drag the window, in points, as UINavigationController's back swipe.
-const EDGE: f32 = 20.0;
-
-#[derive(Clone, Copy, PartialEq)]
-enum Phase {
-    Down,
-    Moved,
-    Up,
-    Cancelled,
-}
-
-/// A finger: tao's id for it, where it landed, where it was last, whether it's panning, whether it landed on an input,
-/// which it presses only as it lifts, or stopped a fling, which it doesn't press at all, or came in from the left
-/// edge, which drags the window, and how fast it's been going, for as it lifts.
-struct Touch {
-    finger: u64,
-    /// It came in from the left edge, which drags the window across, or with a screen of the page's over its first,
-    /// goes back a screen as it's let go (`pops`).
-    edge: bool,
-    pops: bool,
-    start: Point<f32>,
-    last: Point<f32>,
-    /// It's moved past the slop, so it's decided whether it pans or is what it's on's (`Screen::pans`).
-    moved: bool,
-    panning: bool,
-    on_input: bool,
-    stopped: bool,
-    velocity: crate::motion::Velocity,
-}
-
-/// A window let go of from the left edge, springing back to where it was or off to the right (`target`, in points),
-/// from where it is and how fast it's going (points a second), and when it last stepped.
-struct Slide {
-    across: f32,
-    velocity: f32,
-    target: f32,
-    stepped: Instant,
-}
-
-/// Steps every window springing from the edge to now, with the rail's spring; one that's slid off closes.
-fn slide(windows: &mut Windows) {
-    let now = Instant::now();
-    let mut off = Vec::new();
-    SLIDES.with(|slides| {
-        slides.borrow_mut().retain(|id, slide| {
-            let Some(window) = windows.windows.get(id) else { return false };
-            let native = &window.parts[0].native;
-            let width = native.size().width.0.max(1.0);
-            let dt = now.duration_since(slide.stepped).as_secs_f32();
-            slide.stepped = now;
-            let (at, velocity, still) = rail::spring(slide.across / width, slide.velocity / width, slide.target / width, dt);
-            (slide.across, slide.velocity) = (at * width, velocity * width);
-            native.slide(slide.across);
-            if still && slide.target > 0.0 {
-                off.push(*id);
-            }
-            !still
-        });
-    });
-    for id in off {
-        windows.close(id);
-    }
-}
-
-/// A finger at `at`, in the window's points. One that moves further than `SLOP` pans what scrolls under it, and what
-/// it pressed isn't pressed, stretching past its end as a rubber band; let go, the pan carries on as a fling, or
-/// springs back (`Screen::release_scroll`). One on an input gives it the keyboard as it lifts,
-/// as a phone's own fields do, so one that lands there to scroll doesn't. One that lands on a fling stops it.
-/// `time` is when it happened, on `motion::now`'s clock.
-fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, finger: u64, at: Point<f32>, phase: Phase, time: f64) {
-    screen.touch = true;
-    TOUCHES.with(|touches| {
-        let mut touches = touches.borrow_mut();
-        if phase != Phase::Down && touches.get(&id).is_none_or(|touch| touch.finger != finger) {
-            return;
-        }
-        match phase {
-            Phase::Down => {
-                let stopped = screen.catch_scroll(at);
-                // One that lands as the window springs from the edge takes it where it is.
-                let caught = SLIDES.with(|slides| slides.borrow_mut().remove(&id)).is_some();
-                // The root window, the Home Screen, has nothing to go back to, and what's open over a page (a sheet, a
-                // menu) takes no swipe back, as iOS's modals don't.
-                let covered = screen.covered();
-                let edge = caught || (!native.root && at.x < EDGE && covered != Some(true));
-                let pops = !caught && edge && covered == Some(false);
-                let on_input = !edge && screen.input_at(at);
-                let start = if caught { point(at.x - native.slid(), at.y) } else { at };
-                let mut velocity = crate::motion::Velocity::default();
-                velocity.add(at, time);
-                touches.insert(id, Touch { finger, edge, pops, start, last: at, moved: false, panning: false, on_input, stopped, velocity });
-                if !edge && !on_input && !stopped {
-                    screen.pointer_down(at, 0, false);
-                }
-            }
-            Phase::Moved => {
-                let Some(touch) = touches.get_mut(&id) else { return };
-                touch.velocity.add(at, time);
-                if touch.pops {
-                    return;
-                }
-                if touch.edge {
-                    return native.slide((at.x - touch.start.x).max(0.0));
-                }
-                // Past the slop, it pans where what's under it scrolls that way, and is otherwise what it's on's to follow
-                // (a row swiped across, a sheet pulled down), as a browser decides by `touch-action`.
-                if !touch.moved && ((at.x - touch.start.x).abs() > SLOP || (at.y - touch.start.y).abs() > SLOP) {
-                    touch.moved = true;
-                    touch.panning = touch.on_input || touch.stopped || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
-                    if touch.panning && !touch.on_input && !touch.stopped {
-                        screen.pointer_cancel(at);
-                    } else if !touch.panning {
-                        screen.dragged();
-                    }
-                }
-                // Scrolled to its top and pulled on, what it's in that drags that way (a sheet) takes the finger.
-                if touch.panning && !touch.on_input && screen.hand_over(touch.start, point(touch.last.x - at.x, touch.last.y - at.y), at) {
-                    touch.panning = false;
-                }
-                if touch.panning {
-                    screen.drag_scroll(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
-                } else if !touch.on_input && !touch.stopped {
-                    screen.pointer_moved(at);
-                    // What's dragged is drawn where UIKit predicts the finger is going, so it keeps up with it.
-                    if let Some(ahead) = PREDICTED.take() {
-                        screen.predicted(ahead);
-                    }
-                }
-                touch.last = at;
-            }
-            Phase::Up => {
-                let Some(mut touch) = touches.remove(&id) else { return };
-                // How fast it was going, against the finger, as a pan scrolls.
-                touch.velocity.add(at, time);
-                let (now, going) = (Instant::now(), touch.velocity.get(time));
-                let velocity = point(-going.x, -going.y);
-                // Over a screen of the page's, it goes back a screen, the app's window staying where it is.
-                if touch.pops {
-                    if at.x - touch.start.x > native.size().width.0 / 3.0 || -velocity.x > 500.0 {
-                        screen.back();
-                    }
-                    return;
-                }
-                if touch.edge {
-                    // Let go past a third of the way across, or flicked, it goes back: through what's open over the
-                    // app's page or its own screens first, as iOS's navigation does, springing back as the app goes
-                    // back a screen; from its first, the window slides off and closes. Short of that, it springs back.
-                    let width = native.size().width.0;
-                    let across = native.slid();
-                    let far = across > width / 3.0 || -velocity.x > 500.0;
-                    let out = far && !screen.back();
-                    let speed = if far { (-velocity.x).max(0.0) } else { 0.0 };
-                    SLIDES.with(|slides| slides.borrow_mut().insert(id, Slide { across, velocity: speed, target: if out { width } else { 0.0 }, stepped: now }));
-                    return;
-                }
-                if touch.panning {
-                    return screen.release_scroll(touch.start, velocity);
-                }
-                if touch.stopped {
-                    return;
-                }
-                let was = screen.focused();
-                if touch.on_input {
-                    screen.pointer_down(at, 0, false);
-                }
-                screen.pointer_up(at, 0);
-                // A tap in the field that has the keyboard brings it up again, if it went, as Android's does.
-                if touch.on_input && was.is_some() && screen.focused() == was {
-                    Display.text_input(native, &[TextInput::Show]);
-                }
-            }
-            Phase::Cancelled => {
-                let Some(touch) = touches.remove(&id) else { return };
-                if touch.pops {
-                    return;
-                }
-                if touch.edge {
-                    let across = native.slid();
-                    SLIDES.with(|slides| slides.borrow_mut().insert(id, Slide { across, velocity: 0.0, target: 0.0, stepped: Instant::now() }));
-                } else if touch.panning {
-                    screen.release_scroll(touch.start, point(0.0, 0.0));
-                } else if !touch.on_input && !touch.stopped {
-                    screen.pointer_cancel(at);
-                }
-            }
-        }
-    });
-    // A finger that's lifted is over nothing, as a phone's browser has it: nothing it scrolled under it is hovered.
-    if matches!(phase, Phase::Up | Phase::Cancelled) {
-        screen.pointer_left();
-    }
-}
-
 
 /// What an iPhone does for a window's page itself (`device.mm`): its picker, share sheet and haptics.
 struct Device {

@@ -19,7 +19,8 @@
 //! and what it presses scrolled into sight first, as Playwright's click does. Its clock is paused: `clock`'s `step`
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
 //! for loops (at most 3 s), which is what's pictured. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`),
-//! whose touches are the inspector's own, as a phone's host hands its screen each touch.
+//! and presses are a finger's, as the display's touches, which its window takes as every phone's host does
+//! (`view::touch`): its slop, pans, a sheet taking the finger, and the swipe back from the left edge.
 //! `--panel` opens it as a computer's panel is (a Mac's launcher, its corners `<corner>` round), summoned: what its page
 //! puts on the system's glass is a window of its own, each drawn by a renderer of its own where the panel arranges it,
 //! over the system's glass, a flat grey here, and its picture is theirs put together.
@@ -48,6 +49,7 @@ use serde_json::{Value, json};
 use renderer::geometry::{DevicePixels, Pixels, Size};
 use renderer::js::{Clock, Files, Thread};
 use renderer::platform::{Event, WindowOptions, Windows};
+use renderer::touch::Phase;
 use renderer::render::renderer::Renderer;
 use renderer::{Appearance, Screen};
 use url::Url;
@@ -249,7 +251,7 @@ fn main() -> anyhow::Result<()> {
         }
         // What a person does comes as the display's input, on the platform's time, as a host's does; with a seed, a
         // moment or two after what came before, so it lands as things are on their way somewhere.
-        if !touch && INPUT.contains(&request.op.as_str()) {
+        if INPUT.contains(&request.op.as_str()) {
             if seed != 0 && request.op != "clock" {
                 windows.run(windows.random(50) as f64);
             }
@@ -359,8 +361,7 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 
 /// The inspector's requests that a person's input answers, and its clock's: on the fake platform, the display's own
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
-/// moved on with the display ticking through it. A finger's (`--touch`) are the
-/// inspector's own, as a phone's host hands a window's screen each touch.
+/// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's.
 const INPUT: [&str; 11] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
@@ -414,14 +415,17 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         "tap" => {
             let (x, y) = point_of(windows, id, request)?;
             let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3);
-            windows.pointer_moved(id, x, y);
+            press(windows, id, x, y, Phase::Moved);
             windows.run(0.0);
             // With a seed, held as long as a person might: from a quick tap to a quarter of a second.
             let held = request.f64("hold").unwrap_or(CLICK_MS + windows.random(170) as f64 - windows.random(50) as f64);
             for _ in 0..clicks {
-                windows.pointer_down(id, x, y, 0, request.bool("shift"));
+                match request.bool("shift") {
+                    true => windows.pointer_down(id, x, y, 0, true),
+                    false => press(windows, id, x, y, Phase::Down),
+                }
                 windows.run(held);
-                windows.pointer_up(id, x, y, 0);
+                press(windows, id, x, y, Phase::Up);
                 windows.run(0.0);
             }
             Ok(json!({"tapped": {"x": x, "y": y}}))
@@ -479,16 +483,19 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         // A button held down where `tap` would press it, and let go where it was held, for what shows mid-press.
         "down" => {
             let (x, y) = point_of(windows, id, request)?;
-            windows.pointer_moved(id, x, y);
-            windows.pointer_down(id, x, y, 0, request.bool("shift"));
+            press(windows, id, x, y, Phase::Moved);
+            match request.bool("shift") {
+                true => windows.pointer_down(id, x, y, 0, true),
+                false => press(windows, id, x, y, Phase::Down),
+            }
             windows.run(0.0);
             Ok(json!({"down": {"x": x, "y": y}}))
         }
         "up" => {
-            let at = windows.with(id, |screen| screen.pointer()).flatten().ok_or_else(|| anyhow::anyhow!("no pointer is on the window"))?;
-            windows.pointer_up(id, at.x, at.y, 0);
+            let (x, y) = PRESSED.get().ok_or_else(|| anyhow::anyhow!("nothing is held down"))?;
+            press(windows, id, x, y, Phase::Up);
             windows.run(0.0);
-            Ok(json!({"up": {"x": at.x, "y": at.y}}))
+            Ok(json!({"up": {"x": x, "y": y}}))
         }
         // A trace of input as a device delivered it (`events`, each at its `ms` from the first): a trackpad's scrolls
         // with their phases and momentum, the pointer's moves, presses and keys, played as the display's events at their
@@ -523,14 +530,14 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
             let steps = request.inputs.get("steps").and_then(Value::as_u64).unwrap_or(10).max(1);
             let ms = request.f64("ms").unwrap_or(200.0).max(0.0);
-            windows.pointer_moved(id, x, y);
-            windows.pointer_down(id, x, y, 0, false);
+            press(windows, id, x, y, Phase::Moved);
+            press(windows, id, x, y, Phase::Down);
             for step in 1..=steps {
                 windows.run(ms / steps as f64);
                 let part = step as f32 / steps as f32;
-                windows.pointer_moved(id, x + dx * part, y + dy * part);
+                press(windows, id, x + dx * part, y + dy * part, Phase::Moved);
             }
-            windows.pointer_up(id, x + dx, y + dy, 0);
+            press(windows, id, x + dx, y + dy, Phase::Up);
             windows.run(0.0);
             Ok(json!({"dragged": {"x": dx, "y": dy}}))
         }
@@ -668,22 +675,51 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
 static EMPTY: Vec<Value> = Vec::new();
 
 /// One event of a trace, as the display's (`trace`'s `events`): a wheel's or a trackpad's scroll (`dx`, `dy`, its
-/// `phase` and `momentum`), the pointer moved, a button down or up, each at `x`, `y`, or a `key`.
+/// `phase` and `momentum`), the pointer moved, a button down or up (a finger's on a phone's window), a finger
+/// (`touch`, its `phase`, `down`, `moved`, `up` or `cancelled`, and which `finger`, as a phone's screen says it), each
+/// at `x`, `y`, or a `key`.
 fn deliver(windows: &mut Windows, id: renderer::platform::WindowId, event: &Value) -> anyhow::Result<()> {
     let at = |name: &str| event[name].as_f64().unwrap_or(0.0) as f32;
     let (x, y) = (at("x"), at("y"));
     match event["kind"].as_str().unwrap_or_default() {
         "wheel" => windows.wheel(id, (x, y), (at("dx"), at("dy")), event["phase"].as_str(), event["momentum"].as_bool().unwrap_or(false)),
-        "move" => windows.pointer_moved(id, x, y),
-        "down" => windows.pointer_down(id, x, y, 0, false),
-        "up" => windows.pointer_up(id, x, y, 0),
+        "move" => press(windows, id, x, y, Phase::Moved),
+        "down" => press(windows, id, x, y, Phase::Down),
+        "up" => press(windows, id, x, y, Phase::Up),
+        "touch" => {
+            let phase = event["phase"].as_str().and_then(Phase::named).ok_or_else(|| anyhow::anyhow!("say a touch's phase: down, moved, up or cancelled"))?;
+            windows.finger(id, event["finger"].as_u64().unwrap_or(0), x, y, phase);
+        }
         "key" => {
             let key = renderer::inspect::Request::parse(&json!({"v": renderer::inspect::VERSION, "op": "key", "key": event["key"]}).to_string()).map_err(|refused| anyhow::anyhow!("{refused}"))?;
             windows.key(id, &key)?;
         }
-        kind => anyhow::bail!("there's no kind of event {kind}: wheel, move, down, up and key are"),
+        kind => anyhow::bail!("there's no kind of event {kind}: wheel, move, down, up, touch and key are"),
     }
     Ok(())
+}
+
+thread_local! {
+    /// Where the main button or the finger is held down, if it is, for `up`.
+    static PRESSED: std::cell::Cell<Option<(f32, f32)>> = const { std::cell::Cell::new(None) };
+}
+
+/// A press at `x`, `y`: on a phone's window (`--touch`) a finger's, as its screen says it; elsewhere the main button's,
+/// a move the pointer's.
+fn press(windows: &mut Windows, id: renderer::platform::WindowId, x: f32, y: f32, phase: Phase) {
+    match phase {
+        Phase::Down | Phase::Moved if PRESSED.get().is_some() || phase == Phase::Down => PRESSED.set(Some((x, y))),
+        Phase::Up | Phase::Cancelled => PRESSED.set(None),
+        _ => {}
+    }
+    if windows.with(id, |screen| screen.touch).unwrap_or(false) {
+        return windows.finger(id, 0, x, y, phase);
+    }
+    match phase {
+        Phase::Down => windows.pointer_down(id, x, y, 0, false),
+        Phase::Moved => windows.pointer_moved(id, x, y),
+        Phase::Up | Phase::Cancelled => windows.pointer_up(id, x, y, 0),
+    }
 }
 
 /// How long before a refresh what the display shows at it is read: what's drawn after is shown at the next.

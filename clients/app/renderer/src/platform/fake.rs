@@ -36,6 +36,8 @@ pub struct NativeWindow {
     id: WindowId,
     size: Cell<Size<DevicePixels>>,
     scale: f32,
+    /// How far across it's drawn, swiped back from the left edge, as an iPhone's window is (`slide`).
+    slid: Cell<f32>,
 }
 
 /// A window as `Display::arrange` places it.
@@ -72,6 +74,16 @@ impl NativeWindow {
 
     pub fn resized(&self, size: Size<DevicePixels>) {
         self.size.set(size);
+    }
+
+    /// Draws it `across` points to the right, as an iPhone's window is moved by its transform.
+    pub fn slide(&self, across: f32) {
+        self.slid.set(across);
+    }
+
+    /// How far across it's slid (`slide`).
+    pub fn slid(&self) -> f32 {
+        self.slid.get()
     }
 }
 
@@ -145,12 +157,12 @@ impl Display {
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let device = |points: f32| DevicePixels((points * self.scale).round() as i32);
-        Ok(NativeWindow { id, size: Cell::new(Size { width: device(options.size.width.0), height: device(options.size.height.0) }), scale: self.scale })
+        Ok(NativeWindow { id, size: Cell::new(Size { width: device(options.size.width.0), height: device(options.size.height.0) }), scale: self.scale, slid: Cell::new(0.0) })
     }
 
     /// A part of a panel's: a window of its own for each pane of the system's glass its page asks for, as on a Mac.
     pub fn open_part(&self, parent: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
-        Ok(NativeWindow { id: parent.id, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), scale: self.scale })
+        Ok(NativeWindow { id: parent.id, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), scale: self.scale, slid: Cell::new(0.0) })
     }
 
     pub fn summon(&self, _: &NativeWindow, _: &super::Places, _: Size<Pixels>) {}

@@ -12,7 +12,6 @@
 mod a11y;
 
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::ffi::c_void;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
@@ -26,8 +25,9 @@ use raw_window_handle as rwh;
 use serde_json::{Value, json};
 
 use super::{Input, Job, WindowId, WindowOptions, Windows};
-use crate::geometry::{DevicePixels, Edges, Pixels, Point, Size, point};
+use crate::geometry::{DevicePixels, Edges, Pixels, Size, point};
 use crate::tree::Id;
+use crate::view::touch::{Fingers, Phase};
 use crate::Appearance;
 use crate::editing::{self, Composing, Selection, TextInputClient};
 
@@ -455,23 +455,6 @@ fn keyboard(windows: &mut Windows, id: WindowId) {
     windows.display.text_input(&window.parts[0].native, &calls);
 }
 
-/// A finger, as the view's MotionEvent says it, in logical pixels: where it landed, where it was last, whether it's
-/// panning, and whether it landed on an input, which it presses only as it lifts.
-struct Touch {
-    start: Point<f32>,
-    last: Point<f32>,
-    /// It's moved past the slop, so it's decided whether it pans or is what it's on's (`Screen::pans`).
-    moved: bool,
-    panning: bool,
-    on_input: bool,
-    /// It landed on a fling, which it stopped, and presses nothing.
-    stopped: bool,
-}
-
-thread_local! {
-    static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
-}
-
 fn string(env: &mut JNIEnv, string: &JString) -> String {
     env.get_string(string).map(Into::into).unwrap_or_default()
 }
@@ -614,95 +597,25 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeCovered(_: JNIE
     with_windows(|windows| windows.covered(id as WindowId)).unwrap_or(false).into()
 }
 
-/// A finger: `action` is MotionEvent's (0 down, 1 up, 2 move, 3 cancel), at `x`, `y` in device pixels. A finger
-/// that moves further than `slop` pans what scrolls under it, and what it pressed isn't pressed. One on an input gives
-/// it the keyboard as it lifts, as a phone's own fields do, so one that lands there to scroll doesn't. One that
-/// `stopped` a fling only stopped it.
+/// A finger: `action` is MotionEvent's (0 down, 1 up, 2 move, 3 cancel), at `x`, `y` in device pixels, `ago` ms before
+/// now, taken as every phone's host takes one (`view::touch`) with Android's own slop (`slop`, in device pixels), and
+/// its fling, which Java runs (`OverScroller`) and a finger landing `stopped`. → whether it pans, which Java flings as
+/// it lifts.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean, ago: jfloat) -> jboolean {
     let id = id as WindowId;
-    let ago = f64::from(ago).max(0.0);
     let panning = with_windows(|windows| {
-        if windows.check.is_some() {
-            windows.record.input("touch", std::time::Instant::now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0)));
-        }
-        let Some(window) = windows.windows.get(&id) else { return false };
-        let density = window.parts[0].native.density;
-        let at = point(x / density, y / density);
-        // A finger on the rail's line is the line's, which the page doesn't hear, and never flings. Only the first
-        // finger is followed.
+        let density = windows.windows.get(&id)?.parts[0].native.density;
         let phase = match action {
-            0 => super::rail::Phase::Down,
-            1 => super::rail::Phase::Up,
-            2 => super::rail::Phase::Moved,
-            _ => super::rail::Phase::Cancelled,
+            0 => Phase::Down,
+            1 => Phase::Up,
+            2 => Phase::Moved,
+            _ => Phase::Cancelled,
         };
-        if windows.line(id, 0, at, phase) {
-            return false;
-        }
-        let Some(window) = windows.windows.get_mut(&id) else { return false };
-        let Ok(screen) = &mut window.screen else { return false };
-        window.dirty = true;
-        screen.touch = true;
-        screen.happened(Some(ago));
-        TOUCHES.with(|touches| {
-            let mut touches = touches.borrow_mut();
-            match action {
-                0 => {
-                    let (on_input, stopped) = (screen.input_at(at), stopped != 0);
-                    touches.insert(id, Touch { start: at, last: at, moved: false, panning: false, on_input, stopped });
-                    if !on_input && !stopped {
-                        screen.pointer_down(at, 0, false);
-                    }
-                }
-                2 => {
-                    let Some(touch) = touches.get_mut(&id) else { return };
-                    if !touch.moved && ((at.x - touch.start.x).abs() > slop / density || (at.y - touch.start.y).abs() > slop / density) {
-                        touch.moved = true;
-                        touch.panning = touch.on_input || touch.stopped || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
-                        if touch.panning && !touch.on_input && !touch.stopped {
-                            screen.pointer_cancel(at);
-                        } else if !touch.panning {
-                            screen.dragged();
-                        }
-                    }
-                    // Scrolled to its top and pulled on, what it's in that drags that way (a sheet) takes the finger.
-                    if touch.panning && !touch.on_input && screen.hand_over(touch.start, point(touch.last.x - at.x, touch.last.y - at.y), at) {
-                        touch.panning = false;
-                    }
-                    if touch.panning {
-                        screen.pan(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
-                    } else if !touch.on_input && !touch.stopped {
-                        screen.pointer_moved(at);
-                    }
-                    touch.last = at;
-                }
-                1 => {
-                    let Some(touch) = touches.remove(&id) else { return };
-                    if touch.panning || touch.stopped {
-                        return;
-                    }
-                    let was = screen.focused();
-                    if touch.on_input {
-                        screen.pointer_down(at, 0, false);
-                    }
-                    screen.pointer_up(at, 0);
-                    // A tap in the field that has the keyboard brings it up again, if it went.
-                    if touch.on_input && was.is_some() && screen.focused() == was {
-                        windows.display.text_input(&window.parts[0].native, &[editing::TextInput::Show]);
-                    }
-                }
-                _ => {
-                    if touches.remove(&id).is_some_and(|touch| !touch.on_input && !touch.panning && !touch.stopped) {
-                        screen.pointer_cancel(at);
-                    }
-                }
-            }
-        });
-        screen.happened(None);
-        TOUCHES.with(|touches| touches.borrow().get(&id).is_some_and(|touch| touch.panning))
+        let fingers = Fingers { slop: slop / density, flings: true, stopped: stopped != 0, edge: None };
+        Some(windows.touch(id, 0, point(x / density, y / density), phase, Some(f64::from(ago).max(0.0)), fingers))
     });
-    panning.unwrap_or(false).into()
+    panning.flatten().unwrap_or(false).into()
 }
 
 /// A step of a fling Java runs (`OverScroller`, in NativeView): what's under `x`, `y`, where the finger went down,
@@ -748,11 +661,10 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JN
         let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
         let Ok(screen) = &mut window.screen else { return };
-        if !TOUCHES.with(|touches| touches.borrow().get(&id).is_some_and(|touch| touch.on_input)) || !screen.select_word(at) {
+        if !screen.finger_held(at) {
             return;
         }
         window.dirty = true;
-        TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
         window.parts[0].native.apply(json!({"menu": true}));
     });
 }

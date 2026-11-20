@@ -397,6 +397,9 @@ struct Window {
     #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     icon: Option<crate::geometry::Bounds<f32>>,
     pull: Option<rail::Pull>,
+    /// Its spring from a swipe back from the left edge let go (`view::touch`), where the host leaves that to its app.
+    #[cfg_attr(not(any(target_os = "ios", feature = "fake")), allow(dead_code))]
+    slide: Option<Slide>,
     /// Where its frame is kept (`WindowOptions::snapshot`), and the one kept, as RGBA rows its size, shown until its
     /// page has started and heard back, and whether its renderer has it yet.
     snapshot: Option<std::path::PathBuf>,
@@ -408,6 +411,16 @@ struct Window {
     presented: bool,
     /// How many frames it's presented, all told.
     frames: u64,
+}
+
+/// A window let go of from a swipe back, springing back to where it was or off to the right (`target`, in points), from
+/// where it is and how fast it's going (points a second), and when it last stepped.
+#[cfg_attr(not(any(target_os = "ios", feature = "fake")), allow(dead_code))]
+struct Slide {
+    across: f32,
+    velocity: f32,
+    target: f32,
+    stepped: web_time::Instant,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -555,6 +568,7 @@ impl Windows {
                 root: options.root,
                 icon: options.icon,
                 pull: None,
+                slide: None,
                 snapshot: options.snapshot,
                 picture,
                 pictured: false,
@@ -832,23 +846,23 @@ impl Windows {
     /// drives the window's move home from then on, and the first to land keeps it, another on the line meanwhile
     /// ignored. → whether it's the line's, which the window's page doesn't hear.
     #[cfg(any(target_os = "android", target_os = "ios"))]
-    pub(crate) fn line(&mut self, id: WindowId, finger: u64, at: crate::geometry::Point<f32>, phase: rail::Phase) -> bool {
+    pub(crate) fn line(&mut self, id: WindowId, finger: u64, at: crate::geometry::Point<f32>, phase: crate::view::touch::Phase) -> bool {
         let Some(window) = self.windows.get_mut(&id) else { return false };
         let (room, icon) = (window.room(), window.icon);
         let Ok(screen) = &mut window.screen else { return false };
         let Some(pull) = window.pull.as_mut() else {
-            if phase != rail::Phase::Down || window.root || !screen.on_line(at) {
+            if phase != crate::view::touch::Phase::Down || window.root || !screen.on_line(at) {
                 return false;
             }
             window.pull = Some(rail::Pull::new(finger, at));
             return true;
         };
         if pull.finger() != finger {
-            return phase == rail::Phase::Down && screen.on_line(at);
+            return phase == crate::view::touch::Phase::Down && screen.on_line(at);
         }
         match phase {
-            rail::Phase::Down => {}
-            rail::Phase::Moved => {
+            crate::view::touch::Phase::Down => {}
+            crate::view::touch::Phase::Moved => {
                 let was = pull.pulling();
                 match pull.moved(at, Size { width: room.width.0, height: room.height.0 }, icon, screen.reduced_motion) {
                     rail::Pulled::Kept(Some(moved)) => {
@@ -866,13 +880,85 @@ impl Windows {
                     rail::Pulled::Dropped => window.pull = None,
                 }
             }
-            rail::Phase::Up | rail::Phase::Cancelled => {
-                if !pull.let_go(phase == rail::Phase::Cancelled) {
+            crate::view::touch::Phase::Up | crate::view::touch::Phase::Cancelled => {
+                if !pull.let_go(phase == crate::view::touch::Phase::Cancelled) {
                     window.pull = None;
                 }
             }
         }
         true
+    }
+
+    /// Finger `finger` on window `id` at `at`, in its points, as its system says, `ago` ms before now where the system
+    /// says when: the rail's line's where it lands on it, and otherwise its page's (`view::touch`), the window swiped
+    /// back from its left edge where the host leaves that to its app, as an iPhone's apps draw it. `fingers` is how the
+    /// system differs. → whether it pans, which a host that flings flings as it lifts.
+    pub(crate) fn touch(&mut self, id: WindowId, finger: u64, at: Point<f32>, phase: crate::view::touch::Phase, ago: Option<f64>, fingers: crate::view::touch::Fingers) -> bool {
+        use crate::view::touch::Touched;
+        #[cfg_attr(not(any(target_os = "ios", feature = "fake")), allow(unused_mut))]
+        let mut fingers = fingers;
+        if self.check.is_some() {
+            self.record.input("touch", ago.and_then(|ago| now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0))));
+        }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        if self.line(id, finger, at, phase) {
+            return false;
+        }
+        let Some(window) = self.windows.get_mut(&id) else { return false };
+        window.dirty = true;
+        let native = &window.parts[0].native;
+        #[cfg(any(target_os = "ios", feature = "fake"))]
+        if !window.root {
+            fingers.edge = Some(crate::view::touch::Edge { width: native.size().width.0, slid: window.slide.is_some().then(|| native.slid()) });
+        }
+        let Ok(screen) = &mut window.screen else { return false };
+        screen.happened(ago);
+        let time = screen.input_time();
+        let touched = screen.touch(&fingers, finger, at, phase, time);
+        screen.happened(None);
+        match touched {
+            Touched::Panning => return true,
+            Touched::Keyboard => self.display.text_input(native, &[crate::editing::TextInput::Show]),
+            #[cfg(any(target_os = "ios", feature = "fake"))]
+            Touched::Slide(across) => {
+                window.slide = None;
+                native.slide(across);
+            }
+            #[cfg(any(target_os = "ios", feature = "fake"))]
+            Touched::Slid { velocity, out } => {
+                let target = if out { native.size().width.0 } else { 0.0 };
+                window.slide = Some(Slide { across: native.slid(), velocity, target, stepped: now() });
+            }
+            _ => {}
+        }
+        false
+    }
+
+    /// Steps each window springing from a swipe back let go, with the rail's spring, to now: one slid off closes.
+    #[cfg(any(target_os = "ios", feature = "fake"))]
+    fn slide(&mut self) {
+        let at = now();
+        let mut off = Vec::new();
+        for (id, window) in &mut self.windows {
+            let Some(slide) = window.slide.as_mut() else { continue };
+            let native = &window.parts[0].native;
+            let width = native.size().width.0.max(1.0);
+            let dt = at.saturating_duration_since(slide.stepped).as_secs_f32();
+            slide.stepped = at;
+            let (across, velocity, still) = rail::spring(slide.across / width, slide.velocity / width, slide.target / width, dt);
+            (slide.across, slide.velocity) = (across * width, velocity * width);
+            native.slide(slide.across);
+            window.dirty = true;
+            if still {
+                if slide.target > 0.0 {
+                    off.push(*id);
+                }
+                window.slide = None;
+            }
+        }
+        for id in off {
+            self.close(id);
+        }
     }
 
     /// Steps each window's pull let go: home, every app's window closes; back, it's as it was.
@@ -973,7 +1059,7 @@ impl Windows {
     /// for one (`requestAnimationFrame`).
     fn framing(&self) -> bool {
         self.check.as_ref().is_some_and(conformance::Check::moving)
-            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.screen.as_ref().is_ok_and(Screen::framing)))
+            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.slide.is_some() || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
@@ -1043,6 +1129,8 @@ impl Windows {
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         self.spring();
+        #[cfg(any(target_os = "ios", feature = "fake"))]
+        self.slide();
         // The display showed a frame: what moves on a window on screen is drawn again, and its page's
         // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
         let framing = self.framing();
@@ -1313,6 +1401,10 @@ impl Windows {
 
     /// What the display said happened to part `part` of window `id`, where it is in its page.
     fn input(&mut self, id: WindowId, part: usize, input: Input) {
+        if let Input::Touch(finger, at, phase) = input {
+            self.touch(id, finger, at, phase, None, crate::view::touch::Fingers::PHONE);
+            return;
+        }
         if self.check.is_some() {
             self.record.input(input.kind(), None);
         }
@@ -1371,7 +1463,7 @@ impl Windows {
         }
         let Ok(screen) = &mut window.screen else { return };
         match input {
-            Input::Resized(_) | Input::Surface | Input::SurfaceLost => {}
+            Input::Resized(_) | Input::Surface | Input::SurfaceLost | Input::Touch(..) => {}
             Input::Expose => {}
             // The system went light or dark: so do its own parts of the window, where its Colour Mode says nothing.
             Input::FullScreen(full) => screen.full_screen = full,
@@ -1697,6 +1789,11 @@ impl Windows {
         self.turn();
     }
 
+    /// Finger `finger` at `x`, `y` on window `id`, as a phone's screen says it.
+    pub fn finger(&mut self, id: WindowId, finger: u64, x: f32, y: f32, phase: crate::view::touch::Phase) {
+        self.display.push(id, Input::Touch(finger, crate::geometry::point(x, y), phase));
+    }
+
     /// The pointer moved to `x`, `y` on window `id`, as a mouse does.
     pub fn pointer_moved(&mut self, id: WindowId, x: f32, y: f32) {
         self.display.push(id, Input::Moved(crate::geometry::point(x, y)));
@@ -1861,6 +1958,9 @@ pub(crate) enum Input {
     FullScreen(bool),
     Close,
     Moved(crate::geometry::Point<f32>),
+    /// A finger, as a phone's screen says it, in the window's points (`Windows::touch`).
+    #[cfg_attr(not(feature = "fake"), allow(dead_code))]
+    Touch(u64, crate::geometry::Point<f32>, crate::view::touch::Phase),
     /// Where the device predicts the pointer or finger down is going, a little after its last move
     /// (`Screen::predicted`).
     Predicted(crate::geometry::Point<f32>),
