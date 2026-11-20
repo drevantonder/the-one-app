@@ -8,7 +8,7 @@
 
 use serde_json::{Value, json};
 
-use super::Screen;
+use super::{Phase, Screen};
 use crate::geometry::{Point, point};
 use crate::motion::{Velocity, rubber_band};
 use crate::tree::Id;
@@ -29,6 +29,16 @@ pub(super) struct Drag {
     start: Point<f32>,
     began: bool,
     velocity: Velocity,
+}
+
+/// A trackpad's fingers dragging what drags: where they'd be as a finger (`at`), while they're on it, or, once they've
+/// lifted, that what the system scrolls on with is theirs (`lifted`).
+#[derive(Default)]
+pub(super) enum Trackpad {
+    #[default]
+    None,
+    On(Point<f32>),
+    Lifted,
 }
 
 /// Which ways node props say it drags: along, down.
@@ -91,6 +101,46 @@ impl Screen {
             self.tell(id, "dragstart", json!({"clientX": finger.x, "clientY": finger.y}));
         }
         true
+    }
+
+    /// A trackpad scrolled by `delta` at `at`, in `phase`: where the system says when its fingers touch and lift (a
+    /// Mac's), they drag what drags under them as a finger's press would, as an iPad's trackpad moves what a finger
+    /// does (a launcher's pages swiped with two fingers), from where they touch, the way they go (`delta` is the
+    /// scroll's, against the fingers), let go at their speed as they lift; what the system scrolls on with after is
+    /// theirs too, so nothing else scrolls by it. → whether they're its, which nothing else hears.
+    pub(super) fn drag_wheel(&mut self, at: Point<f32>, delta: Point<f32>, phase: Option<Phase>) -> bool {
+        let Some(phase) = phase else { return false };
+        if phase.momentum {
+            return matches!(self.trackpad, Trackpad::Lifted);
+        }
+        match (phase.fingers, std::mem::take(&mut self.trackpad)) {
+            (Some("began"), _) => {
+                let chain = self.under(at);
+                self.drag_down(&chain, at);
+                if self.drag.is_none() {
+                    return false;
+                }
+                self.trackpad = Trackpad::On(at);
+                true
+            }
+            (Some("changed"), Trackpad::On(was)) => {
+                let finger = point(was.x - delta.x, was.y - delta.y);
+                self.drag_moved(finger);
+                // Gone the other way, they're not its: what scrolls that way, or the page, has them.
+                if self.drag.is_none() {
+                    return false;
+                }
+                self.trackpad = Trackpad::On(finger);
+                true
+            }
+            (Some(lifted @ ("ended" | "cancelled")), Trackpad::On(was)) => {
+                let finger = point(was.x - delta.x, was.y - delta.y);
+                self.drag_up(finger, lifted == "cancelled");
+                self.trackpad = Trackpad::Lifted;
+                true
+            }
+            _ => false,
+        }
     }
 
     /// The press moved to `at`: past a few points, its node follows it, the way it drags, and gives past its

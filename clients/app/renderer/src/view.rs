@@ -295,6 +295,9 @@ pub struct Screen {
     captured: Option<Id>,
     /// What the press drags, if it's on a node that does.
     drag: Option<drag::Drag>,
+    /// A trackpad's fingers dragging what drags (`drag_wheel`): where they'd be as a finger, and once lifted, that the
+    /// scrolling the system goes on with is theirs too.
+    trackpad: drag::Trackpad,
     /// What was going (`Tree::leaving`) as the last frame was drawn.
     going: HashSet<Id>,
     /// What scrolls by itself or past its end, as a finger left it (`bounce`).
@@ -412,6 +415,7 @@ impl Screen {
             chosen_files: Arc::default(),
             scrolled: HashMap::new(),
             drag: None,
+            trackpad: drag::Trackpad::default(),
             going: HashSet::new(),
             coasts: HashMap::new(),
             states: States::default(),
@@ -1638,6 +1642,9 @@ impl Screen {
         // A frame's page scrolls first, and what it can't, this one does, as a browser chains them.
         if let Some(frame) = self.frame_scroll(at, delta, Some(phase)) {
             return Some(frame);
+        }
+        if self.drag_wheel(at, delta, phase) {
+            return None;
         }
         let chain = self.under(at);
         self.pointer_event(&chain, "wheel", at, 0, Some((delta, phase)));
