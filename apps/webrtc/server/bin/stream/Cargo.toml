@@ -38,3 +38,8 @@ tokio = { workspace = true }
 tokio-stream = "0.1"
 tonic = { version = "0.14", default-features = false, features = ["transport", "codegen"] }
 tonic-prost = "0.14"
+
+# A Windows PC's screen: Windows.Graphics.Capture's pictures, and SendInput for what the viewer does.
+[target.'cfg(windows)'.dependencies]
+windows-capture = "2"
+windows-sys = { version = "0.61", features = ["Win32_UI_Input_KeyboardAndMouse"] }

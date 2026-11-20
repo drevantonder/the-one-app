@@ -8,11 +8,13 @@
 //!
 //! The source is where the frames come from and where what the viewer does goes (`source`): `scrcpy`, an Android
 //! phone's own H.264 from scrcpy's server; `idb`, an iOS Simulator's own, from idb's companion; `x11`, a Linux
-//! display's, and `screencapturekit`, a Mac's, encoded here.
+//! display's, `screencapturekit`, a Mac's, and `graphicscapture`, a Windows PC's, encoded here.
 //!
 //! The data channel (id 0, negotiated) carries what the UI library's LiveScreen sends (`input::Input`).
 #[cfg(target_os = "macos")]
 mod idb;
+#[cfg(windows)]
+mod graphicscapture;
 mod h264;
 mod input;
 mod scrcpy;
@@ -49,6 +51,8 @@ pub enum SourceConfig {
     Idb(idb::Config),
     #[cfg(target_os = "macos")]
     Screencapturekit(screencapturekit::Config),
+    #[cfg(windows)]
+    Graphicscapture(graphicscapture::Config),
     #[cfg(target_os = "linux")]
     X11(x11::Config),
 }
@@ -76,6 +80,8 @@ fn start(config: SourceConfig, events: Sender<Event>) -> anyhow::Result<Box<dyn 
         SourceConfig::Idb(config) => Box::new(idb::Idb::start(config, events)?),
         #[cfg(target_os = "macos")]
         SourceConfig::Screencapturekit(config) => Box::new(screencapturekit::ScreenCaptureKit::start(config, events)?),
+        #[cfg(windows)]
+        SourceConfig::Graphicscapture(config) => Box::new(graphicscapture::GraphicsCapture::start(config, events)?),
         #[cfg(target_os = "linux")]
         SourceConfig::X11(config) => Box::new(x11::X11::start(config, events)?),
     })
@@ -144,7 +150,8 @@ fn started(path: &str) -> i32 {
     }
 }
 
-/// Out of the session and the job of whatever started it, so it carries on once that ends.
+/// Out of the session of whatever started it, so it carries on once that ends; on Windows, a process of its own,
+/// with no console, in the job it's in (Task Scheduler's, as a server's is, allows none out).
 #[cfg(unix)]
 fn detach(command: &mut std::process::Command) {
     use std::os::unix::process::CommandExt;
@@ -159,8 +166,8 @@ fn detach(command: &mut std::process::Command) {
 #[cfg(windows)]
 fn detach(command: &mut std::process::Command) {
     use std::os::windows::process::CommandExt;
-    // DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP, CREATE_BREAKAWAY_FROM_JOB
-    command.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0100_0000);
+    // DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP
+    command.creation_flags(0x0000_0008 | 0x0000_0200);
 }
 
 /// `stream --serve`: the stream itself, its config on stdin, answering on stdout and saying what happens on stderr.
