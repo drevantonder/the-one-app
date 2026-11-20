@@ -5,13 +5,15 @@
 // built with has them, Emil Kowalski's, pstack's and our design rules. build/ is how an app is built and checked against it: app.js and lint-app.js, with what they need to run, which a server
 // installs and runs on an app's source.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
 import { newMade, stylesCss, stylesPlugin, stylesTable, tokensCss, tokensTable } from "./tables.ts"
 import { $ } from "bun"
 
-const here = (path) => new URL(path, import.meta.url).pathname
+// A path of the UI library's own, as this machine writes one (Windows' with its drive's letter).
+const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const text = (path) => readFileSync(here(path), "utf8")
 /// Where what a client runs goes: dist/client, or with `bun build.js <folder>`, that folder, and nothing else is built,
 /// as a program that has the UI library built in builds it for itself (clients/app/build.rs).
