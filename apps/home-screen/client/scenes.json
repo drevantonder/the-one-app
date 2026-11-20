@@ -367,6 +367,67 @@
       }
     }
   },
+  "Home, swiped": {
+    "like": "Home, two pages",
+    "touch": true,
+    "motions": {
+      "Swiped to the next page": {
+        "from": {
+          "x": 300,
+          "y": 500
+        },
+        "follow": "Notes",
+        "gesture": {
+          "swipe": [
+            -200,
+            0
+          ],
+          "speed": 800
+        }
+      },
+      "Flicked": {
+        "from": {
+          "x": 300,
+          "y": 500
+        },
+        "follow": "Notes",
+        "gesture": {
+          "fling": [
+            -80,
+            0
+          ]
+        }
+      },
+      "Dragged a third and let go": {
+        "from": {
+          "x": 300,
+          "y": 500
+        },
+        "follow": "Notes",
+        "gesture": {
+          "drag": [
+            -130,
+            0
+          ],
+          "speed": 300
+        }
+      },
+      "Pulled past the first page": {
+        "from": {
+          "x": 100,
+          "y": 500
+        },
+        "follow": "Notes",
+        "gesture": {
+          "swipe": [
+            160,
+            0
+          ],
+          "speed": 600
+        }
+      }
+    }
+  },
   "Home, one page of apps": {
     "answers": {
       "home-screen_pages": {
