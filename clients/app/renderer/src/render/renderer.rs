@@ -422,6 +422,10 @@ pub struct Renderer {
     /// surface to draw on.
     stamps: Option<Stamps>,
     acquired: web_time::Duration,
+    /// How long the last frame took to finish its commands and hand them to the GPU (`CommandEncoder::finish`,
+    /// `Queue::submit`), and to hand its image to the system to show (`Queue::present`).
+    submitted: web_time::Duration,
+    presented: web_time::Duration,
 }
 
 /// How many passes a frame's GPU time is taken of, each a timestamp as it begins and one as it ends.
@@ -678,6 +682,8 @@ impl Renderer {
             on_cpu: Default::default(),
             stamps: Stamps::new(&context.device, &context.queue),
             acquired: Default::default(),
+            submitted: Default::default(),
+            presented: Default::default(),
         }
     }
 
@@ -1098,13 +1104,17 @@ impl Renderer {
             stamps.resolve(&mut encoder);
         }
         self.belt.finish_and_recall_on_submit(&encoder);
+        let submitting = web_time::Instant::now();
         self.queue.submit([encoder.finish()]);
+        self.submitted = submitting.elapsed();
         if let Some(stamps) = &mut self.stamps {
             stamps.submitted();
         }
+        let presenting = web_time::Instant::now();
         if let Some(frame) = frame {
             self.queue.present(frame);
         }
+        self.presented = presenting.elapsed();
         true
     }
 
@@ -1118,6 +1128,11 @@ impl Renderer {
     /// frames before keeps it waiting for.
     pub fn acquired(&self) -> web_time::Duration {
         self.acquired
+    }
+
+    /// How long the last frame took to finish its commands and submit them, and to present its image.
+    pub fn submitted(&self) -> (web_time::Duration, web_time::Duration) {
+        (self.submitted, self.presented)
     }
 
     /// Writes the frame's data into its buffer, grown to hold it.

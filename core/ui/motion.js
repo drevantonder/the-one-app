@@ -5,7 +5,11 @@
 // build's). `--ssh` plays them on a real device instead, as calibrate.js draws there (a Windows one's harness built with
 // `cargo xwin build --release … --target x86_64-pc-windows-msvc`, which draws with Direct3D 12 over ssh), at its tier's
 // device pixels a point, and judges its tier by each frame's own times there: its GPU's (its timestamps), its thread's
-// painting and drawing, and its JS's.
+// painting and drawing, and its JS's. With `--present` too, and the `window` example built for it as `--harness`, each
+// motion that plays a trace of a wheel's notches is played in a real window in the device's person's session instead
+// (a scheduled task's), drawn and presented on its display as the app's windows are, which the headless harness never
+// does: it fails where its frames' painting and drawing, or its GPU, took longer than a refresh at their 95th
+// percentile, and says each part (waiting for an image, submitting, presenting).
 //
 // A folder is the gallery (core/ui/gallery, its scenes in `*.scenes.tsx`) or an app's (apps/<app>, in
 // `client/scenes.json`), as `scenes.js` takes them; with none, the gallery and every app with a motion. A motion is
@@ -63,6 +67,7 @@ const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--
 // On a device of devices.json's tiers over ssh (the one whose `measured` it is), with a harness built for it, its own
 // GPU and CPU draw each frame, as calibrate.js has them, and its tier is judged by the times it took there.
 const ssh = option("--ssh")
+const present = flag("--present")
 const harness = ssh ? option("--harness") && resolve(option("--harness")) : join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 /// How every harness runs, here and in scenes.js, on a machine others share: Vulkan on lavapipe, which draws on the
 /// CPU with 2 threads rather than one a core (`LP_NUM_THREADS`), as a few run at once.
@@ -256,6 +261,47 @@ async function runThere(at, folder, args, lines) {
   const tree = stderr.lastIndexOf("\n{")
   if (tree >= 0) writeFileSync(join(folder, "end.json"), stderr.slice(tree + 1))
   return { stdout, stderr: tree >= 0 ? stderr.slice(0, tree) : stderr, failed: ran.exitCode !== 0 || !stdout.trim() }
+}
+
+/// A motion's trace played in a real window on `--ssh`'s device, in its person's session, by the `window` example
+/// (`--present`): a scheduled task runs it there, and says it's done on a named pipe, which is every session's, that
+/// this waits on there, five minutes at most. → what it said of each round's
+/// frames, as JSON lines, and whether it failed.
+async function presentThere(at, folder, scene, events) {
+  const base = onDevice()
+  const name = `${basename(folder)}-${Math.random().toString(36).slice(2, 8)}`.replace(/[^\w-]/g, "")
+  const run = `${base}\\${name}`
+  const staged = join(folder, ".device")
+  rmSync(staged, { recursive: true, force: true })
+  cpSync(at, join(staged, "page"), { recursive: true, dereference: true })
+  cpSync(join(folder, "answers.json"), join(staged, "answers.json"))
+  writeFileSync(join(staged, "trace.json"), JSON.stringify(events))
+  const client = scene.answers?.["one/client"]
+  const panel = client?.launcher ? ["--panel", "16"] : []
+  const args = ["page", "--trace", "trace.json", "--ui", `${base}\\ui`, "--answers", "answers.json", "--size", `${scene.size[0]}x${scene.size[1]}`, "--rounds", "3", ...panel]
+  writeFileSync(join(staged, "run.cmd"), ["@echo off", `cd /d "${run}"`, `"${base}\\screenshot.exe" ${args.map((arg) => `"${arg}"`).join(" ")} > said.txt 2> err.txt`, "echo %errorlevel% > exit.txt", `echo done> \\\\.\\pipe\\${name}`].join("\r\n"))
+  writeFileSync(
+    join(staged, "wait.ps1"),
+    [
+      // Its person may write to it from their session, which a pipe's own permissions don't let them.
+      "$security = New-Object System.IO.Pipes.PipeSecurity",
+      "$security.AddAccessRule((New-Object System.IO.Pipes.PipeAccessRule([System.Security.Principal.WindowsIdentity]::GetCurrent().User, 'ReadWrite', 'Allow')))",
+      `$pipe = New-Object System.IO.Pipes.NamedPipeServerStream('${name}', 'In', 1, 'Byte', 'None', 0, 0, $security)`,
+      `schtasks /Create /F /SC ONCE /ST 23:59 /TN ${name} /TR '"${run}\\run.cmd"' /IT | Out-Null`,
+      `schtasks /Run /TN ${name} | Out-Null`,
+      "$null = $pipe.WaitForConnectionAsync().Wait(300000)",
+      "$pipe.Dispose()",
+      `schtasks /Delete /F /TN ${name} | Out-Null`,
+    ].join("\r\n"),
+  )
+  const sent = Bun.spawnSync(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} 'mkdir "${run}" && tar -xf - -C "${run}"'`], { stdout: "pipe", stderr: "pipe" })
+  rmSync(staged, { recursive: true, force: true })
+  if (sent.exitCode !== 0) return { stdout: "", stderr: sent.stderr.toString(), failed: true }
+  const task = `powershell -NoProfile -ExecutionPolicy Bypass -File "${run}\\wait.ps1" & type "${run}\\exit.txt" & type "${run}\\said.txt" & type "${run}\\err.txt" 1>&2 & rmdir /s /q "${run}"`
+  const ran = Bun.spawn(["ssh", ssh, task], { stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr] = await Promise.all([new Response(ran.stdout).text(), new Response(ran.stderr).text(), ran.exited])
+  const [exit, ...said] = stdout.split("\n")
+  return { said: said.filter((line) => line.trim().startsWith("{")).map((line) => JSON.parse(line)), stderr, failed: exit.trim() !== "0" }
 }
 
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
@@ -494,6 +540,21 @@ async function play(built, scene, name, motion, hz, folder) {
   const { moves: stretches, lift, trace } = moves(motion.gesture)
   const events = trace && JSON.parse(readFileSync(join(scene.from, trace), "utf8"))
   const taps = scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) }, { op: "clock", step: 1000 }])
+  if (present) {
+    if (!events?.some((event) => event.kind === "wheel")) return { said: `  ${hz} Hz: not a wheel's, which only the headless harness plays` }
+    if (hz !== device.hz) return { said: `  ${hz} Hz: the device's display is ${device.hz} Hz` }
+    const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
+    writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
+    const shown = await presentThere(at, folder, scene, events)
+    const ms = (value) => `${value} ms`
+    const lines = shown.said.map((round, n) => `  ${hz} Hz presented, round ${n + 1}: ${round.frames} frames, p95 painting ${ms(round.paint_ms)}, drawing ${ms(round.draw_ms)} (waiting for an image ${ms(round.acquire_ms)}, submitting ${ms(round.submit_ms)}, presenting ${ms(round.present_ms)}), GPU ${ms(round.gpu_ms)}`)
+    if (!shown.said.length) lines.push(`  ${hz} Hz presented: nothing said: ${shown.stderr.trim().split("\n").at(-1)}`)
+    if (shown.failed) {
+      process.exitCode = 1
+      lines.push(`  ${hz} Hz presented FAILS: ${device.name}'s frames took longer than its ${(1000 / hz).toFixed(1)} ms refresh`)
+    }
+    return { said: lines.join("\n") }
+  }
   const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
   const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, replay])

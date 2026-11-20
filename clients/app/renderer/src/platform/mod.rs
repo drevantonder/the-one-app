@@ -1551,11 +1551,12 @@ impl Windows {
             }
             let refresh = self.display.refresh();
             let drawn = window.parts.iter().filter_map(|part| part.renderer.as_ref());
-            let (acquire, gpu) = drawn.fold((std::time::Duration::ZERO, None), |(acquire, gpu), renderer| {
+            let (acquire, submit, present, gpu) = drawn.fold((std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, None), |(acquire, submit, present, gpu), renderer| {
                 let (all, blur) = gpu.unwrap_or_default();
-                (acquire + renderer.acquired(), renderer.gpu().map(|(part, blurs)| (all + part, blur + blurs)).or(gpu))
+                let (submitted, presented) = renderer.submitted();
+                (acquire + renderer.acquired(), submit + submitted, present + presented, renderer.gpu().map(|(part, blurs)| (all + part, blur + blurs)).or(gpu))
             });
-            let frame = frame_timing::Frame { at: now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), applied: Default::default(), turned: Default::default() };
+            let frame = frame_timing::Frame { at: now(), paint: painted - began, draw: painted.elapsed(), acquire, submit, present, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), applied: Default::default(), turned: Default::default() };
             let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
                 self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));

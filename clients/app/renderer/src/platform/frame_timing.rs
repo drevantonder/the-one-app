@@ -34,6 +34,8 @@ pub struct Frames {
     pub paint: Duration,
     pub draw: Duration,
     pub acquire: Duration,
+    pub submit: Duration,
+    pub present: Duration,
     pub gpu: Option<Duration>,
     /// Of `gpu`, its blurs': what's behind a backdrop's glass.
     pub blur: Option<Duration>,
@@ -44,14 +46,16 @@ pub struct Frames {
 
 /// One frame: when it was handed to the display, and what it took. `paint` is this thread laying it out and making
 /// its scene; `draw` its GPU commands, waiting for an image to draw on (`acquire`, which a display that hasn't shown
-/// the frames before keeps it waiting for) and handing it to the display; `gpu` the GPU's time on its passes, where
-/// the GPU says, a frame or two behind.
+/// the frames before keeps it waiting for), finishing and submitting them (`submit`) and handing its image to the
+/// display (`present`); `gpu` the GPU's time on its passes, where the GPU says, a frame or two behind.
 #[derive(Debug, Clone, Copy)]
 pub struct Frame {
     pub at: Instant,
     pub paint: Duration,
     pub draw: Duration,
     pub acquire: Duration,
+    pub submit: Duration,
+    pub present: Duration,
     pub gpu: Option<Duration>,
     /// Of `gpu`, its blurs': what's behind a backdrop's glass.
     pub blur: Option<Duration>,
@@ -144,6 +148,8 @@ impl Timing {
             paint: at(frames.iter().map(|frame| frame.paint).collect(), 0.95),
             draw: at(frames.iter().map(|frame| frame.draw).collect(), 0.95),
             acquire: at(frames.iter().map(|frame| frame.acquire).collect(), 0.95),
+            submit: at(frames.iter().map(|frame| frame.submit).collect(), 0.95),
+            present: at(frames.iter().map(|frame| frame.present).collect(), 0.95),
             gpu: (!gpu.is_empty()).then(|| at(gpu, 0.95)),
             blur: (!blur.is_empty()).then(|| at(blur, 0.95)),
         })

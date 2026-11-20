@@ -1052,6 +1052,26 @@
       }
     }
   },
+  "Launcher on Windows, its pages wheeled": {
+    "like": "Launcher on a computer",
+    "answers": {
+      "one/client": {
+        "device": "Windows",
+        "build": "0.34.0",
+        "theme": null,
+        "launcher": true,
+        "mac": false
+      }
+    },
+    "motions": {
+      "A mouse wheel's notches move its pages": {
+        "gesture": {
+          "trace": "traces/windows-wheel-pages.json"
+        },
+        "keeps": "Intel UHD laptop at 4K"
+      }
+    }
+  },
   "Launcher, five pages": {
     "like": "Launcher on a computer",
     "answers": {
