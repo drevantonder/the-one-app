@@ -79,6 +79,34 @@ const Picked = () => {
 
 const face = { role: "combobox", name: "Fruit" }
 
+/// A field of each kind a phone's keyboard treats differently, as iOS's and Android's own fields do.
+const Keyboards = () => (
+  <View style={look.form}>
+    <Field label="Name">
+      <Input />
+    </Field>
+    <Search placeholder="Search" aria-label="Search" />
+    <Field label="Email">
+      <Input inputMode="email" />
+    </Field>
+    <Field label="Link">
+      <Input inputMode="url" />
+    </Field>
+    <Field label="Username">
+      <Input autoComplete="username" />
+    </Field>
+    <Field label="Code">
+      <Input inputMode="numeric" autoComplete="one-time-code" />
+    </Field>
+    <Field label="Note">
+      <Textarea />
+    </Field>
+  </View>
+)
+/// What a field's keyboard is asked for, as Flutter's TextInputConfiguration says it.
+const kept = { textCapitalization: "TextCapitalization.none", autocorrect: false }
+const sentences = { textCapitalization: "TextCapitalization.sentences", autocorrect: true }
+
 export default {
   // What people expect of a select, from the UI SDK's own tests (tests/specs/select.spec.ts at the commit select.ts
   // names).
@@ -97,6 +125,21 @@ export default {
     },
   },
   "Fields/Every kind": () => <Fields />,
+  // What each field asks a phone's keyboard for: a search, an address, a username or a code taken as it's typed, as
+  // UISearchBar and Android's SearchView are; text capitalised as sentences and corrected.
+  "Fields/What each asks the keyboard for": {
+    render: () => <Keyboards />,
+    touch: true,
+    checks: {
+      "A name is capitalised as sentences": [{ role: "textbox", name: "Name" }, { expect: { keyboard: sentences } }],
+      "A search isn't capitalised or corrected": [{ role: "searchbox", name: "Search" }, { expect: { keyboard: kept } }],
+      "An email isn't": [{ role: "textbox", name: "Email" }, { expect: { keyboard: kept } }],
+      "A link isn't": [{ role: "textbox", name: "Link" }, { expect: { keyboard: kept } }],
+      "A username isn't": [{ role: "textbox", name: "Username" }, { expect: { keyboard: kept } }],
+      "A code isn't": [{ role: "textbox", name: "Code" }, { expect: { keyboard: kept } }],
+      "A note is capitalised as sentences": [{ role: "textbox", name: "Note" }, { expect: { keyboard: sentences } }],
+    },
+  },
   "Fields/A select open": { render: () => <Fields />, taps: [{ role: "combobox", name: "Fruit" }] },
   // The caret steps over an emoji, a flag and a letter with its accent whole, and Backspace takes an emoji whole:
   // End, then back past "é" and the flag, and Backspace deletes the family, leaving "a🇦🇺é".

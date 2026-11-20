@@ -1730,6 +1730,12 @@ impl Windows {
         self.display.wrongs()
     }
 
+    /// What window `id`'s input with the keyboard asked the platform's keyboard for (Flutter's
+    /// `TextInputConfiguration`), if one has it.
+    pub fn keyboard(&self, id: WindowId) -> Option<serde_json::Value> {
+        self.display.keyboard(id)
+    }
+
     /// Window `id` is drawn again on the next turn, though nothing on it changed.
     pub fn redraw(&mut self, id: WindowId) {
         if let Some(window) = self.windows.get_mut(&id) {

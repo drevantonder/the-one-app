@@ -9,7 +9,7 @@ import { layer } from "./layer.ts"
 import type { Mutations, Type } from "./renderer.ts"
 import type * as Page from "../types/ui.d.ts"
 import type { PickerProps } from "./primitives.tsx"
-import { options, renamed } from "./props.ts"
+import { literal, options, renamed } from "./props.ts"
 import { styles } from "../styles.ts"
 import { Problem } from "../styled-components/states.tsx"
 import { messages } from "../words.ts"
@@ -77,8 +77,8 @@ export const TextInput: typeof Page.TextInput = (props) =>
       onInput: (it) => it.onChangeText && ((event: { currentTarget: { value: string } }) => it.onChangeText!(event.currentTarget.value)),
       readonly: (it) => it.readOnly,
       autofocus: (it) => it.autoFocus,
-      autocapitalize: (it) => it.autoCapitalize,
-      autocorrect: (it) => it.autoCorrect,
+      autocapitalize: (it) => it.autoCapitalize ?? (literal(it) ? "none" : undefined),
+      autocorrect: (it) => it.autoCorrect ?? (literal(it) ? false : undefined),
       spellcheck: (it) => it.spellCheck,
       autocomplete: (it) => it.autoComplete,
     }),

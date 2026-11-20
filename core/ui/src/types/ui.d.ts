@@ -468,8 +468,10 @@ export type Scene =
 export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
- * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), and the glass's blur drawn (`blur`). */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean }
+ * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn (`blur`), and what the input with the
+ * keyboard asks the platform's keyboard for (`keyboard`, as Flutter's `TextInputConfiguration` says it to iOS and
+ * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`). */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; keyboard?: Record<string, unknown> }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input

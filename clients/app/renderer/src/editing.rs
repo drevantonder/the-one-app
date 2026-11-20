@@ -199,7 +199,7 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
         "inputType": {"name": format!("TextInputType.{kind}"), "signed": null, "decimal": prop("inputmode") == "decimal"},
         "inputAction": format!("TextInputAction.{}", field["action"].as_str().unwrap_or("done")),
         "obscureText": prop("type") == "password",
-        "autocorrect": checked && !literal,
+        "autocorrect": checked && field["autocorrect"] != false && !literal,
         "enableSuggestions": checked,
         "readOnly": field["readonly"] == true,
         "textCapitalization": format!("TextCapitalization.{capitalization}"),

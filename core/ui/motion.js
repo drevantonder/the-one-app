@@ -393,7 +393,7 @@ function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard } = step.expect
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
@@ -406,6 +406,16 @@ function requests(steps, folder) {
           request: { op: "wait_for", ...selector(drawn.of), state: "drawn", opacity: drawn.opacity, ...(step.within !== undefined ? { timeout: step.within } : {}) },
         })
       if (states) out.push(until(states.of, "there", (answer) => `${named(states.of)}: ${why(answer, states.is)}`, states.is))
+      if (keyboard)
+        out.push({
+          request: { op: "keyboard" },
+          judge: (answer) => {
+            const asked = answer?.result?.keyboard
+            if (!asked) return "nothing has the keyboard"
+            const off = Object.entries(keyboard).filter(([key, want]) => JSON.stringify(asked[key]) !== JSON.stringify(want))
+            return off.length ? `the keyboard is asked for ${off.map(([key]) => `${key} ${JSON.stringify(asked[key])}`).join(", ")}` : undefined
+          },
+        })
       if (blur) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => !(answer?.result?.frames?.[0]?.work?.backdrops > 0) && "no blur is drawn" })
     }
     for (const one of out.slice(from)) one.step = `step ${at + 1}`

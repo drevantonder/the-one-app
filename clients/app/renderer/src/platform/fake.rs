@@ -31,6 +31,9 @@ pub struct Display {
     summoned: RefCell<Vec<WindowId>>,
     /// What was wrong with what it showed (`Windows::tick`), since it was last asked.
     wrong: RefCell<Vec<String>>,
+    /// What each window's input with the keyboard last asked the platform's keyboard for (Flutter's
+    /// `TextInputConfiguration`, as `TextInput.setClient` gives it), as a phone's keyboard is told.
+    keyboard: RefCell<std::collections::HashMap<WindowId, serde_json::Value>>,
 }
 
 /// How often a refresh comes late where the display is adversarial, a frame dropped, as a busy device's are: one in
@@ -105,6 +108,7 @@ impl Display {
             drawing: Cell::new(0.0),
             summoned: RefCell::default(),
             wrong: RefCell::default(),
+            keyboard: RefCell::default(),
         }
     }
 
@@ -217,7 +221,20 @@ impl Display {
 
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    pub fn text_input(&self, _: &NativeWindow, _: &[crate::editing::TextInput]) {}
+    pub fn text_input(&self, window: &NativeWindow, calls: &[crate::editing::TextInput]) {
+        for call in calls {
+            match call {
+                crate::editing::TextInput::SetClient(_, configuration) => _ = self.keyboard.borrow_mut().insert(window.id, configuration.clone()),
+                crate::editing::TextInput::ClearClient => _ = self.keyboard.borrow_mut().remove(&window.id),
+                _ => {}
+            }
+        }
+    }
+
+    /// What window `id`'s input with the keyboard asked the keyboard for, if one has it.
+    pub(crate) fn keyboard(&self, id: WindowId) -> Option<serde_json::Value> {
+        self.keyboard.borrow().get(&id).cloned()
+    }
 
     #[allow(dead_code)]
     pub fn set_moved(&self, _: &NativeWindow, _: super::rail::Moved) {}

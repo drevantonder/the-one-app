@@ -10,7 +10,7 @@ import type { Ice, Props, TextInputAction } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Dragged, Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
 import { flat, web, type Styles } from "../styles.ts"
-import { options } from "./props.ts"
+import { literal, options } from "./props.ts"
 
 /// `<Modal visible={open()}>…</Modal>`: what's drawn over the whole window while it's `visible` (unless it says, it
 /// is), over the page and everything over it before, with everything else inert: nothing else is pressed, focused or
@@ -805,6 +805,7 @@ export function TextInput(props: TextInputProps) {
       (on) => void (on && requestAnimationFrame(() => element.isConnected && element.focus({ preventScroll: true }))),
     )
   const looks = () => drawn("ui-text-input", props.style)
+  const corrected = () => props.autoCorrect ?? (literal(props) ? false : undefined)
   return (
     <Dynamic
       component={props.multiline ? "textarea" : "input"}
@@ -812,8 +813,8 @@ export function TextInput(props: TextInputProps) {
       inputmode={props.inputMode}
       dir="auto"
       enterkeyhint={props.enterKeyHint || !props.multiline ? (props.enterKeyHint ?? "done") : undefined}
-      autocorrect={props.autoCorrect === undefined ? undefined : props.autoCorrect ? "on" : "off"}
-      autocapitalize={props.autoCapitalize}
+      autocorrect={corrected() === undefined ? undefined : corrected() ? "on" : "off"}
+      autocapitalize={props.autoCapitalize ?? (literal(props) ? "none" : undefined)}
       spellcheck={props.spellCheck}
       autocomplete={props.autoComplete}
       readonly={props.readOnly}

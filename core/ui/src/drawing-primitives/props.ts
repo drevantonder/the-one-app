@@ -15,3 +15,9 @@ export function options(items: () => Element) {
   const resolved = children(items)
   return () => (resolved.toArray() as unknown as PickerItemProps[]).map(({ label, value, enabled }) => ({ label, value, disabled: enabled === false ? true : undefined }))
 }
+
+/** Whether what's typed in a text input is taken as it's typed, not capitalised or corrected, where it doesn't say
+ * (`autoCapitalize`, `autoCorrect`), as iOS's and Android's own search, address, username, code and password fields
+ * are: a search, an email, a URL, a password, a username or a one-time code. */
+export const literal = (props: { inputMode?: string; secureTextEntry?: boolean; autoComplete?: string }) =>
+  !!props.secureTextEntry || ["search", "email", "url"].includes(props.inputMode!) || /\b(username|one-time-code)\b/.test(props.autoComplete ?? "")

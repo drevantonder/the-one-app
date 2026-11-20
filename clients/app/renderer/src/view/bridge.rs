@@ -141,7 +141,7 @@ impl Screen {
     }
 
     /// What a keyboard bridge needs to know of input `id`: what kind of text it takes (`type`, `inputmode`), what may
-    /// fill it (`autocomplete`), how a keyboard capitalises and checks it, its action key, its name, and where it is.
+    /// fill it (`autocomplete`), how a keyboard capitalises, corrects and checks it, its action key, its name, and where it is.
     pub fn field(&self, id: Id) -> Option<Value> {
         let node = self.tree.nodes.get(&id).filter(|node| node.kind == Kind::Input)?;
         let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
@@ -153,6 +153,7 @@ impl Screen {
             "autocomplete": node.str("autocomplete"),
             "autocapitalize": node.str("autocapitalize"),
             "spellcheck": node.prop("spellcheck").is_none_or(|spellcheck| spellcheck != &json!(false) && spellcheck != &json!("false")),
+            "autocorrect": node.prop("autocorrect").is_none_or(|autocorrect| autocorrect != &json!(false) && autocorrect != &json!("off")),
             "multiline": multiline,
             "readonly": node.is("readonly"),
             "action": node.str("action").unwrap_or(if multiline { "newline" } else { "done" }),

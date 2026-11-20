@@ -376,8 +376,9 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 
 /// The inspector's requests that a person's input answers, and its clock's: on the fake platform, the display's own
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
-/// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's.
-const INPUT: [&str; 13] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon"];
+/// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's. And what the
+/// platform's keyboard was told (`keyboard`), which only the fake platform knows.
+const INPUT: [&str; 14] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "keyboard"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -471,6 +472,9 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             windows.run(0.0);
             Ok(json!({}))
         }
+        // What the input with the keyboard asked the platform's keyboard for (Flutter's `TextInputConfiguration`:
+        // `textCapitalization`, `autocorrect`, `inputType`…), as a phone's keyboard is told; null where none has it.
+        "keyboard" => Ok(json!({"keyboard": windows.keyboard(id)})),
         // As Playwright's `locator.waitFor` and its assertions do: what's selected comes to be `state` (`shown`: drawn
         // whole and in the window; `gone`: not there; `focused`: with the keyboard; `there`: there at all; `drawn`: at
         // `opacity`), with its
