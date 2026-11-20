@@ -2,9 +2,10 @@
 // which opens the app again. It's drawn with the UI library, as the recovery key window is (recovery.js), and asks its
 // host only what it's for (`one/unopened`, in native.rs).
 import { createComponent as h } from "/ui/client/solid.js"
-import { Button, Problem, render, Screen } from "/ui/client/native/ui.js"
-import { ask } from "/client/ask.js"
+import { Button, Problem, render, Screen, leave } from "/ui/client/native/ui.js"
+import { ask, cancelOnEscape } from "/client/ask.js"
 
+cancelOnEscape(leave)
 const { name, why } = await ask("one/unopened")
 const said = why.charAt(0).toUpperCase() + why.slice(1)
 

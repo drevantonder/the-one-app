@@ -5,7 +5,7 @@
 // On the web, the window page's own dialog does the same (`recoveryKey` in page/client.js), in the same words.
 import { createComponent as h, createSignal, Show } from "/ui/client/solid.js"
 import { Button, Input, render, Screen, Section, Text } from "/ui/client/native/ui.js"
-import { ask } from "/client/ask.js"
+import { ask, cancelOnEscape } from "/client/ask.js"
 
 const { typed } = await ask("one/recovery")
 const [key, setKey] = createSignal("")
@@ -13,6 +13,7 @@ const [entry, setEntry] = createSignal("")
 const [wrong, setWrong] = createSignal("")
 const [approving, setApproving] = createSignal(false)
 const done = (done) => ask("one/recovery/done", { done })
+cancelOnEscape(() => done(false))
 
 if (!typed) ask("one/recovery/key").then(setKey, (error) => setWrong(error.message))
 
@@ -49,8 +50,9 @@ const asking = () => [
     onSubmitEditing: approve,
   }),
   h(Show, { get when() { return wrong() }, get children() { return h(Text, { role: "alert", get children() { return wrong() } }) } }),
-  h(Button, { get loading() { return approving() }, onPress: approve, children: "Approve This Device" }),
+  h(Button, { get loading() { return approving() }, get disabled() { return !entry().trim() }, onPress: approve, children: "Approve This Device" }),
   h(Button, { variant: "outline", onPress: () => done(false), children: "Cancel" }),
 ]
 
-render(() => h(Screen, { heading: "Recovery Key", get children() { return h(Section, { get children() { return typed ? asking() : shown() } }) } }))
+// Its window's title bar says what it is, so the page doesn't say it again.
+render(() => h(Screen, { get children() { return h(Section, { get children() { return typed ? asking() : shown() } }) } }))

@@ -4,9 +4,10 @@
 // a passkey in the device's browser, where theirs is (`one/sign-in/browser`); or opens its link on another device where
 // they're signed in. The device learns it's in by itself, and the Home Screen takes this page's place then.
 import { createComponent as h, createSignal } from "/ui/client/solid.js"
-import { Field, Input, render, SignIn } from "/ui/client/native/ui.js"
-import { ask } from "/client/ask.js"
+import { Field, Input, leave, render, SignIn } from "/ui/client/native/ui.js"
+import { ask, cancelOnEscape } from "/client/ask.js"
 
+cancelOnEscape(leave)
 const { typed, code, why, mark } = await ask("one/sign-in")
 /// Why it shows a new code, as the device says it (`NotApproved` in core/client/src/auth.rs).
 const said = { denied: "It was denied where you signed in.", expired: "Its code expired before it was approved. Try again.", removed: "This device was removed from your network." }[why]

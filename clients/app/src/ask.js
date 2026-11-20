@@ -1,3 +1,5 @@
+import { keydown } from "/ui/client/native/ui.js"
+
 // What the client's own pages ask their host (`respond` in native.rs), apart from the UI library's own asks, by ids of
 // their own, each answered as it's heard.
 const waiting = new Map()
@@ -17,3 +19,6 @@ export const ask = (method, params = {}) =>
     waiting.set(id, ({ result, error }) => (error ? failed(new Error(error.message)) : done(result)))
     globalThis.host.post({ jsonrpc: "2.0", id, method, params })
   })
+
+/// Escape does what Cancel does, in a window of the client's own, as it does in a system's dialog.
+export const cancelOnEscape = (cancel) => keydown((event) => event.key === "Escape" && cancel())

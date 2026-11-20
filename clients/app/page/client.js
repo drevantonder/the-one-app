@@ -1434,9 +1434,12 @@ function opened(view) {
 /** @param {boolean} typed @param {string} [subject] @returns {Promise<{ done: boolean }>} */
 function recoveryKey(typed, subject) {
   const dialog = /** @type {HTMLDialogElement} */ (byId("recovery"))
-  const [key, entry, problem, form] = /** @type {[HTMLElement, HTMLInputElement, HTMLElement, HTMLFormElement]} */ ([".key", ".entry", ".wrong", "form"].map((part) => dialog.querySelector(part)))
+  const [key, entry, problem, form, approve] = /** @type {[HTMLElement, HTMLInputElement, HTMLElement, HTMLFormElement, HTMLButtonElement]} */ ([".key", ".entry", ".wrong", "form", 'button.typed[data-variant="default"]'].map((part) => dialog.querySelector(part)))
   dialog.dataset.typed = String(typed)
   entry.value = key.textContent = problem.textContent = dialog.returnValue = ""
+  // Its main button waits for the key, as a system's dialog's default button waits for what it needs.
+  approve.disabled = true
+  entry.oninput = () => (approve.disabled = entry.value.trim() === "")
   if (!typed) invoke("recovery_key", { subject }).then((shown) => (key.textContent = shown), (error) => (problem.textContent = `${error}`))
   dialog.showModal()
   return new Promise((resolve) => {

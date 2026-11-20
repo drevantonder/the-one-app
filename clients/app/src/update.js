@@ -3,8 +3,10 @@
 // on it (`one/update`), and Try Again, which asks its network afresh (`one/update/retry`), as a server rolled back
 // may talk with it again. Once one does, the Home Screen takes this page's place.
 import { createComponent as h, createSignal, Show } from "/ui/client/solid.js"
-import { Button, Problem, render, Screen, Status } from "/ui/client/native/ui.js"
-import { ask } from "/client/ask.js"
+import { Button, Problem, render, Screen, Status, leave } from "/ui/client/native/ui.js"
+import { ask, cancelOnEscape } from "/client/ask.js"
+
+cancelOnEscape(leave)
 
 /// Whether it's updating, and what the last try said, if it failed.
 const [updating, setUpdating] = createSignal(false)
