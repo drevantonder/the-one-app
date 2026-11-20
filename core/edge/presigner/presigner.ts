@@ -283,7 +283,7 @@ async function allowed(env: Env, by: string, token: string | null, tokens: strin
   const server = SERVER.exec(key)?.[1];
   const reads = operation === "read" || operation === "list";
   const icon = ICON.test(key) && (operation === "read" || operation === "write");
-  const opens = (server !== undefined && server !== by && operation === "read") || (OPEN.test(key) && reads) || icon;
+  const opens = server === by || (server !== undefined && operation === "read") || (OPEN.test(key) && reads) || icon;
   const installer = ((operation === "write" || operation === "remove") && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
   // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
   // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
@@ -292,20 +292,14 @@ async function allowed(env: Env, by: string, token: string | null, tokens: strin
   // Every list that could let it is read at once, each once: one trip to the bucket.
   const lists = reader(env);
   const vouched = tokens.filter((shown) => owner(key) && claims(shown.split(".")[0]).list === owner(key));
-  // A server's own blobs are its to write once it's on the list its token names, whom it chose among them
-  // (`servers/<key>/members`), which is the other side of acting for someone: so that's written before it's checked.
-  const listed = server === by ? lists(claims(token ?? "").list) : null;
-  const [network, owners, open, installed, own, ...words] = await Promise.all([
+  const [network, owners, open, installed, ...words] = await Promise.all([
     servers(lists, NETWORK),
     servers(lists, owner(key)),
     opens ? admits(lists, by, token) : null,
     installer ? servers(lists, installer + "/") : null,
-    listed,
     ...vouched.map((shown) => admits(lists, by, shown)),
   ]);
-  return Boolean(
-    network.includes(by) || owners.includes(by) || first || open || installed?.includes(by) || own?.includes(by) || words.some(Boolean),
-  );
+  return Boolean(network.includes(by) || owners.includes(by) || first || open || installed?.includes(by) || words.some(Boolean));
 }
 
 /** The request to the bucket that `ask` is, unsigned: its method, URL and headers. */
@@ -339,7 +333,9 @@ export async function admits(lists: Lists, key: string, shown: string | null): P
   const [token, device = key, attestation] = (shown ?? "").split(".");
   const { list, by, until, signature } = claims(token);
   if (!isKey(key) || owner(list) !== list) return null;
-  if (by === undefined) return (await servers(lists, list)).includes(key) ? {} : null;
+  // A server's own token says it's one of the network's, on the list it names, which is all it says: a new one is on
+  // its list before it says whom it chose, the other side of acting for them (`servers/2`).
+  if (by === undefined) return (await lists(list))?.includes(key) ? {} : null;
   if (!(until !== undefined && until > Date.now())) return null;
   if (device !== key && !(await signedBy(device, attestation, `one/run/1\n${key}`))) return null;
   if (!(await signedBy(by, signature, `one/token/1\n${device}\n${list}\n${until}`))) return null;
@@ -413,15 +409,17 @@ export function reader(env: Env): Lists {
 }
 
 /**
- * Whom the server `key` chose to act for, as its own `members` blob says, kept as long as a list is. Only it writes
- * that, and it changes only when its owner chooses someone else too, which is never a refusal of what was let.
+ * Whom the server `key` chose to act for, as its own `members` blob says, kept as long as a list is once it's there.
+ * Only it writes that, and it changes only when its owner chooses someone else too, which is never a refusal of what
+ * was let. One not there yet is read again next time, as a new server writes it as it starts.
  */
 async function chosen(env: Env, key: string): Promise<string[]> {
   const had = choices.get(key);
   if (had && Date.now() - had.at < KEPT) return had.members;
   const got = await bucket(env).fetch(blob(env, `servers/${key}/members`));
   if (!got.ok && got.status !== 404) throw new Error(`The bucket answered ${got.status} for servers/${key}/members`);
-  const members: string[] = got.ok ? await got.json() : [];
+  if (!got.ok) return [];
+  const members: string[] = await got.json();
   choices.set(key, { at: Date.now(), members });
   return members;
 }
