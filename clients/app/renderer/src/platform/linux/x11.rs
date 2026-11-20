@@ -1120,13 +1120,13 @@ impl Display {
                 }
                 // Buttons 1 to 3 are the main, middle and secondary; 4 and 5 the wheel's turns, up and down, 6 and 7
                 // sideways; a notch is 3 lines of 16 px. X11 says no trackpad's phase.
-                let notch = |x: f32, y: f32| Input::Wheel(at, Point { x, y }, None);
+                let notch = |x: f32, y: f32| Input::Wheel(at, Point { x: x * 48.0, y: y * 48.0 }, None, Some(Point { x, y }));
                 match event.detail {
                     button @ 1..=3 => out.push((id, Input::Down(at, button - 1, event.state.contains(xproto::KeyButMask::SHIFT)))),
-                    4 => out.push((id, notch(0.0, -48.0))),
-                    5 => out.push((id, notch(0.0, 48.0))),
-                    6 => out.push((id, notch(-48.0, 0.0))),
-                    7 => out.push((id, notch(48.0, 0.0))),
+                    4 => out.push((id, notch(0.0, -1.0))),
+                    5 => out.push((id, notch(0.0, 1.0))),
+                    6 => out.push((id, notch(-1.0, 0.0))),
+                    7 => out.push((id, notch(1.0, 0.0))),
                     _ => {}
                 }
             }

@@ -901,10 +901,11 @@ pub fn predicted(x: f32, y: f32) {
     input(Input::Predicted(point(x, y)));
 }
 
-/// A wheel or trackpad scrolled by `dx`, `dy` CSS pixels.
+/// A wheel or trackpad scrolled by `dx`, `dy` CSS pixels, and by `nx`, `ny` notches where the browser says a wheel
+/// turned by clicks (its `deltaMode` in lines, as Firefox's is), or 0.
 #[wasm_bindgen]
-pub fn wheel(x: f32, y: f32, dx: f32, dy: f32) {
-    input(Input::Wheel(point(x, y), point(dx, dy), None));
+pub fn wheel(x: f32, y: f32, dx: f32, dy: f32, nx: f32, ny: f32) {
+    input(Input::Wheel(point(x, y), point(dx, dy), None, (nx != 0.0 || ny != 0.0).then(|| point(nx, ny))));
 }
 
 /// A key, as the DOM's `KeyboardEvent.key` names it, with the modifiers held.

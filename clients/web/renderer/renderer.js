@@ -144,10 +144,12 @@
     canvas.addEventListener("pointerup", (event) => (pointer("up")(event), renderer.flush()))
     canvas.addEventListener("pointerleave", pointer("leave"))
     canvas.addEventListener("pointercancel", pointer("cancel"))
-    // A wheel's lines and pages, in CSS pixels, as a browser scrolls them.
+    // A wheel's lines and pages, in CSS pixels, as a browser scrolls them; one that says lines (Firefox's) turned by
+    // notches, an event each.
     const unit = [1, 16, innerHeight]
+    const notch = (event, by) => (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? Math.sign(by) : 0)
     // A wheel over a video turns the screen's, not the page.
-    canvas.addEventListener("wheel", (event) => (event.preventDefault(), streams.wheel(event, unit[event.deltaMode]) || renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode])), { passive: false })
+    canvas.addEventListener("wheel", (event) => (event.preventDefault(), streams.wheel(event, unit[event.deltaMode]) || renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode], notch(event, event.deltaX), notch(event, event.deltaY))), { passive: false })
     // A key is the page's first, as a Mac's are (`platform::mac`): one that types nothing, or with ⌘ or Ctrl held.
     // What types something goes to the field being typed in, and every key while its input method composes, and so do
     // copy, cut and paste, so they're the browser's own clipboard's.

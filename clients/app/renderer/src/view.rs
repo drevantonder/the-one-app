@@ -1540,7 +1540,7 @@ impl Screen {
     }
 
     /// A pointer event to each node in `chain` that listens for it, the innermost first, as the DOM's bubble.
-    fn pointer_event(&mut self, chain: &[Id], name: &str, at: Point<f32>, button: u8, wheel: Option<(Point<f32>, Option<Phase>)>) {
+    fn pointer_event(&mut self, chain: &[Id], name: &str, at: Point<f32>, button: u8, wheel: Option<(Point<f32>, Option<Phase>, Option<Point<f32>>)>) {
         for &id in chain {
             if !self.tree.nodes.get(&id).is_some_and(|node| node.listens(name)) {
                 continue;
@@ -1553,9 +1553,13 @@ impl Screen {
                 "timeStamp": self.input_time(),
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
-            if let Some((delta, phase)) = wheel {
+            if let Some((delta, phase, notches)) = wheel {
                 told["deltaX"] = json!(delta.x);
                 told["deltaY"] = json!(delta.y);
+                if let Some(notches) = notches {
+                    told["notchesX"] = json!(notches.x);
+                    told["notchesY"] = json!(notches.y);
+                }
                 if let Some(phase) = phase {
                     told["momentum"] = json!(phase.momentum);
                     if let Some(fingers) = phase.fingers {
@@ -1801,11 +1805,12 @@ impl Screen {
     }
 
     /// The wheel or a trackpad scrolled by `delta` pixels (down and right positive) at `at`, in `phase` where the
-    /// system says: what's under it is told (`wheel`), and the innermost thing there that can still scroll that way
-    /// does, telling its app if it listens. → what scrolled.
-    pub fn scroll(&mut self, at: Point<f32>, delta: Point<f32>, phase: Option<Phase>) -> Option<Id> {
+    /// system says, or by a wheel's `notches`, its clicks as it turns, where it has them: what's under it is told
+    /// (`wheel`), and the innermost thing there that can still scroll that way does, telling its app if it listens.
+    /// → what scrolled.
+    pub fn scroll(&mut self, at: Point<f32>, delta: Point<f32>, phase: Option<Phase>, notches: Option<Point<f32>>) -> Option<Id> {
         // A frame's page scrolls first, and what it can't, this one does, as a browser chains them.
-        if let Some(frame) = self.frame_scroll(at, delta, Some(phase)) {
+        if let Some(frame) = self.frame_scroll(at, delta, Some((phase, notches))) {
             return Some(frame);
         }
         if self.drag_wheel(at, delta, phase) {
@@ -1816,7 +1821,7 @@ impl Screen {
             return None;
         }
         let chain = self.under(at);
-        self.pointer_event(&chain, "wheel", at, 0, Some((delta, phase)));
+        self.pointer_event(&chain, "wheel", at, 0, Some((delta, phase, notches)));
         self.pan(at, delta)
     }
 

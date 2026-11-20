@@ -150,6 +150,9 @@ export interface Event {
    * the momentum after they've lifted. */
   phase?: Phase
   momentum?: boolean
+  /** `wheel`'s, where a wheel turned by clicks (a mouse's): how many, along and down. */
+  notchesX?: number
+  notchesY?: number
   /** A `video`'s `offer`: its SDP offer, with its candidates. */
   sdp?: string
   /** A `video`'s `state`: its data channel open (`connected`), or its connection lost. */

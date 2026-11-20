@@ -840,10 +840,13 @@ define_class!(
 
         #[unsafe(method(scrollWheel:))]
         fn scroll_wheel(&self, event: &NSEvent) {
-            // A trackpad says pixels; a wheel says lines, which WebKit scrolls 40 px each. AppKit's deltas move the
-            // content, so the DOM's, which move the view, are the other way.
-            let per = if event.hasPreciseScrollingDeltas() { 1.0 } else { 40.0 };
+            // A trackpad says pixels; a wheel says lines, which WebKit scrolls 40 px each, an event a click of it.
+            // AppKit's deltas move the content, so the DOM's, which move the view, are the other way.
+            let precise = event.hasPreciseScrollingDeltas();
+            let per = if precise { 1.0 } else { 40.0 };
             let delta = Point { x: -(event.scrollingDeltaX() as f32) * per, y: -(event.scrollingDeltaY() as f32) * per };
+            let click = |by: f32| if by == 0.0 { 0.0 } else { by.signum() };
+            let notches = (!precise).then(|| Point { x: click(delta.x), y: click(delta.y) });
             // A trackpad's fingers' phase, and the momentum AppKit goes on with once they've lifted; a wheel has neither.
             let (fingers, momentum) = (event.phase(), event.momentumPhase());
             let phase = (fingers != NSEventPhase::None || momentum != NSEventPhase::None).then(|| Phase {
@@ -853,7 +856,7 @@ define_class!(
                     .map(|at| Phase::FINGERS[at]),
                 momentum: momentum != NSEventPhase::None,
             });
-            self.ivars().shared.send(Input::Wheel(self.at(event), delta, phase));
+            self.ivars().shared.send(Input::Wheel(self.at(event), delta, phase, notches));
         }
     }
 

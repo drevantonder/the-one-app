@@ -719,7 +719,7 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             let (x, y) = if request.selects() { point_of(windows, id, request)? } else { (0.0, 0.0) };
             let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
             let momentum = request.inputs.get("momentum").and_then(Value::as_bool).unwrap_or(false);
-            windows.wheel(id, (x, y), (dx, dy), request.str("phase"), momentum);
+            windows.wheel(id, (x, y), (dx, dy), request.str("phase"), momentum, notches(|name| request.inputs.get(name).and_then(Value::as_f64)));
             windows.run(0.0);
             let scrolled = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten();
             Ok(json!({"scrolled": scrolled.map(|at| json!({"x": at.x, "y": at.y}))}))
@@ -893,18 +893,24 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "leaving": leaving, "frames": frames, "time": renderer::platform::fake_time(), "paused": true}))
 }
 
+/// A mouse wheel's clicks as it turns (`notchesX`, `notchesY`), where an event says them.
+fn notches(at: impl Fn(&str) -> Option<f64>) -> Option<(f32, f32)> {
+    let (x, y) = (at("notchesX"), at("notchesY"));
+    (x.is_some() || y.is_some()).then(|| (x.unwrap_or(0.0) as f32, y.unwrap_or(0.0) as f32))
+}
+
 /// No moves: a trace's replay has its events instead.
 static EMPTY: Vec<Value> = Vec::new();
 
 /// One event of a trace, as the display's (`trace`'s `events`): a wheel's or a trackpad's scroll (`dx`, `dy`, its
-/// `phase` and `momentum`), the pointer moved, a button down or up (a finger's on a phone's window), a finger
+/// `phase` and `momentum`, or a mouse wheel's `notchesX` and `notchesY`), the pointer moved, a button down or up (a finger's on a phone's window), a finger
 /// (`touch`, its `phase`, `down`, `moved`, `up` or `cancelled`, and which `finger`, as a phone's screen says it), each
 /// at `x`, `y`, or a `key`.
 fn deliver(windows: &mut Windows, id: renderer::platform::WindowId, event: &Value) -> anyhow::Result<()> {
     let at = |name: &str| event[name].as_f64().unwrap_or(0.0) as f32;
     let (x, y) = (at("x"), at("y"));
     match event["kind"].as_str().unwrap_or_default() {
-        "wheel" => windows.wheel(id, (x, y), (at("dx"), at("dy")), event["phase"].as_str(), event["momentum"].as_bool().unwrap_or(false)),
+        "wheel" => windows.wheel(id, (x, y), (at("dx"), at("dy")), event["phase"].as_str(), event["momentum"].as_bool().unwrap_or(false), notches(|name| event[name].as_f64())),
         "move" => press(windows, id, x, y, Phase::Moved),
         "down" => press(windows, id, x, y, Phase::Down),
         "up" => press(windows, id, x, y, Phase::Up),

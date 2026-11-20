@@ -1774,9 +1774,9 @@ impl Windows {
                     None => {}
                 }
             }
-            Input::Wheel(at, delta, phase) => {
+            Input::Wheel(at, delta, phase, notches) => {
                 window.timing.input("scroll");
-                screen.scroll(at, delta, phase);
+                screen.scroll(at, delta, phase, notches);
             }
             Input::Key(key) => drop(screen.key(&key)),
             Input::Ime(ime) => screen.ime(ime),
@@ -2214,11 +2214,13 @@ impl Windows {
     }
 
     /// A wheel's or a trackpad's scroll at `at` on window `id`, by `by` in points, in a trackpad's phase where it says
-    /// one (its fingers' by AppKit's names, `crate::view::Phase::FINGERS`, and whether it's the momentum after).
-    pub fn wheel(&mut self, id: WindowId, at: (f32, f32), by: (f32, f32), fingers: Option<&str>, momentum: bool) {
+    /// one (its fingers' by AppKit's names, `crate::view::Phase::FINGERS`, and whether it's the momentum after), or a
+    /// wheel's `notches` where it turned by clicks.
+    pub fn wheel(&mut self, id: WindowId, at: (f32, f32), by: (f32, f32), fingers: Option<&str>, momentum: bool, notches: Option<(f32, f32)>) {
         let fingers = fingers.and_then(|named| crate::view::Phase::FINGERS.into_iter().find(|one| *one == named));
         let phase = (fingers.is_some() || momentum).then_some(crate::view::Phase { fingers, momentum });
-        self.display.push(id, Input::Wheel(crate::geometry::point(at.0, at.1), crate::geometry::point(by.0, by.1), phase));
+        let notches = notches.map(|(x, y)| crate::geometry::point(x, y));
+        self.display.push(id, Input::Wheel(crate::geometry::point(at.0, at.1), crate::geometry::point(by.0, by.1), phase, notches));
     }
 
     /// A key on window `id`, as an inspector's `key` request says it.
@@ -2362,7 +2364,13 @@ impl Input {
             Input::Moved(at) => json!({"kind": "move", "x": at.x, "y": at.y}),
             Input::Down(at, button, shift) => json!({"kind": "down", "x": at.x, "y": at.y, "button": button, "shift": shift}),
             Input::Up(at, button) => json!({"kind": "up", "x": at.x, "y": at.y, "button": button}),
-            Input::Wheel(at, by, phase) => json!({"kind": "wheel", "x": at.x, "y": at.y, "dx": by.x, "dy": by.y, "phase": phase.as_ref().and_then(|phase| phase.fingers), "momentum": phase.as_ref().is_some_and(|phase| phase.momentum)}),
+            Input::Wheel(at, by, phase, notches) => {
+                let mut wheel = json!({"kind": "wheel", "x": at.x, "y": at.y, "dx": by.x, "dy": by.y, "phase": phase.as_ref().and_then(|phase| phase.fingers), "momentum": phase.as_ref().is_some_and(|phase| phase.momentum)});
+                if let Some(notches) = notches {
+                    (wheel["notchesX"], wheel["notchesY"]) = (json!(notches.x), json!(notches.y));
+                }
+                wheel
+            }
             Input::Key(key) => json!({"kind": "key", "key": key.key, "shift": key.shift, "alt": key.alt, "ctrl": key.ctrl, "meta": key.meta}),
             _ => return None,
         })
@@ -2377,7 +2385,7 @@ impl Input {
             Input::Down(at, button, shift) => Input::Down(moved(at), button, shift),
             Input::Up(at, button) => Input::Up(moved(at), button),
             Input::Dropped(at, files) => Input::Dropped(moved(at), files),
-            Input::Wheel(at, delta, phase) => Input::Wheel(moved(at), delta, phase),
+            Input::Wheel(at, delta, phase, notches) => Input::Wheel(moved(at), delta, phase, notches),
             input => input,
         }
     }
@@ -2415,8 +2423,9 @@ pub(crate) enum Input {
     Down(crate::geometry::Point<f32>, u8, bool),
     Up(crate::geometry::Point<f32>, u8),
     /// Scrolled along and down by so many pixels (left and up negative), in the trackpad's phase where the system
-    /// says it.
-    Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>, Option<crate::view::Phase>),
+    /// says it, and by so many notches along and down where a wheel turned by clicks, as a mouse's does: what tells
+    /// it from a trackpad's or a smooth wheel's scroll, which has none.
+    Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>, Option<crate::view::Phase>, Option<crate::geometry::Point<f32>>),
     /// A key the page hears first, as Flutter's keyboard manager gives its framework each key.
     Key(crate::inspect::Key),
     /// What X11's input method composes or commits, which has no text input plugin.

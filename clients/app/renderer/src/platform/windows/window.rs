@@ -1167,20 +1167,23 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
         }
         WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
             // A notch is as many lines as Windows is set to scroll (3 unless changed), of 16 px; down and right
-            // positive, as the DOM's are. A precision touchpad sends fractions of a notch.
+            // positive, as the DOM's are. A mouse's wheel turns by whole notches (`WHEEL_DELTA`); a precision
+            // touchpad, or a wheel that turns smoothly, sends fractions of one.
             let mut lines = 3u32;
             unsafe {
                 let _ = SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, Some((&raw mut lines).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
             }
-            let notches = hiword(wparam.0 as isize) as f32 / WHEEL_DELTA as f32;
+            let turned = hiword(wparam.0 as isize);
+            let notches = turned as f32 / WHEEL_DELTA as f32;
             let distance = notches * lines as f32 * 16.0;
-            let delta = if msg == WM_MOUSEWHEEL { Point { x: 0.0, y: -distance } } else { Point { x: distance, y: 0.0 } };
+            let (delta, notched) = if msg == WM_MOUSEWHEEL { (Point { x: 0.0, y: -distance }, Point { x: 0.0, y: -notches }) } else { (Point { x: distance, y: 0.0 }, Point { x: notches, y: 0.0 }) };
+            let notched = (turned % WHEEL_DELTA as i32 == 0).then_some(notched);
             let mut point = POINT { x: loword(lparam.0), y: hiword(lparam.0) };
             unsafe {
                 let _ = ScreenToClient(hwnd, &mut point);
             }
             // A wheel message says no precision touchpad's phase: Windows' own momentum comes as more of them.
-            push(Input::Wheel(at(point.x, point.y), delta, None));
+            push(Input::Wheel(at(point.x, point.y), delta, None, notched));
             Some(0)
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {

@@ -262,7 +262,10 @@ impl Screen {
                 let fingers = request.inputs.get("phase").and_then(Value::as_str).and_then(|named| super::Phase::FINGERS.into_iter().find(|one| *one == named));
                 let momentum = request.inputs.get("momentum").and_then(Value::as_bool);
                 let phase = (fingers.is_some() || momentum.is_some()).then(|| super::Phase { fingers, momentum: momentum.unwrap_or(false) });
-                let scrolled = self.scroll(crate::geometry::point(x, y), crate::geometry::point(dx, dy), phase).and_then(|id| self.scrolled.get(&id).copied()).unwrap_or_default();
+                // A wheel's notches, where it turned by clicks.
+                let (nx, ny) = (request.f32("notchesX"), request.f32("notchesY"));
+                let notches = (nx.is_some() || ny.is_some()).then(|| crate::geometry::point(nx.unwrap_or(0.0), ny.unwrap_or(0.0)));
+                let scrolled = self.scroll(crate::geometry::point(x, y), crate::geometry::point(dx, dy), phase, notches).and_then(|id| self.scrolled.get(&id).copied()).unwrap_or_default();
                 json!({"scrolled": {"x": scrolled.x, "y": scrolled.y}})
             }
             "drag" => {

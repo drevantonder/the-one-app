@@ -78,7 +78,8 @@
 //!   Z, Shift+Z, Y and A, Ctrl+arrows by word, Shift to select, Home and End), with a clipboard of the window's own
 //!   in the headless harness.
 //! - `scroll` (`dx`, `dy` in CSS pixels, and a selector of what's in what scrolls, or a point; `phase`, a trackpad's fingers' by
-//!   AppKit's names, and `momentum`, as a Mac says them, `view::Phase`) → `{scrolled: {x, y}}`.
+//!   AppKit's names, and `momentum`, as a Mac says them, `view::Phase`; or `notchesX`, `notchesY`, a mouse wheel's clicks
+//!   as it turns) → `{scrolled: {x, y}}`.
 //! - `drag` (a selector, or a point, where it starts; `dx`, `dy` in CSS pixels; `steps`, 10 unless given, and `ms`,
 //!   200) → `{dragged}`: the pointer goes down there, moves `dx`, `dy` in `steps` even moves, and comes up, as
 //!   Playwright's mouse drags, or in a window for a finger, as a phone's finger does, scrolling what scrolls that way

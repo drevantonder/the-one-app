@@ -49,13 +49,17 @@ export type Laid = {
 }
 /** A trackpad's or a wheel's scroll, in CSS pixels. Where the system says them, which a native host on a Mac does and
  * the DOM doesn't: the trackpad's fingers' `phase`, by AppKit's names, and whether it's the `momentum` after they've
- * lifted. */
+ * lifted. Where a wheel turned by clicks, as a mouse's does, how many it turned along and down (`notchesX`,
+ * `notchesY`, the deltas' way), which a native host says on every system and the DOM where it says lines (Firefox):
+ * what tells it from a trackpad's scroll, or a wheel's that turns smoothly, which has none. */
 export type Wheeled = {
   deltaX: number
   deltaY: number
   timeStamp: number
   phase?: "began" | "changed" | "ended" | "cancelled" | "mayBegin"
   momentum?: boolean
+  notchesX?: number
+  notchesY?: number
 }
 
 /** What a key pressed is told, as the DOM's `KeyboardEvent`: `preventDefault()` keeps what the key does by itself

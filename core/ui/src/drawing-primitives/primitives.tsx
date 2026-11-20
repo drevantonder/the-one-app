@@ -609,19 +609,25 @@ function follows(box: HTMLElement, props: ViewProps) {
   box.addEventListener(
     "wheel",
     (event) => {
-      if (Math.abs(event.deltaY) > Math.abs(event.deltaX) && scrolls(event.target, box)) return
+      // Up and down over what scrolls inside it is that's, while it can still scroll that way, as a native host's is.
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX) && scrolls(event.target, box, event.deltaY)) return
       event.preventDefault()
       const lines = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? box.clientHeight : 1
-      props.onWheel?.({ deltaX: event.deltaX * lines, deltaY: event.deltaY * lines, timeStamp: event.timeStamp })
+      // A wheel the browser says in lines (Firefox's) turned by notches, an event each.
+      const notches = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? { notchesX: Math.sign(event.deltaX), notchesY: Math.sign(event.deltaY) } : {}
+      props.onWheel?.({ deltaX: event.deltaX * lines, deltaY: event.deltaY * lines, timeStamp: event.timeStamp, ...notches })
     },
     { passive: false },
   )
 }
 
 /** Whether `target` is in something in `box` that scrolls. */
-const scrolls = (target: EventTarget | null, box: HTMLElement) => {
+/** Whether what's at `target` scrolls inside `box`, and can still scroll down (`by` over 0) or up (under 0) where it's
+ * said. */
+const scrolls = (target: EventTarget | null, box: HTMLElement, by?: number) => {
   const scroller = (target as Element | null)?.closest?.("[data-scrolls]")
-  return !!scroller && scroller !== box && box.contains(scroller)
+  if (!scroller || scroller === box || !box.contains(scroller)) return false
+  return by === undefined || (by < 0 ? scroller.scrollTop > 0 : scroller.scrollTop < scroller.scrollHeight - scroller.clientHeight)
 }
 
 /** A text's props. */
