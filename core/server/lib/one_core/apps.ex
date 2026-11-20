@@ -206,7 +206,8 @@ defmodule OneCore.Apps do
   ago, and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody uses costs nothing.
   """
   def reload(owner, only \\ :all) do
-    Servers.reload(owner)
+    # Told only which apps changed, it's their versions that are new, not the servers.
+    if only == :all, do: Servers.reload(owner)
     OneCore.Apps.Deploy.forget()
     if sync(owner, [], only), do: changed([owner])
     # An app updated by a server elsewhere may require what isn't installed for them yet.
