@@ -478,7 +478,9 @@ if ((${#servers[@]})); then
   # carry.
   mingit=2.56.1
   mingit_url=https://github.com/git-for-windows/git/releases/download/v$mingit.windows.1/MinGit-$mingit-64-bit.zip
-  mingit_sum=$(curl -fsSL "https://api.github.com/repos/git-for-windows/git/releases/tags/v$mingit.windows.1" |
+  # GitHub's API asked as whoever `gh` is signed in as: without it, 60 requests an hour from an address, which a
+  # day of releases from one machine used up (20 Nov).
+  mingit_sum=$(gh api "repos/git-for-windows/git/releases/tags/v$mingit.windows.1" |
     jq -r --arg z "MinGit-$mingit-64-bit.zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
   wait "$nifs" || { echo "The servers' NIFs weren't built." >&2 && exit 1; }
   wait "$ui" || { echo "The UI library wasn't built." >&2 && exit 1; }
@@ -506,7 +508,7 @@ for kind in "${servers[@]}"; do
       archive=$(fetched "https://builds.hex.pm/builds/otp/$hex/ubuntu-22.04/OTP-$otp.tar.gz" "otp-$otp-$kind.tar.gz" "$sum")
     elif [[ $kind == windows-* ]]; then
       zip=otp_win64_$otp.zip
-      sum=$(curl -fsSL "https://api.github.com/repos/erlang/otp/releases/tags/OTP-$otp" | jq -r --arg z "$zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
+      sum=$(gh api "repos/erlang/otp/releases/tags/OTP-$otp" | jq -r --arg z "$zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
       archive=$(fetched "https://github.com/erlang/otp/releases/download/OTP-$otp/$zip" "otp-$otp-$kind.zip" "$sum")
     else
       url="https://github.com/erlef/otp_builds/releases/download/OTP-$otp/otp-aarch64-apple-darwin.tar.gz"
