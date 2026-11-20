@@ -1,6 +1,10 @@
 //! How much memory the app uses, as its system counts it, and where that is, told to Telemetry once what's on
 //! screen has settled after it changes: `one.client.memory` is the process's, and `one.client.memory.<part>` its
-//! parts' (`renderer::platform::Windows::memory`), each in MB, and how many command encoders the GPU holds
+//! parts', each in MB: what the GPU holds for it (`gpu`, `renderer::render::Context::memory`), and of that its
+//! windows' surfaces and textures (`renderer::platform::Windows::memory`); all the graphics memory the system counts
+//! against it (`graphics`: the GPU's, and its system's own layers' and web view's, a Mac's and an iPhone's); what
+//! its heap holds (`heap`: Rust's, QuickJS's and the system's frameworks', where its allocator says), and of that its
+//! pages' JS (`js`); what's left is its code and its threads' stacks; and how many command encoders the GPU holds
 //! (`one.client.gpu.encoders`), each with the state it was in (`one.state`: `background`
 //! with nothing on screen, `launcher` while it's summoned, `windows` with an app's window open) and how many windows
 //! were on screen (`one.windows`) and its system (`os.type`, as Telemetry adds a metric's points up whichever device
@@ -61,25 +65,27 @@ fn measure() {
         let surfaces = sum("surface");
         let textures = sum("kept") + sum("backdrop") + sum("rasters") + sum("tiles") + sum("buffer") + parts["atlas"].as_u64().unwrap_or(0);
         let js: u64 = all.iter().map(|window| window["js"].as_u64().unwrap_or(0)).sum();
-        // The GPU's allocator's, where its backend says (not Metal, whose textures a Mac counts as their own).
         let gpu = parts["gpu"]["reserved"].as_u64();
+        let (graphics, heap) = (graphics(), heap());
         let encoders = parts["gpu"]["encoders"].as_u64().unwrap_or(0);
         let process = process();
         let mb = |bytes: u64| (bytes as f64 / 1e5).round() / 10.0;
         let said = |bytes: Option<u64>| bytes.map_or("unknown".to_owned(), |bytes| format!("{} MB", mb(bytes)));
         eprintln!(
-            "the app's memory, {state} with {} windows on screen of {}: {} all told; its windows' surfaces {}, textures {}, the GPU's allocator {} and {encoders} command encoders, JS {}; {parts}",
+            "the app's memory, {state} with {} windows on screen of {}: {} all told; the GPU {} (its windows' surfaces {}, textures {}) and {encoders} command encoders, graphics {}, the heap {} (JS {}); {parts}",
             shown.len(),
             all.len(),
             said(process),
+            said(gpu),
             said(Some(surfaces)),
             said(Some(textures)),
-            said(gpu),
+            said(graphics),
+            said(heap),
             said(Some(js)),
         );
         let Ok(views) = crate::views() else { return };
         let attributes = json!({"one.state": state, "one.windows": shown.len(), "os.type": std::env::consts::OS});
-        let records = [("one.client.memory", process), ("one.client.memory.surfaces", Some(surfaces)), ("one.client.memory.textures", Some(textures)), ("one.client.memory.gpu", gpu), ("one.client.memory.js", Some(js))];
+        let records = [("one.client.memory", process), ("one.client.memory.surfaces", Some(surfaces)), ("one.client.memory.textures", Some(textures)), ("one.client.memory.gpu", gpu), ("one.client.memory.graphics", graphics), ("one.client.memory.heap", heap), ("one.client.memory.js", Some(js))];
         for (name, bytes) in records {
             if let Some(bytes) = bytes {
                 views.client.report(json!({"name": name, "value": mb(bytes), "attributes": attributes}));
@@ -130,4 +136,36 @@ fn process() -> Option<u64> {
     let rollup = std::fs::read_to_string("/proc/self/smaps_rollup").ok()?;
     let kb = |field: &str| rollup.lines().find_map(|line| line.strip_prefix(field)?.trim().strip_suffix("kB")?.trim().parse::<u64>().ok());
     Some((kb("Private_Clean:")? + kb("Private_Dirty:")?) * 1024)
+}
+
+/// All the graphics memory the system counts against the process (its ledger's), the GPU's and its frameworks'
+/// layers': a Mac's and an iPhone's, where it's what footprint calls "IOAccelerator (graphics)" and "IOSurface".
+#[cfg(target_vendor = "apple")]
+fn graphics() -> Option<u64> {
+    use mach2::task_info::{TASK_VM_INFO, task_vm_info};
+    let mut info = task_vm_info::default();
+    let mut count = (std::mem::size_of::<task_vm_info>() / std::mem::size_of::<mach2::vm_types::natural_t>()) as u32;
+    // Safety: the info is the size said, and the task is this one, which needs no releasing.
+    let read = unsafe { mach2::task::task_info(mach2::traps::mach_task_self(), TASK_VM_INFO, (&raw mut info).cast(), &mut count) };
+    let bytes = info.ledger_tag_graphics_footprint + info.ledger_tag_graphics_footprint_compressed;
+    (read == mach2::kern_return::KERN_SUCCESS).then_some(bytes.max(0) as u64)
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn graphics() -> Option<u64> {
+    None
+}
+
+/// What the process's heap holds as its allocator counts it: every malloc zone's, a Mac's and an iPhone's.
+#[cfg(target_vendor = "apple")]
+fn heap() -> Option<u64> {
+    let mut stats = libc::malloc_statistics_t { blocks_in_use: 0, size_in_use: 0, max_size_in_use: 0, size_allocated: 0 };
+    // Safety: no zone is every zone's, and the statistics are filled in.
+    unsafe { libc::malloc_zone_statistics(std::ptr::null_mut(), &mut stats) };
+    Some(stats.size_in_use as u64)
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn heap() -> Option<u64> {
+    None
 }

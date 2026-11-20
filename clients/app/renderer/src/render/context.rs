@@ -139,15 +139,32 @@ impl Context {
     }
 
     /// The GPU memory its allocator has taken from the system (`reserved`) and what it's given out of that
-    /// (`allocated`), in bytes, where its backend says (Direct3D 12's and Vulkan's; Metal's makes each texture alone),
-    /// and how many command encoders it holds (`encoders`): wgpu keeps every one it's needed at once, and a driver
-    /// keeps what each recorded at most (Intel's Direct3D 12, 0.3 to 0.6 MB a render pass).
+    /// (`allocated`), in bytes: Direct3D 12's and Vulkan's allocator's, and on Metal, which makes each buffer and
+    /// texture alone, all the device holds for this process (`MTLDevice.currentAllocatedSize`), which a Mac and an
+    /// iPhone count as the app's; how many command encoders it holds (`encoders`): wgpu keeps every one it's needed
+    /// at once, and a driver keeps what each recorded at most (Intel's Direct3D 12, 0.3 to 0.6 MB a render pass); and
+    /// how many buffers, textures, pipelines and shaders it holds.
     pub fn memory(&self) -> serde_json::Value {
-        let report = self.device.generate_allocator_report();
+        let counters = self.device.get_internal_counters().hal;
+        #[cfg(target_vendor = "apple")]
+        let reserved = {
+            use objc2_metal::MTLDevice;
+            // Safety: the device is only read.
+            let metal = unsafe { self.device.as_hal::<wgpu::hal::api::Metal>() };
+            metal.map(|device| device.raw_device().currentAllocatedSize() as u64)
+        };
+        #[cfg(target_vendor = "apple")]
+        let allocated = reserved;
+        #[cfg(not(target_vendor = "apple"))]
+        let (reserved, allocated) = self.device.generate_allocator_report().map(|report| (report.total_reserved_bytes, report.total_allocated_bytes)).unzip();
         serde_json::json!({
-            "reserved": report.as_ref().map(|report| report.total_reserved_bytes),
-            "allocated": report.as_ref().map(|report| report.total_allocated_bytes),
-            "encoders": self.device.get_internal_counters().hal.command_encoders.read(),
+            "reserved": reserved,
+            "allocated": allocated,
+            "encoders": counters.command_encoders.read(),
+            "buffers": counters.buffers.read(),
+            "textures": counters.textures.read(),
+            "pipelines": counters.render_pipelines.read() + counters.compute_pipelines.read(),
+            "shaders": counters.shader_modules.read(),
         })
     }
 

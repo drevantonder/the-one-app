@@ -131,6 +131,8 @@ libc = "0.2"
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
+# What the system counts as the app's graphics memory (`TASK_VM_INFO`'s ledger), for its memory report (`memory`).
+mach2 = "0.6"
 
 # A Mac app's menu bar (`host`, `computer`), and each app's icon as its bundle's .icns (`shortcuts`).
 [target.'cfg(target_os = "macos")'.dependencies]

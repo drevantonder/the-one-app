@@ -224,6 +224,7 @@ dependencies = [
  "ico",
  "jni 0.21.1",
  "libc",
+ "mach2",
  "muda",
  "notifications_client",
  "notify",
@@ -5018,6 +5019,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "mach2"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "dae608c151f68243f2b000364e1f7b186d9c29845f7d2d85bd31b9ad77ad552b"
+
+[[package]]
 name = "markup5ever"
 version = "0.39.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -7376,6 +7383,7 @@ dependencies = [
  "objc2-core-text",
  "objc2-core-video",
  "objc2-foundation 0.3.2",
+ "objc2-metal 0.3.2",
  "objc2-quartz-core 0.3.2",
  "objc2-ui-kit 0.3.2",
  "openh264",

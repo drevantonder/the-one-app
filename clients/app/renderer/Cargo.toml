@@ -180,6 +180,8 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFont"] }
 dispatch2 = "0.3"
 objc2 = "0.6"
+# What the GPU holds for the app, as Metal says (`Context::memory`), which wgpu's allocator report doesn't on Metal.
+objc2-metal = { version = "0.3.2", default-features = false, features = ["std", "MTLDevice"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSProcessInfo", "NSRunLoop", "NSString"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CABase", "CALayer", "CAMetalLayer", "CATransaction"] }
 # The display's frames, by a display link (`Display::frame`), as GPUI's Mac platform has them.
