@@ -357,10 +357,10 @@ struct Window {
     parts: Vec<Part>,
     /// How big its page is laid out, in points: a panel's as its page asks (`resize`), the rest their window's.
     room: Size<Pixels>,
-    /// A panel showing as its page asked for another room, which it's placed again for once it's drawn in it, as it
-    /// would have been summoned: its page asks as it first opens, which is after it first shows.
+    /// A panel summoned or showing that's to be placed, as it's summoned (`Display::summon`), before its next frame
+    /// shows: summoned before it had drawn, or showing as its page asked for another room.
     placing: bool,
-    /// When it was opened, hidden, and whether it's shown.
+    /// When it was opened, hidden, and whether it's shown: a panel once its page has started, which it's summoned with.
     opened: web_time::Instant,
     shown: bool,
     /// A panel's: whether it's showing, and since when it was asked to, until its frame is drawn.
@@ -547,7 +547,7 @@ impl Windows {
                 room: options.size,
                 placing: false,
                 opened,
-                shown: panel,
+                shown: false,
                 panel,
                 visible: false,
                 summoned: None,
@@ -756,7 +756,12 @@ impl Windows {
             screen.summoned(key);
         }
         let queued = asked.elapsed();
-        self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
+        // On the screen with what it last drew, where it has; else once its page has drawn its first frame (`turn`), so
+        // a launcher summoned as the app starts never shows empty.
+        match window.drawn {
+            true => self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room),
+            false => window.placing = true,
+        }
         // Where the time to show it goes: waiting for this thread, then for the system's to place it, then drawing.
         let ms = |time: std::time::Duration| time.as_secs_f64() * 1000.0;
         eprintln!("the launcher's summon waited {:.1} ms for its thread and {:.1} ms to be placed", ms(queued), ms(asked.elapsed() - queued));
@@ -772,6 +777,7 @@ impl Windows {
         }
         window.visible = false;
         window.summoned = None;
+        window.placing = false;
         // Its surfaces let go of their images, or on a Mac its next frame's taken while it's still on the screen, so
         // it's drawn at once as it's summoned (`Renderer::put_away`).
         for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
@@ -1210,7 +1216,10 @@ impl Windows {
                     continue;
                 }
                 window.shown = true;
-                self.display.show(&window.parts[0].native);
+                // A panel shows as it's summoned.
+                if !window.panel {
+                    self.display.show(&window.parts[0].native);
+                }
             }
             // Its page loading again in its place (`reload`) is drawn as a new window shows, the frame before staying
             // on screen until then.
@@ -1289,6 +1298,10 @@ impl Windows {
             }
             let painted = web_time::Instant::now();
             let glass = window.screen.as_ref().map(|screen| screen.glass().to_vec()).unwrap_or_default();
+            // Placed for the room it's drawn in before that frame shows, so it shows where it stays.
+            if window.drawn && std::mem::take(&mut window.placing) {
+                self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
+            }
             if !window.arrange(&self.display, &self.context, &self.atlas, &glass) {
                 window.missed(&self.context, &self.atlas);
                 continue;
@@ -1317,8 +1330,10 @@ impl Windows {
             if let Some(frames) = frames {
                 (window.on_event)(Event::Frames(frames));
             }
+            // Summoned before it had drawn, it's on the screen now it has, arranged again so its parts show with it.
             if std::mem::take(&mut window.placing) {
                 self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
+                window.arrange(&self.display, &self.context, &self.atlas, &glass);
             }
             if !window.drawn {
                 window.drawn = true;
@@ -1694,9 +1709,23 @@ impl Windows {
         self.windows.values().any(|window| window.dirty)
     }
 
-    /// The display shows a frame now, which the loop hears on its turn.
+    /// The display shows a frame now, which the loop hears on its turn. A panel just put on the screen with nothing
+    /// drawn on it (a page that hadn't drawn yet) is wrong (`wrong`), as a host's compositor shows its window then,
+    /// its backdrop an empty box, until the next frame.
     pub fn tick(&mut self) {
         self.display.tick(now());
+        for id in self.display.summoned() {
+            let Some(window) = self.windows.get_mut(&id) else { continue };
+            let drawn = window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()?.read()).any(|(_, _, rgba)| rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+            if !drawn {
+                self.display.wrong(format!("{} was put on the screen with nothing drawn on it", window.title));
+            }
+        }
+    }
+
+    /// What was wrong with what the display showed, since it was last asked.
+    pub fn wrong(&self) -> Vec<String> {
+        self.display.wrongs()
     }
 
     /// Window `id` is drawn again on the next turn, though nothing on it changed.

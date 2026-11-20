@@ -26,6 +26,11 @@ pub struct Display {
     /// How long each frame takes to draw, in ms, where it's longer than a refresh, as on a device others load
     /// (`set_frame_ms`).
     drawing: Cell<f64>,
+    /// The panels put on the screen since the display last showed a frame, which the frame it shows next is checked
+    /// on (`Windows::tick`): a host's summon shows its window at once, with what it last presented.
+    summoned: RefCell<Vec<WindowId>>,
+    /// What was wrong with what it showed (`Windows::tick`), since it was last asked.
+    wrong: RefCell<Vec<String>>,
 }
 
 /// How often a refresh comes late where the display is adversarial, a frame dropped, as a busy device's are: one in
@@ -98,6 +103,8 @@ impl Display {
             wanted: Cell::new(false),
             random: Cell::new(0),
             drawing: Cell::new(0.0),
+            summoned: RefCell::default(),
+            wrong: RefCell::default(),
         }
     }
 
@@ -165,7 +172,22 @@ impl Display {
         Ok(NativeWindow { id: parent.id, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), scale: self.scale, slid: Cell::new(0.0) })
     }
 
-    pub fn summon(&self, _: &NativeWindow, _: &super::Places, _: Size<Pixels>) {}
+    pub fn summon(&self, window: &NativeWindow, _: &super::Places, _: Size<Pixels>) {
+        self.summoned.borrow_mut().push(window.id);
+    }
+
+    /// The panels put on the screen since it was last asked.
+    pub(crate) fn summoned(&self) -> Vec<WindowId> {
+        self.summoned.take()
+    }
+
+    pub(crate) fn wrong(&self, what: String) {
+        self.wrong.borrow_mut().push(what);
+    }
+
+    pub(crate) fn wrongs(&self) -> Vec<String> {
+        self.wrong.take()
+    }
 
     pub fn put_away(&self, _: &NativeWindow, _: bool) {}
 

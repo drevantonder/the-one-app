@@ -168,13 +168,12 @@ fn main() -> anyhow::Result<()> {
         };
         screen.late = Some(renderer::Late::new(Box::new(move || if random(4) == 0 { 1 + random(3) as u32 } else { 0 })));
     }
-    // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.
-    screen.idle();
-    screen.seed(seed);
-    let ran = started.elapsed();
-    if let Some(why) = screen.didnt_start() {
-        anyhow::bail!("its page didn't start: {why}");
+    // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run. A panel is
+    // summoned as it opens, its page still starting, as a launcher's first summon can come as the app starts.
+    if panel.is_none() {
+        screen.idle();
     }
+    screen.seed(seed);
     // A window of the fake platform's, drawn by the loop every host's windows are (`Windows::turn`).
     let gpu = std::time::Instant::now();
     let resident = || memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
@@ -193,6 +192,11 @@ fn main() -> anyhow::Result<()> {
     })?;
     if panel.is_some() {
         windows.summon(id, std::time::Instant::now(), None);
+        windows.wait();
+    }
+    let ran = started.elapsed();
+    if let Some(why) = windows.with(id, |screen| screen.didnt_start().map(str::to_owned)).flatten() {
+        anyhow::bail!("its page didn't start: {why}");
     }
     // With `--latency`, the page's clock runs as it opens, each answer coming when it's due, until it's had them all:
     // its first content is then, on that clock.
@@ -298,6 +302,11 @@ fn main() -> anyhow::Result<()> {
         eprintln!("{said}");
     }
     eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {w}x{h} px");
+    // What the display showed that it mustn't have, last, as its failure.
+    let wrong = windows.wrong();
+    if !wrong.is_empty() {
+        anyhow::bail!("{}", wrong.join("; "));
+    }
     if args.iter().any(|arg| arg == "--measure") {
         // How long a frame takes, on average over FRAMES each after `act`, which says false where there's nothing
         // to do it to: drawn one after another, as a window draws them, and the last waited for.
