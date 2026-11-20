@@ -65,6 +65,13 @@ export default {
     ),
     checks: {
       "Scrolled, its large title goes under the bar, which takes its glass": [{ expect: { blur: false } }, { trace: "traces/finger-pans-up.json" }, { expect: { blur: true } }, { expect: { shown: { role: "heading", name: "Notes" } } }],
+      // iOS's sizes at its usual text size (17 pt): the large title 34 pt (`.largeTitle`), the bar's 17 (`.headline`), each
+      // with its lines' height and the room around them.
+      "On a phone, the large title is 34 pt and the bar's title 17": [
+        { expect: { tall: { of: { role: "heading", name: "Notes" }, height: 49.3 } } },
+        { trace: "traces/finger-pans-up.json" },
+        { expect: { tall: { of: { role: "heading", name: "Notes" }, height: 34 } } },
+      ],
     },
     motions: { "Scrolled under its bar": { from: { x: 195, y: 600 }, gesture: { swipe: [0, -200], speed: 400 }, follow: { role: "heading", name: "Notes" } } },
   },

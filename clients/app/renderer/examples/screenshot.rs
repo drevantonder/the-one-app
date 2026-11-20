@@ -160,6 +160,8 @@ fn main() -> anyhow::Result<()> {
     screen.page = tokens_page;
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
+    // A phone's, as an iPhone's host says its person's text size: its body text's 17 pt, which the `phone` tokens are made for.
+    screen.text_size = touch.then_some(17.0);
     screen.panel = panel.map(|corner| renderer::Panel { corner, fill: false, whole: false });
     // A picture its page names by its path (Settings' `updates.svg`) is one of its files, read as an app's window
     // fetches it from its app's (`OneCore.Entrypoint` serves them as deployed), a `data:` address, or none where it

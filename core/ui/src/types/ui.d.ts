@@ -475,8 +475,9 @@ export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { do
  * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), and what the input with the
  * keyboard asks the platform's keyboard for (`keyboard`, as Flutter's `TextInputConfiguration` says it to iOS and
  * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`), and every text drawn in the window
- * at least `margins` points in from its sides, as a page's margins keep it. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; keyboard?: Record<string, unknown>; margins?: number }
+ * at least `margins` points in from its sides, as a page's margins keep it, and what's drawn as tall as it should be (`tall`:
+ * a node of that name, `height` points, within one), as a type size is. */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input

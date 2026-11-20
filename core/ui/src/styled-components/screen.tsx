@@ -31,7 +31,7 @@ const look = styles({
   large: { paddingInline: tokens.length.gutter, paddingTop: tokens.grid[1], paddingBottom: tokens.grid[1], font: tokens.type.largeTitle, textAlign: "start" },
   row: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], minHeight: tokens.length.bar, paddingInline: tokens.length.gutter },
   // A long name, which may be all the screen says of what it's about, takes two lines, as Android's bars do.
-  title: { flexGrow: 1, flexShrink: 1, minWidth: 0, paddingBlock: tokens.grid[1], font: tokens.type.title, lineClamp: 2, textAlign: "start" },
+  title: { flexGrow: 1, flexShrink: 1, minWidth: 0, paddingBlock: tokens.grid[1], font: tokens.type.headline, lineClamp: 2, textAlign: "start" },
   // On a computer, Raycast's: its title beside Back, 15px, on one line.
   computerTitle: { font: tokens.type.barTitle, lineClamp: 1 },
   // On a computer the bar is the window's title row, its unified toolbar, as macOS's System Settings and Raycast have

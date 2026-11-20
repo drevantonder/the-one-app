@@ -367,8 +367,10 @@ export const tokens = {
     largeTitle: type(sizes.largeTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
     /** A big number: a widget's stat. */
     figure: types.figure,
-    /** A bar's title, which runs to a second line before it's cut. */
-    title: type(sizes.large, weights.title, { lineHeight: 1.3, tracking: -0.015 }),
+    /** A screen's, a dialog's and a big widget text. */
+    title: types.title,
+    /** A bar's title under a finger, which runs to a second line before it's cut: UIKit's `.headline`, 17 pt. */
+    headline: types.headline,
     /** A computer's bar's title, deeper in an app, beside its Back: Raycast's 15px. */
     barTitle: type(sizes.barTitle, weights.label, { lineHeight: 1.3, tracking: -0.01 }),
     large: type(sizes.large, weights.label),
