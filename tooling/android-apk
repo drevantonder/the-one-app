@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Finishes a plain build of the One App for Android, an APK `cargo tauri android build --apk` made with no network in
+# it, for a network, as `tooling/testflight` does an iPhone's: its address, from the network's repo's `app/address` as
+# its main has it on the remote, goes in as the APK's `assets/network`, read as the app starts (`bundled` in
+# core/client), and it's aligned and signed again, with the keystore its network's edge names in its assetlinks
+# (`ANDROID_APPS` in apps/sign-in/edge/wrangler.jsonc), the Android SDK's debug keystore where none is given, whose
+# password is ANDROID_KEYSTORE_PASSWORD:
+#
+#     tooling/android-apk <the network's repo> <the plain APK> <the network's APK> [<keystore>]
+#
+# Its name, identifier and link hosts stay the One App's: Gradle and Tauri's deep-link plugin build them into its
+# manifest and its Rust.
+set -euo pipefail
+(($# == 3 || $# == 4)) || { echo "tooling/android-apk <the network's repo> <the plain APK> <the network's APK> [<keystore>]" >&2 && exit 1; }
+network=$1 plain=$2 out=$3 keystore=${4:-$HOME/.android/debug.keystore}
+[[ -n ${4:-} ]] || export ANDROID_KEYSTORE_PASSWORD=android
+tools=$(ls -d "${ANDROID_HOME:-$HOME/Android/Sdk}"/build-tools/* | sort -V | tail -1)
+work=$(mktemp -d) && trap 'rm -rf "$work"' EXIT
+
+git -C "$network" fetch -q origin main
+jq -nc --arg address "$(git -C "$network" show origin/main:app/address)" '{address: $address}' >"$work/network"
+cp "$plain" "$work/plain.apk"
+python3 -I -c $'import sys, zipfile\nwith zipfile.ZipFile(sys.argv[1], "a") as apk: apk.write(sys.argv[2], "assets/network")' \
+  "$work/plain.apk" "$work/network"
+"$tools/zipalign" -p -f 4 "$work/plain.apk" "$work/aligned.apk"
+"$tools/apksigner" sign --ks "$keystore" --ks-pass env:ANDROID_KEYSTORE_PASSWORD --out "$out" "$work/aligned.apk"
+"$tools/apksigner" verify "$out"

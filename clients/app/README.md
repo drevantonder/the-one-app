@@ -5,7 +5,8 @@ this build, finished for it afterwards, as white-label apps are made: its name, 
 its links and its address are written in, and it's signed for it. The network's settings are in its repo's `app/`, as
 a Tauri config (`tauri.conf.json`: `productName`, `identifier`, `plugins.deep-link.mobile`) and its address
 (`address`), and never in this repo or its GitHub runs, whose logs anyone can read. An iPhone's is finished and sent to
-TestFlight by `tooling/testflight <the network's repo>`. Its link hosts are where its web view uses the network's
+TestFlight by `tooling/testflight <the network's repo>`, and an Android APK finished by `tooling/android-apk`, which
+puts in only its address: its name, identifier and link hosts are built into its manifest and Rust. Its link hosts are where its web view uses the network's
 passkeys (`webcredentials:`) and which of its links open in it (`applinks:`), as the network's edge says it may
 (`apps/sign-in/edge/wrangler.jsonc`). `tooling/network` starts a network on this machine and opens an app built from
 here on it.
