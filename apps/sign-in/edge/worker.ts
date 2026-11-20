@@ -206,7 +206,7 @@ async function ask(request: Request, auth: Auth, url: URL) {
   } catch {
     return Response.json({ error: "An ask is JSON" }, { status: 400 });
   }
-  const ofNetwork = ["invite", "owner", "everyone", "remove_person"].includes(what.ask ?? "");
+  const ofNetwork = ["invite", "owner", "everyone", "remove_person", "domains"].includes(what.ask ?? "");
   const acting = (await Promise.all([env.NETWORK.servers(), ...(ofNetwork ? [] : [env.NETWORK.servers(`${what.who}/`)])])).flat();
   if (!acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
   return Response.json(await asked(auth, url.origin, what));

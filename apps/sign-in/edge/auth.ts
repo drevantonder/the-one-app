@@ -1,5 +1,7 @@
 // Who signs in to a network, and what they let act as them: Better Auth, kept in this Worker's own database. A
-// person signs in with a passkey and nothing else. An assistant becomes theirs when they answer that one question
+// person signs in with a passkey, or with Google where the network has a Google client (`GOOGLE_CLIENT_ID`): someone
+// invited joins with their Google account as with a passkey, and anyone whose Google Workspace domain the network's
+// owner named (`domains`) joins by signing in. An assistant becomes theirs when they answer that one question
 // for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
 // device authorization has it, or when a device or assistant of theirs lets it in by that code. A new device may
 // instead name whose it is (`/device/claim`): that person's devices list it as waiting, and one of them lets it in by
@@ -9,7 +11,7 @@
 // joined, and their email where how they signed in has one, which a server tells apps of by `people`.
 import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx, getOAuthState, getSessionFromCtx } from "better-auth/api";
 import { jwt } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
@@ -48,6 +50,13 @@ declare global {
       APPLE_APPS: string[];
       ANDROID_APPS: { package_name: string; sha256_cert_fingerprints: string[] }[];
       APP_LINKS: string[];
+      /**
+       * The network's Google OAuth client, a web application's, whose redirect URI is
+       * `<address>/sign-in/auth/callback/google`: secrets the network's own deploy sets, if it signs people in with
+       * Google. Without them nobody does.
+       */
+      GOOGLE_CLIENT_ID?: string;
+      GOOGLE_CLIENT_SECRET?: string;
     }
   }
 }
@@ -171,11 +180,12 @@ async function secret() {
 
 /**
  * The tables that say who's in the network and what lets them in: its people, their passkeys, with each one's
- * encrypted key, and their devices. They're kept in this app's own artifact as `accounts.json` (`keep`), so a backup
- * of the bucket holds them (the Backups app). Sessions, tokens and the secret that signs them aren't: after a loss,
- * people sign in again with their passkeys.
+ * encrypted key, their devices, and its settings (`domains`). They're kept in this app's own artifact as
+ * `accounts.json` (`keep`), so a backup of the bucket holds them (the Backups app). Sessions, tokens and the secret
+ * that signs them aren't, nor Google's accounts, which hold Google's tokens: after a loss, people sign in again with
+ * their passkeys, and with Google, which Better Auth links to them again by their verified email.
  */
-const KEPT = ["user", "passkey", "device"] as const;
+const KEPT = ["user", "passkey", "device", "setting"] as const;
 
 /**
  * Keeps the database's people, passkeys and devices in the bucket, as `KEPT` says, writing only what changed. A
@@ -189,7 +199,7 @@ export async function keep() {
       const kept: Record<string, Record<string, unknown>[]> = JSON.parse(was);
       await env.DB.batch(
         KEPT.flatMap((table) =>
-          kept[table].map((row) => {
+          (kept[table] ?? []).map((row) => {
             const columns = Object.keys(row);
             const sql = `insert into "${table}" (${columns.map((column) => `"${column}"`).join(", ")}) values (${columns.map(() => "?").join(", ")})`;
             return env.DB.prepare(sql).bind(...Object.values(row));
@@ -249,7 +259,7 @@ async function remove(adapter: Adapter, device: { id: string }) {
 /** The invitation a link carries, if it's one that still stands. The link is kept nowhere: only its hash is. */
 async function invited(adapter: Adapter, link: string | undefined) {
   const [invite] = await adapter.findMany<Invite>({ model: "invite", where: [{ field: "id", value: await sha256(link ?? "") }] });
-  if (!invite || invite.expiresAt < new Date()) throw new APIError("FORBIDDEN", { message: "That invitation expired. Ask for another." });
+  if (!invite || invite.expiresAt < new Date()) throw new APIError("FORBIDDEN", { code: "invitation_expired", message: "That invitation expired. Ask for another." });
   return invite;
 }
 
@@ -292,14 +302,14 @@ async function usedJustNow(ctx: { body?: { credential?: unknown } } & Parameters
 }
 
 /**
- * Throws unless this browser's session was made with a passkey in the last few minutes: what lets another device or
- * an app act as its person is approved only by them just now, as WebAuthn's user verification and GitHub's sudo
- * mode have it, whatever a page asked first.
+ * Throws unless this browser's session was made in the last few minutes, with a passkey or with Google: what lets
+ * another device or an app act as its person is approved only by them just now, as WebAuthn's user verification and
+ * GitHub's sudo mode have it, whatever a page asked first.
  */
 async function signedInJustNow(ctx: Parameters<typeof getAuthoritativeSessionFromCtx>[0]) {
-  const session = (await getAuthoritativeSessionFromCtx(ctx)) as { session: { passkey?: string | null; createdAt: Date } } | null;
-  if (!session?.session.passkey || Date.now() - new Date(session.session.createdAt).getTime() >= FRESH * 1000)
-    throw new APIError("FORBIDDEN", { message: "Sign in again with your passkey to approve this." });
+  const session = await getAuthoritativeSessionFromCtx(ctx);
+  if (!session || Date.now() - new Date(session.session.createdAt).getTime() >= FRESH * 1000)
+    throw new APIError("FORBIDDEN", { message: "Sign in again to approve this." });
 }
 
 /** A device's code as Better Auth looks it up: its letters and digits, in capitals. */
@@ -343,6 +353,10 @@ const devices = () => ({
   // Naming whoever's signing in says whether they're here, and notifies them, so one address names only so many.
   rateLimit: [{ pathMatcher: (path: string) => path === "/device/claim", window: NAMED.window, max: 10 }],
   endpoints: {
+    /** The ways besides a passkey someone signs in here, which the sign-in page offers: Google, where it's set up. */
+    socialProviders: createAuthEndpoint("/social-providers", { method: "GET" }, async (ctx) =>
+      ctx.json({ providers: env.GOOGLE_CLIENT_ID ? ["google"] : [] }),
+    ),
     /**
      * A new device names whose it is, by their name or an email they signed in with, from the page that shows its
      * code (`page/`): its code is a request to sign in from then on (`RequestState`), waiting on their devices for the
@@ -533,9 +547,39 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
     session: { freshAge: FRESH, cookieCache: { enabled: true, maxAge: BELIEVED } },
     // The name a person chose as they joined, which they can change: the one they're `users/<name>` by is chosen
     // for them, as they're invited, and never changes.
-    user: { additionalFields: { called: { type: "string", required: false, input: true } } },
+    user: {
+      additionalFields: { called: { type: "string", required: false, input: true } },
+      // Someone new joins with Google only by an invitation, or from a Workspace domain the network's owner named.
+      validateUserInfo: async ({ source }) => {
+        if (source.oauth?.providerId !== "google" || source.action !== "create-user") return;
+        if ((await getOAuthState())?.invite || (await admits(source.oauth.profile ?? {}))) return;
+        return { error: "not_invited", message: "This network lets your Google account in only with an invitation. Ask its owner for one." };
+      },
+    },
+    // A network with a Google client signs people in with it too, choosing the account each time.
+    socialProviders: env.GOOGLE_CLIENT_ID ? { google: { clientId: env.GOOGLE_CLIENT_ID, clientSecret: env.GOOGLE_CLIENT_SECRET!, prompt: "select_account" as const } } : {},
     databaseHooks: {
-      user: { update: { after: goesBy } },
+      user: {
+        // Someone joining with Google is `users/<name>` by the invitation they came with, or by a name made of their
+        // email, and goes by the name Google has for them. An invitation is for a user who hasn't joined, who's made
+        // again as they join, by the same name.
+        create: {
+          before: async (user, ctx) => {
+            if (ctx?.params?.id !== "google") return;
+            const adapter = ctx.context.adapter;
+            const invitee = await invitedToGoogle(adapter);
+            if (invitee) {
+              await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: invitee.id }] });
+              await adapter.delete({ model: "user", where: [{ field: "id", value: invitee.id }] });
+            }
+            // The name someone joining typed on the sign-in page, which only says what they go by.
+            const typed = String((await getOAuthState())?.called ?? "").trim().slice(0, 100);
+            return { data: { ...user, name: invitee?.name ?? (await freeName(adapter, user.email)), called: typed || invitee?.called || user.name } };
+          },
+          after: goesBy,
+        },
+        update: { after: goesBy },
+      },
       // A browser that's signed in is one of its person's devices for as long as it is: the web client asks as its
       // session (`worker.ts`).
       session: {
@@ -668,20 +712,19 @@ async function tell(user: User, request: string) {
  * it's made only when the server says it may be (`again`): the network's owner asked, for someone who isn't an
  * owner. An owner who lost a passkey adds one on a device they're signed in on, as Apple and Google have it.
  */
-async function invite(adapter: Adapter, internalAdapter: InternalAdapter, origin: string, name: string, user: User | undefined, again: boolean) {
+async function invite(adapter: Adapter, origin: string, name: string, user: User | undefined, again: boolean) {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
   if (user && !again && (await joined(adapter, user)))
     return { error: `${name} has joined already. Only the network's owner invites someone again, and never an owner, who adds a passkey on a device they're signed in on.` };
-  const invitee = user ?? (await made(internalAdapter, origin, name));
+  const invitee = user ?? (await made(adapter, origin, name));
   return { link: `${origin}/sign-in/#invite=${await invitation(adapter, invitee, INVITED_FOR)}` };
 }
 
-type InternalAdapter = Awaited<Auth["$context"]>["internalAdapter"];
-
 /** The user `name`, made here, who hasn't joined. */
-function made(internalAdapter: InternalAdapter, origin: string, name: string): Promise<User> {
+function made(adapter: Adapter, origin: string, name: string): Promise<User> {
   // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
-  return internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }, { method: "admin" });
+  const now = new Date();
+  return adapter.create<User>({ model: "user", data: { name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false, createdAt: now, updatedAt: now } });
 }
 
 /**
@@ -695,8 +738,49 @@ async function invitation(adapter: Adapter, user: { id: string }, lasts: number)
   return link;
 }
 
-/** Whether `user` has joined: they made a passkey. */
-const joined = async (adapter: Adapter, user: User) => (await adapter.findMany({ model: "passkey", where: [{ field: "userId", value: user.id }] })).length > 0;
+/** Whether `user` has joined: they made a passkey, or signed in with Google. */
+const joined = async (adapter: Adapter, user: { id: string }) =>
+  (await Promise.all(["passkey", "account"].map((model) => adapter.findMany({ model, where: [{ field: "userId", value: user.id }] })))).some((rows) => rows.length > 0);
+
+/** The Google Workspace domains whose people join by signing in with Google, as the network's owner said (`domains`). */
+async function domains(): Promise<string[]> {
+  const kept = await env.DB.prepare("select value from setting where name = 'domains'").first<{ value: string }>();
+  return kept ? JSON.parse(kept.value) : [];
+}
+
+/**
+ * Whether a Google account may join with no invitation: Google says it's a Workspace account of a domain the network's
+ * owner named (its `hd` claim), and that its email, at that domain, is verified. An email at the domain alone isn't
+ * enough, since anyone can make a Google account with any email.
+ */
+async function admits(profile: { hd?: unknown; email?: unknown; email_verified?: unknown }) {
+  const domain = typeof profile.hd === "string" ? profile.hd.toLowerCase() : "";
+  const email = String(profile.email ?? "").toLowerCase();
+  return !!domain && profile.email_verified === true && email.endsWith(`@${domain}`) && (await domains()).includes(domain);
+}
+
+/**
+ * The invitation a Google sign-in carries (`invite` in its OAuth state, which the sign-in page sends), and the user it's
+ * for, who joins with Google as they would have with a passkey. Only someone who hasn't joined does: someone who has
+ * signs in as they joined.
+ */
+async function invitedToGoogle(adapter: Adapter) {
+  const link = (await getOAuthState())?.invite;
+  if (typeof link !== "string") return null;
+  const invite = await invited(adapter, link);
+  const user = (await adapter.findOne<User>({ model: "user", where: [{ field: "id", value: invite.userId }] }))!;
+  if (await joined(adapter, user)) throw new APIError("FORBIDDEN", { code: "joined", message: `${user.called || user.name} has joined already. Sign in as you joined.` });
+  return user;
+}
+
+/** A name nobody has, made of an email's local part, for someone who joins by signing in with Google. */
+async function freeName(adapter: Adapter, email: string) {
+  const made = email.split("@")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^[^a-z]+|-+$/g, "") || "person";
+  for (let n = 1; ; n++) {
+    const name = n === 1 ? made : `${made}-${n}`;
+    if (!(await adapter.findOne({ model: "user", where: [{ field: "name", value: name }] }))) return name;
+  }
+}
 
 /**
  * What a server acting for the network asks, for a person in the app: `{ask, ...}`. Their name is theirs as
@@ -718,6 +802,8 @@ export interface Ask {
   building?: boolean;
   /** With `invite`: whether someone who has joined may be invited again, as the server says (`invite`). */
   again?: boolean;
+  /** With `domains`: the Google Workspace domains whose people join by signing in with Google. */
+  domains?: unknown;
 }
 
 export async function asked(auth: Auth, origin: string, { ask, who: name, building, ...about }: Ask) {
@@ -726,17 +812,27 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
   let [user] = await adapter.findMany<User>({ model: "user", where: [{ field: "name", value: named }] });
   // In a network being built nobody joins, and a server asks as whoever a client says it is: they're made here as
   // they're first asked about, so they approve a device's code as anyone who joined does.
-  if (!user && building && ask !== "invite" && /^[a-z][a-z0-9-]*$/.test(named)) user = await made(internalAdapter, origin, named);
+  if (!user && building && ask !== "invite" && /^[a-z][a-z0-9-]*$/.test(named)) user = await made(adapter, origin, named);
 
-  if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user, about.again === true);
+  if (ask === "invite") return invite(adapter, origin, named, user, about.again === true);
   // The network's first owner is invited only until they've joined, so a link to join as them isn't made after.
-  if (ask === "owner") return user && (await joined(adapter, user)) ? { joined: true } : invite(adapter, internalAdapter, origin, named, user, false);
+  if (ask === "owner") return user && (await joined(adapter, user)) ? { joined: true } : invite(adapter, origin, named, user, false);
+  // The Google Workspace domains whose people join by signing in with Google, with no invitation, as the network's
+  // owner says: given `domains`, they're those from then on.
+  if (ask === "domains") {
+    if (about.domains !== undefined) {
+      const domains = [...new Set((Array.isArray(about.domains) ? about.domains : []).map((domain) => String(domain).trim().toLowerCase()).filter(Boolean))];
+      if (domains.some((domain) => !/^[a-z0-9-]+(\.[a-z0-9-]+)+$/.test(domain))) return { error: "A domain is a name like example.org." };
+      await env.DB.prepare("insert into setting (name, value) values ('domains', ?) on conflict (name) do update set value = excluded.value").bind(JSON.stringify(domains)).run();
+    }
+    return { domains: await domains() };
+  }
   // Everyone who has joined, and everyone invited who hasn't yet, with the name each goes by.
   if (ask === "everyone") {
     type Row = { id: string; userId: string; expiresAt?: Date; name?: string; called?: string | null; email?: string; emailVerified?: boolean };
-    const [users, passkeys, invites] = await Promise.all(["user", "passkey", "invite"].map((model) => adapter.findMany<Row>({ model })));
+    const [users, passkeys, accounts, invites] = await Promise.all(["user", "passkey", "account", "invite"].map((model) => adapter.findMany<Row>({ model })));
     const has = (rows: Row[]) => new Set(rows.filter(({ expiresAt }) => !expiresAt || expiresAt > new Date()).map(({ userId }) => userId));
-    const [keyed, invited] = [has(passkeys), has(invites)];
+    const [keyed, invited] = [has([...passkeys, ...accounts]), has(invites)];
     return {
       people: users
         .filter(({ id }) => keyed.has(id) || invited.has(id))

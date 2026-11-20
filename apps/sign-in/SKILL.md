@@ -4,19 +4,22 @@ description: Read before inviting someone to a network or taking someone out, wh
 metadata:
   title: "Sign-In"
   subtitle: "People, devices and passkeys"
-  about: "Invite people to your network, who sign in with a passkey and no password. See and remove your devices and the AI assistants you let in."
+  about: "Invite people to your network, who sign in with a passkey or Google and no password. See and remove your devices and the AI assistants you let in."
   category: "Privacy & Security"
 ---
 
 Sign-in is how people get into a network, and what acts as each of them: their devices, and the assistants they
-let in. A person signs in with a passkey at the network's address. An assistant becomes theirs when they answer
+let in. A person signs in with a passkey at the network's address, or with Google where its edge has a Google client. An assistant becomes theirs when they answer
 that one question for it, and a new device when they also say the code it shows matches.
 
-- `invite` makes a link someone joins by: they open it and make a passkey, and are that user from then on. The
+- `invite` makes a link someone joins by: they open it and make a passkey, or continue with Google, and are that
+  user from then on. The
   network's owners invite, and whoever they made an editor of `network/own/sign-in`. The link works once, for a
   week, and a new one for them ends it, so pass on the newest. Whoever joins by it is that user, so only the network's
   owner invites someone who's already in, as a way back when they've lost every passkey, and never an owner: an owner
   adds a passkey on a device they're signed in on.
+- `domains` says which Google Workspace domains' people join by signing in with Google, with no invitation, and
+  sets them for whoever invites. They're named `users/<their email's name>`, and go by their Google name.
 - `devices` lists your devices, the assistants you let in and the browsers you're signed in on, and your
   passkeys. An app says whether it's `connected`, and if not when it was `last_seen`. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a
   passkey, but never your last. `add_passkey` lets your person make another passkey: whoever opens its link makes

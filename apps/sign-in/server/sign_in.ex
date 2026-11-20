@@ -82,6 +82,21 @@ defmodule SignIn do
         }
       },
       %{
+        name: "domains",
+        description: """
+        Says which Google Workspace domains' people join the network by signing in with Google, with no invitation,
+        or, given `domains`, makes those the ones. Google signs people in only where the network's edge has a Google
+        client. Everyone else joins by an invitation
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            domains: %{type: "array", items: %{type: "string"}, description: "Its domains, like example.org: none lets nobody in this way"}
+          }
+        },
+        outputs: %{type: "object", properties: %{domains: %{type: "array", items: %{type: "string"}}}, required: ["domains"]}
+      },
+      %{
         name: "remove_person",
         description:
           "Takes someone out of the network: their devices, assistants and passkeys stop working, and what they made stays",
@@ -419,6 +434,17 @@ defmodule SignIn do
   def call("everyone", _inputs, call) do
     if not Call.member?(call, "network"), do: raise("Only a member of the network sees who's in it.")
     %{people: ask(%{ask: "everyone"})["people"]}
+  end
+
+  # Whoever invites says who joins with no invitation, and any member sees it.
+  def call("domains", %{"domains" => domains}, call) do
+    Call.reach(call, Artifact.name(call.own), "editor")
+    %{domains: ask(%{ask: "domains", domains: domains})["domains"]}
+  end
+
+  def call("domains", _inputs, call) do
+    if not Call.member?(call, "network"), do: raise("Only a member of the network sees who joins it.")
+    %{domains: ask(%{ask: "domains"})["domains"]}
   end
 
   # Whoever invites takes out, and nobody takes themselves out. Only an owner takes out an owner, as only a super

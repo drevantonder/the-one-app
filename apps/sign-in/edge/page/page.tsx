@@ -10,7 +10,8 @@
 // says), and Use Another Device gives the link and the code to open where they're signed in, for a passkey the app
 // can't reach. Every passkey is asked for its PRF output, which unlocks its person's key (`passkey.ts`): a device
 // approved with one that can holds the key as it comes in, and a device that's in but doesn't hold it opens this page
-// to Unlock with Passkey.
+// to Unlock with Passkey. Where the network signs people in with Google too, Continue with Google is the first way,
+// and the passkey the second: Google sends them back here, to carry on with what the page was opened for.
 import { createSignal, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
@@ -25,6 +26,14 @@ import "./page.css"
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
 const opened = new URLSearchParams(location.hash.slice(1))
 const params = new URLSearchParams(location.search)
+/// Whether the network signs people in with Google (`/social-providers` in `edge/auth.ts`).
+const [google, setGoogle] = createSignal(false)
+fetch("/sign-in/auth/social-providers")
+  .then((response) => response.json())
+  .then(({ providers }) => setGoogle(providers.includes("google")))
+  .catch(() => {})
+/// Why Google's sign-in didn't let someone in, as Better Auth sends them back here.
+const refused = params.get("error_description") ?? params.get("error") ?? undefined
 
 /// How the page was opened, which picks what it does: someone joining with an invitation, someone who has joined
 /// making another passkey (the app's Sign In & Security), an assistant's request to be let in, which Better Auth carries signed
@@ -64,7 +73,7 @@ const shown = "code" in flow ? flow.code.replace(/(.{4})(?=.)/g, "$1-") : undefi
 /// Allow it. Either may fail, and Try Again starts it again.
 type Stage =
   | { stage: "checking" }
-  | { stage: "needsPasskey" }
+  | { stage: "needsSignIn" }
   | { stage: "claiming" }
   | { stage: "comparing"; name: string; device: string }
   | { stage: "approved"; name: string; unlocked: boolean }
@@ -145,7 +154,7 @@ async function begin() {
     }
     if (flow.flow === "device") {
       const { data } = await auth.getSession()
-      return data ? claim() : setStage({ stage: "needsPasskey" })
+      return data ? claim() : setStage({ stage: "needsSignIn" })
     }
   } catch (error) {
     setStage({ stage: "failed", why: (error as Error).message })
@@ -183,6 +192,29 @@ async function answered(result: Answered, prf: Uint8Array | undefined | null) {
   const key = prf && (await prfKey(prf))
   if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key })
   shownCode = key ? await code(key) : undefined
+}
+
+/// Signs in with Google, which brings them back to this page, as it was opened, to carry on: someone joining to Home,
+/// with their invitation and the name they typed, if they did. Back here, they're signed in, as of just now.
+async function withGoogle() {
+  const back = new URL(location.href)
+  back.searchParams.delete("error")
+  back.searchParams.delete("error_description")
+  const { error } = await auth.signIn.social({
+    provider: "google",
+    callbackURL: flow.flow === "join" ? "/" : back.href,
+    errorCallbackURL: back.href,
+    ...(flow.flow === "join" && { additionalData: { invite: flow.invite, called: called().trim() } }),
+  })
+  if (error) throw new Error(error.message ?? "Google didn't answer. Try again.")
+  // Google's page is opening.
+  await new Promise(() => {})
+}
+
+/// Whether this browser's session was made in the last few minutes, as the edge asks of whoever approves something.
+async function signedInJustNow() {
+  const { data } = await auth.getSession()
+  return !!data && Date.now() - new Date(data.session.createdAt).getTime() < 4 * 60_000
 }
 
 /// Signs in with a passkey, asked for its PRF output, which whoever was signed in here before no longer is.
@@ -274,6 +306,11 @@ async function signIn() {
     if (result.error) throw new Error(result.error.message ?? "That passkey didn't work. Try again.")
     await made(result as Answered, false)
     await ask("/update-user", { called: called().trim() })
+  } else if (flow.flow === "assistant" && (await signedInJustNow())) {
+    // Signed in just now, with Google or a passkey: Allow needs nothing more.
+  } else if (flow.flow === "assistant" && google() && !((await auth.getSession()).data?.session as { passkey?: string | null } | undefined)?.passkey) {
+    // Someone who signs in with Google does so again, and comes back here to Allow.
+    return withGoogle()
   } else await withPasskey()
   if (flow.flow === "unlock") return flow.device ? unlockAsked(flow.device) : setStage(used?.prf ? { stage: "unlocked" } : { stage: "failed", why: NO_PRF })
   if (flow.flow === "assistant") {
@@ -300,8 +337,8 @@ async function respond(yes: boolean) {
     await ask("/device/deny", { userCode: (flow as { code: string }).code })
     return setStage({ stage: "denied", name })
   }
-  // The edge approves only for a passkey answered in the last five minutes (`edge/auth.ts`).
-  if (!used || Date.now() - used.at > 4 * 60_000) await withPasskey()
+  // The edge approves only for someone who signed in in the last five minutes (`edge/auth.ts`).
+  if (!(used && Date.now() - used.at < 4 * 60_000) && !(await signedInJustNow())) await (google() && !used ? withGoogle() : withPasskey())
   const unlocked = await unlock(device, name)
   await ask("/device/approve", { userCode: (flow as { code: string }).code })
   setStage({ stage: "approved", name, unlocked })
@@ -350,8 +387,8 @@ function shows(): Shows {
       switch (now.stage) {
         case "checking":
           return { heading: "Approve a device", status: "Checking you're signed in…" }
-        case "needsPasskey":
-          return { heading: "Sign in", button: "Sign in", onSignIn: signIn }
+        case "needsSignIn":
+          return google() ? { heading: "Sign in", problem: refused, ...withGoogleFirst("Use a Passkey") } : { heading: "Sign in", button: "Sign in", onSignIn: signIn }
         case "claiming":
           return { heading: "Approve a device", status: "Finding the device…" }
         case "comparing":
@@ -404,11 +441,14 @@ function shows(): Shows {
     case "addPasskey":
       return now.stage === "created" ? { heading: "Add a passkey", done: shownCode ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}` : "Your passkey is created. Go back to the app." } : { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }
     case "join":
-      return { heading: "Join", button: "Create a passkey", onSignIn: signIn, asksName: true }
+      return google() ? { heading: "Join", problem: refused, ...withGoogleFirst("Create a Passkey"), asksName: true } : { heading: "Join", button: "Create a passkey", onSignIn: signIn, asksName: true }
     case "signIn":
-      return { heading: "Sign in", button: "Sign in", onSignIn: signIn }
+      return google() ? { heading: "Sign in", problem: refused, ...withGoogleFirst("Use a Passkey") } : { heading: "Sign in", button: "Sign in", onSignIn: signIn }
   }
 }
+
+/// Continue with Google as the button, and the passkey as the second way, `passkey` saying what that does.
+const withGoogleFirst = (passkey: string) => ({ button: "Continue with Google", onSignIn: withGoogle, stop: passkey, onStop: signIn })
 
 /// The app's logo, or its initial on a plain tile when it has none or it doesn't load, joined to the network's mark.
 function Logos(props: { app: App }) {
