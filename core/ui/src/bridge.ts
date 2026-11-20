@@ -42,8 +42,8 @@ addEventListener("message", ({ source, data }) => {
   if (source !== host) return
   if (data?.method === "notifications/one/changed") for (const listener of listeners) listener()
   else if (data?.method === "ui/notifications/host-context-changed") dress(data.params)
-  // The device's own back, where a device has one and something is open over the page: the last opened shuts.
-  else if (data?.method === "notifications/one/back") over.at(-1)?.shut()
+  // The device's own back, where a device has one and something is open over the page: the topmost shuts.
+  else if (data?.method === "notifications/one/back") topmost()?.shut()
   // A tap on an iPhone's status bar: what scrolls goes back to its top.
   else if (data?.method === "notifications/one/scroll-to-top") toTop()
   // How tall a page in one of this page's frames says its content is.
@@ -275,6 +275,10 @@ export async function tellDrawn() {
 /// API's `canGoBack`, in its frame), where the device's back gesture leaves the app. A browser without the Navigation
 /// API doesn't say.
 const over: { shut: () => void; layer: boolean }[] = []
+/// What the device's Back shuts: the last opened of what's drawn over the page (a sheet, a menu, a dialog), which is above
+/// any screen, and where none is, the last screen's Back, as Android's OnBackPressedDispatcher and the web's top layer put
+/// what's drawn over first, whichever registered first.
+const topmost = () => over.findLast(({ layer }) => layer) ?? over.at(-1)
 const said = () => notify("notifications/one/over", { over: over.length > 0, layer: over.some(({ layer }) => layer), first: globalThis.navigation && !navigation.canGoBack })
 // A page that hasn't said what it is yet says this as it does.
 const overNow = () => (greeted ? greeted.then(said) : greet())

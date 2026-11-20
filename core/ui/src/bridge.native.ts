@@ -26,8 +26,8 @@ const keys = new Set<(event: Page.Keyed) => void>()
   message(message: { id?: number; method?: string; result?: unknown; error?: { message: string } }) {
     if (message.method === "notifications/one/changed") for (const listener of listeners) listener()
     else if (message.method === "ui/notifications/host-context-changed") dress((message as { params?: object }).params)
-    // The device's own back, where something is open over the page: the last opened shuts.
-    else if (message.method === "notifications/one/back") over.at(-1)?.shut()
+    // The device's own back, where something is open over the page: the topmost shuts.
+    else if (message.method === "notifications/one/back") topmost()?.shut()
     else if (message.id !== undefined) waiting.get(message.id)?.(message)
   },
 }
@@ -198,6 +198,10 @@ export const changed: typeof Page.changed = (listener) => {
 }
 /** What's open over the page, as the DOM's bridge keeps it (`covers`), which its host hears of, so its Back shuts it. */
 const over: { shut: () => void; layer: boolean }[] = []
+/// What the device's Back shuts: the last opened of what's drawn over the page (a sheet, a menu, a dialog), which is above
+/// any screen, and where none is, the last screen's Back, as Android's OnBackPressedDispatcher and the web's top layer put
+/// what's drawn over first, whichever registered first.
+const topmost = () => over.findLast(({ layer }) => layer) ?? over.at(-1)
 const said = async () => (await greeted, host?.post({ jsonrpc: "2.0", method: "notifications/one/over", params: { over: over.length > 0, layer: over.some(({ layer }) => layer) } }))
 export const covers: typeof Page.covers = (shut, { layer = true } = {}) => {
   const one = { shut, layer }
