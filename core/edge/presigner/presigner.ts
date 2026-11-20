@@ -206,11 +206,13 @@ interface Ask {
   tag?: unknown
   /** A list's: where the keys it lists start, as the bucket said with the ones before. */
   after?: string
+  /** A list's: whether it lists the folders just under its start, `<start><name>/`, rather than every key. */
+  folders?: boolean
 }
 
 /**
  * The ask in `body`, or null if it isn't one: `{read: key}`, `{write: key}` (only if absent), `{replace: key, tag}`
- * (only if unchanged), `{list: prefix, after?}` or `{remove: key}`. It names one operation, so that what's checked
+ * (only if unchanged), `{list: prefix, after?, folders?}` or `{remove: key}`. It names one operation, so that what's checked
  * is what's signed.
  */
 function parse(body: string): Ask | null {
@@ -226,7 +228,7 @@ function parse(body: string): Ask | null {
   const key = ask[operation];
   // A replace names the version it replaces: `*`, any version, would be a write that overwrites blind.
   if (operation === "replace" && !(typeof ask.tag === "string" && ask.tag !== "" && ask.tag.trim() !== "*")) return null;
-  return isBlob(key, operation === "list") ? { operation, key, tag: ask.tag, after: ask.after } : null;
+  return isBlob(key, operation === "list") ? { operation, key, tag: ask.tag, after: ask.after, folders: ask.folders === true } : null;
 }
 
 /**
@@ -307,9 +309,12 @@ async function allowed(env: Env, by: string, token: string | null, tokens: strin
 }
 
 /** The request to the bucket that `ask` is, unsigned: its method, URL and headers. */
-function request(env: Env, { operation, key, tag, after }: Ask) {
+function request(env: Env, { operation, key, tag, after, folders }: Ask) {
   const url = new URL(operation === "list" ? env.BUCKET : blob(env, key));
-  if (operation === "list") url.search = new URLSearchParams({ "list-type": "2", prefix: key, ...(after && { "continuation-token": after }) }).toString();
+  if (operation === "list") {
+    const listed = { "list-type": "2", prefix: key, ...(after && { "continuation-token": after }), ...(folders && { delimiter: "/" }) };
+    url.search = new URLSearchParams(listed).toString();
+  }
   const headers: Record<string, string> = {};
   if (operation === "write") headers["if-none-match"] = "*";
   if (operation === "replace") headers["if-match"] = String(tag);
