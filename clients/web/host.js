@@ -185,10 +185,9 @@ function tryAgain(now = false) {
 for (const [target, event] of /** @type {const} */ ([[window, "online"], [document, "visibilitychange"]]))
   target.addEventListener(event, () => connection === "offline" && document.visibilityState === "visible" && tryAgain(true))
 
-/// What each open app was answered that only reads, by what it asked: it's answered that again until something
-/// changes, as the app's client answers a view (`Subscription` in `core/client`). A write marks matching entries
-/// stale (`invalidated > fetched`) and starts an independent background refetch (`fetching`) before resolving;
-/// subsequent reads join the in-flight refetch rather than returning stale pre-write data.
+/// What each open app was answered that only reads, by what it asked: it's answered that at once, as
+/// stale-while-revalidate has it, as the app's client answers a view (`Subscription` in `core/client`). A write has
+/// each tool's answer asked again in the background (`fetching`), and the app is told as one comes back different.
 /** @typedef {{ method: string, params: Record<string, unknown>, response: unknown, invalidated: number, fetched: number, fetching?: { generation: number, done: Promise<boolean> } }} CachedQuery */
 /** @type {Map<string, Map<string, CachedQuery>>} */
 const views = new Map()
@@ -221,18 +220,11 @@ function fetchEntry(view, entry, generation) {
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function read(view, method, params) {
   const request = JSON.stringify([method, params])
-  for (;;) {
-    const cached = responses(view).get(request)
-    if (!cached) {
-      const response = await mcp(method, params)
-      responses(view).set(request, { method, params, response, invalidated: 0, fetched: 0 })
-      return response
-    }
-    if (cached.fetched >= cached.invalidated) return cached.response
-    const done = cached.fetching?.generation === cached.invalidated ? cached.fetching.done : fetchEntry(view, cached, cached.invalidated)
-    const ok = await done
-    if (cached.fetched >= cached.invalidated || !ok) return cached.response
-  }
+  const cached = responses(view).get(request)
+  if (cached) return cached.response
+  const response = await mcp(method, params)
+  if (!responses(view).has(request)) responses(view).set(request, { method, params, response, invalidated: 0, fetched: 0 })
+  return /** @type {CachedQuery} */ (responses(view).get(request)).response
 }
 
 /// The tools a server lists, by which a call is known to only read: asked for as soon as this browser is signed in,
@@ -270,10 +262,12 @@ async function reads(method, params) {
   return (await (tools ?? listTools())).some((/** @type {{ name: string, annotations?: { readOnlyHint?: boolean } }} */ tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
 }
 
-/// Marks every cached read in `view` stale and starts an independent background refetch for each.
+/// Asks again, in the background, for each tool `view` was answered, as a write may have changed what they answer.
+/// An app's files aren't: what changes them, an install or a deploy, says so.
 /** @param {string} view */
 function invalidate(view) {
   for (const cached of views.get(view)?.values() ?? []) {
+    if (cached.method !== "tools/call") continue
     cached.invalidated += 1
     fetchEntry(view, cached, cached.invalidated)
   }

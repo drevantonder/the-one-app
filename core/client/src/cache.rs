@@ -9,7 +9,6 @@
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::time::SystemTime;
 use std::fs;
 use std::io::Write;
 
@@ -116,14 +115,6 @@ impl Client {
         serde_json::from_slice(&fs::read(self.cache_file(method, params)).ok()?).ok()
     }
 
-    /// What a server last answered `method` with, and when it was written on disk.
-    fn cached_entry(&self, method: &str, params: &Value) -> Option<(Value, Option<SystemTime>)> {
-        let path = self.cache_file(method, params);
-        let modified = fs::metadata(&path).ok().and_then(|meta| meta.modified().ok());
-        let value = serde_json::from_slice(&fs::read(&path).ok()?).ok()?;
-        Some((value, modified))
-    }
-
     fn cache_file(&self, method: &str, params: &Value) -> PathBuf {
         let key = json!([self.link().who, self.says, method, params]);
         self.home.join("cache").join(crate::hex(&Sha256::digest(key.to_string())))
@@ -196,50 +187,42 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
-/// One cached read in a `Subscription`, following TanStack Query's invalidation model: a write marks matching entries
-/// stale (`invalidated > fetched`) and starts an independent background refetch (`fetching`). Subsequent reads join
-/// the in-flight refetch rather than returning stale pre-write data, and when any refetch changes an answer, the view
-/// is notified immediately without waiting for other queries.
+/// One cached read in a `Subscription`, as stale-while-revalidate has it (SWR, TanStack Query, Apollo): the view is
+/// always answered `response` at once, and a write, or a server saying something changed, asks again behind it
+/// (`fetching`), telling the view when the answer comes back different.
 struct Query {
     method: String,
     params: Value,
     /// The last answer the view was given.
     response: Value,
-    /// Incremented on every write invalidation; `response` is fresh while `fetched >= invalidated`.
+    /// How many times it was asked again after a write: an answer asked before the latest isn't shown over it.
     invalidated: u64,
-    /// The invalidation generation `response` was fetched at or after.
+    /// The generation `response` was fetched at.
     fetched: u64,
-    /// Active post-write refetch for `generation`, shared by any `read` waiting for a fresh answer.
-    fetching: Option<(u64, watch::Receiver<Option<bool>>)>,
+    /// The refetch a write started, which a refresh joins rather than asking again.
+    fetching: Option<(u64, watch::Receiver<bool>)>,
 }
 
 /// What one view has been answered since it opened. It asks through this, and every view gets the same, with
-/// nothing to write: what only reads is answered from what was kept and asked again behind it; writes resolve as
-/// soon as their own answer arrives, invalidating the reads they may affect and refetching them in the background;
-/// and reads are also asked again when the user returns to the view or a server says something changed. When an
-/// answer comes back different, the view is told to ask again, and is answered at once.
+/// nothing to write: what only reads is answered at once from what was kept and asked again behind it, as
+/// stale-while-revalidate is, so a view opens as fast while its servers restart as with them up; a write resolves as
+/// soon as its own answer arrives and has the tools the view was answered asked again in the background; and reads
+/// are also asked again when the user returns to the view or a server says something changed. When an answer comes
+/// back different, the view is told to ask again, and is answered at once.
 pub struct Subscription {
     client: Arc<Client>,
-    /// What only reads, by what was asked, with the answer the view was last given and its invalidation state.
+    /// What only reads, by what was asked, with the answer the view was last given and when it was asked again.
     responses: Mutex<HashMap<String, Query>>,
-    /// When this view last completed a write, so a cold read doesn't serve a pre-write disk cache entry.
-    written: Mutex<Option<SystemTime>>,
     /// Tells the view that what it was answered has changed.
     changed: Box<dyn Fn() + Send + Sync>,
 }
 
 impl Subscription {
     pub fn new(client: Arc<Client>, changed: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
-        Arc::new(Self {
-            client,
-            responses: Mutex::default(),
-            written: Mutex::default(),
-            changed: Box::new(changed),
-        })
+        Arc::new(Self { client, responses: Mutex::default(), changed: Box::new(changed) })
     }
 
-    /// Answers what the view asks: the result of `method`. Writes resolve as soon as their own answer arrives and
-    /// invalidate cached reads in the background (TanStack Query `invalidateQueries` / `onSuccess`).
+    /// Answers what the view asks: the result of `method`. A write resolves as soon as its own answer arrives.
     pub async fn request(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
         if self.reads(method, &params).await {
             return self.read(method, params).await;
@@ -248,24 +231,21 @@ impl Subscription {
         if changes_tools(method, &params) {
             self.client.refresh_listed();
         }
-        self.invalidate(None);
+        self.invalidate();
         Ok(response)
     }
 
-    /// Marks matching cached reads as stale and spawns an independent background refetch for each.
-    pub fn invalidate(self: &Arc<Self>, app: Option<&str>) {
-        *self.written.lock().expect("no view panics") = Some(SystemTime::now());
-        let prefix = app.map(|app| format!("{app}_"));
+    /// Asks again, in the background, for each tool the view was answered, as a write may have changed what they
+    /// answer (TanStack Query's `invalidateQueries`). An app's files aren't asked again for a tool's write: what
+    /// changes them, an install or a deploy, says so (`notifications/one/changed`).
+    fn invalidate(self: &Arc<Self>) {
         let mut spawned = Vec::new();
         {
             let mut responses = self.responses.lock().expect("no view panics");
-            for (key, query) in responses.iter_mut() {
-                if !matches_app(&query.method, &query.params, prefix.as_deref()) {
-                    continue;
-                }
+            for (key, query) in responses.iter_mut().filter(|(_, query)| query.method == "tools/call") {
                 query.invalidated += 1;
                 let generation = query.invalidated;
-                let (tx, rx) = watch::channel(None);
+                let (tx, rx) = watch::channel(false);
                 query.fetching = Some((generation, rx));
                 spawned.push((key.clone(), query.method.clone(), query.params.clone(), generation, tx));
             }
@@ -289,14 +269,11 @@ impl Subscription {
                 if !matches_app(&query.method, &query.params, prefix.as_deref()) {
                     continue;
                 }
-                // A post-write invalidation refetch is already on its way to the server; join it rather than
-                // sending a duplicate RPC when `notifications/one/changed` arrives for the same write.
-                if query.fetched < query.invalidated
-                    && let Some((_, rx)) = &query.fetching
-                {
-                    waiting.push(rx.clone());
-                } else {
-                    asks.push((key.clone(), query.method.clone(), query.params.clone(), query.invalidated));
+                // A write's refetch is already on its way to the server; join it rather than sending a duplicate
+                // RPC when `notifications/one/changed` arrives for the same write.
+                match &query.fetching {
+                    Some((_, rx)) => waiting.push(rx.clone()),
+                    None => asks.push((key.clone(), query.method.clone(), query.params.clone(), query.invalidated)),
                 }
             }
         }
@@ -304,84 +281,42 @@ impl Subscription {
             self.fetch(key, method, params, generation, None).await;
         });
         let joins = waiting.into_iter().map(|mut rx| async move {
-            let _ = rx.wait_for(Option::is_some).await;
+            let _ = rx.wait_for(|done| *done).await;
         });
         tokio::join!(join_all(fetches), join_all(joins));
     }
 
+    /// What the view was last answered, at once, or what was kept, asked again behind it; only what was never
+    /// answered waits for a server.
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
         let key = json!([method, params]).to_string();
-        loop {
-            let wait = {
-                let mut responses = self.responses.lock().expect("no view panics");
-                if let Some(query) = responses.get_mut(&key) {
-                    if query.fetched >= query.invalidated {
-                        return Ok(query.response.clone());
-                    }
-                    match &query.fetching {
-                        Some((at, rx)) if *at == query.invalidated => Some(rx.clone()),
-                        _ => {
-                            let generation = query.invalidated;
-                            let (tx, rx) = watch::channel(None);
-                            query.fetching = Some((generation, rx.clone()));
-                            let (m, p) = (query.method.clone(), query.params.clone());
-                            let shown = self.clone();
-                            let k = key.clone();
-                            tokio::spawn(async move { shown.fetch(k, m, p, generation, Some(tx)).await });
-                            Some(rx)
-                        }
-                    }
-                } else {
-                    None
-                }
-            };
-            if let Some(mut rx) = wait {
-                let ok = rx.wait_for(Option::is_some).await.ok().and_then(|v| *v).unwrap_or(false);
-                let responses = self.responses.lock().expect("no view panics");
-                if let Some(query) = responses.get(&key) {
-                    if query.fetched >= query.invalidated || !ok {
-                        return Ok(query.response.clone());
-                    }
-                    // A newer write invalidated this query while we awaited an earlier fetch; wait for the newer one.
-                    continue;
-                }
-            }
-            let written = *self.written.lock().expect("no view panics");
-            let disk = self.client.cached_entry(method, &params);
-            let usable = disk.as_ref().is_some_and(|(_, modified)| {
-                written.is_none_or(|at| modified.is_some_and(|m| m >= at))
-            });
-            let (response, revalidate) = if usable {
-                (disk.expect("usable implies Some").0, true)
-            } else {
-                match self.client.fresh(method, &params).await {
-                    Ok(fresh) => {
-                        if *self.written.lock().expect("no view panics") != written {
-                            continue;
-                        }
-                        (fresh, false)
-                    }
-                    Err(error) => match disk {
-                        Some((cached, _)) => (cached, false),
-                        None => return Err(error),
-                    },
-                }
-            };
-            self.responses.lock().expect("no view panics").entry(key.clone()).or_insert_with(|| Query {
-                method: method.to_owned(),
-                params: params.clone(),
-                response: response.clone(),
-                invalidated: 0,
-                fetched: 0,
-                fetching: None,
-            });
-            if revalidate {
-                let shown = self.clone();
-                let (m, p) = (method.to_owned(), params);
-                tokio::spawn(async move { shown.fetch(key, m, p, 0, None).await });
-            }
-            return Ok(response);
+        if let Some(query) = self.responses.lock().expect("no view panics").get(&key) {
+            return Ok(query.response.clone());
         }
+        let (response, revalidate) = match self.client.cached(method, &params) {
+            Some(cached) => (cached, true),
+            None => (self.client.fresh(method, &params).await?, false),
+        };
+        let mut responses = self.responses.lock().expect("no view panics");
+        // Another read of the same may have been answered meanwhile, and asked again behind it.
+        if let Some(query) = responses.get(&key) {
+            return Ok(query.response.clone());
+        }
+        responses.insert(key.clone(), Query {
+            method: method.to_owned(),
+            params: params.clone(),
+            response: response.clone(),
+            invalidated: 0,
+            fetched: 0,
+            fetching: None,
+        });
+        drop(responses);
+        if revalidate {
+            let shown = self.clone();
+            let method = method.to_owned();
+            tokio::spawn(async move { shown.fetch(key, method, params, 0, None).await });
+        }
+        Ok(response)
     }
 
     async fn fetch(
@@ -390,10 +325,9 @@ impl Subscription {
         method: String,
         params: Value,
         generation: u64,
-        done: Option<watch::Sender<Option<bool>>>,
+        done: Option<watch::Sender<bool>>,
     ) {
         let fresh = self.client.fresh(&method, &params).await;
-        let ok = fresh.is_ok();
         let mut notify = false;
         {
             let mut responses = self.responses.lock().expect("no view panics");
@@ -416,7 +350,7 @@ impl Subscription {
             }
         }
         if let Some(tx) = done {
-            let _ = tx.send(Some(ok));
+            let _ = tx.send(true);
         }
         if notify {
             (self.changed)();
