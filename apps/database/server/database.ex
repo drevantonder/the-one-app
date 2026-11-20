@@ -121,8 +121,9 @@ defmodule Database do
     lease = Lease.of(call)
 
     case :gen_statem.call(lease, {call.own.codec, {:schedule, jobs, fire, System.os_time(:second)}}) do
+      # What's due is being made, and its timers' alarm says when the next is, so the clock comes back then.
       :ok ->
-        :ok
+        alarm(call, transaction(call, fn db -> query(db, timers()) && next(db) end))
 
       {:raised, kind, reason, stacktrace} ->
         :erlang.raise(kind, reason, stacktrace)
@@ -144,6 +145,50 @@ defmodule Database do
     receive do
       {:DOWN, ^closing, :process, _lease, _why} -> :ok
     end
+  end
+
+  @doc """
+  Sets a timer for whoever the calling app's call keeps data for, as Android's WorkManager or a Durable Object's
+  alarm does: the app's `tool` is called with `inputs` at `at`, in seconds since 1970, once, or with `every`, every
+  that many seconds after, by the server holding this database's lease, which One Core's clock finds within a
+  minute of it (`OneCore.Jobs`). Setting it again for the same tool and inputs moves it, and `at` `nil` removes it.
+  It's kept in the database, so it's made once whichever server holds it, and after any of them starts again.
+  """
+  def timer(%Call{} = call, tool, inputs, at, every \\ nil) when is_binary(tool) and is_map(inputs) do
+    job = "#{tool} #{JSON.encode!(inputs)}"
+
+    next =
+      transaction(call, fn db ->
+        query(db, timers())
+
+        if at,
+          do: query(db, set_timer(), [job, tool, JSON.encode!(inputs), at, every]),
+          else: query(db, "delete from database_timers where job = ?", [job])
+
+        next(db)
+      end)
+
+    alarm(call, next)
+  end
+
+  @doc false
+  def timers,
+    do: "create table if not exists database_timers (job text primary key, tool text not null, inputs text not null, at integer not null, every integer) without rowid"
+
+  defp set_timer,
+    do: "insert into database_timers (job, tool, inputs, at, every) values (?, ?, ?, ?, ?) on conflict (job) do update set at = excluded.at, every = excluded.every"
+
+  defp next(db), do: with([%{"next" => next}] <- query(db, "select min(at) as next from database_timers"), do: next)
+
+  # Says when this database's next timer is due, `next`, or that it has none, as the one key One Core's clock looks
+  # for (`OneCore.Jobs`), `<whose>/alarms/<installed for>/<app>/<due>`, under whose data it is.
+  defp alarm(call, next) do
+    whose = OneCore.User.owner(OneCore.Artifact.name(call.own))
+    prefix = "#{whose}/alarms/#{call.installed}/#{call.app}/"
+    keys = OneCore.Bucket.list(prefix)
+    if next && "#{prefix}#{next}" not in keys, do: OneCore.Bucket.write("#{prefix}#{next}", "")
+    for key <- keys, key != "#{prefix}#{next}", do: OneCore.Bucket.remove(key)
+    :ok
   end
 
   @doc "Runs one SQL statement in a transaction, with a `?` for each value, and gives its rows."

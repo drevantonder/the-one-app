@@ -388,10 +388,20 @@ defmodule Database.Lease do
     end
   end
 
-  # The jobs that are due at `now`: each one's name here, the time it was due at, and the job. A job is due at
-  # each whole multiple of its `every` seconds, and the newest of those that passed is the one that's made up
-  # for. One that's new is first due at the next.
-  defp due(db, jobs, now) do
+  # The jobs and timers that are due at `now`: each one's name here, the time it was due at, and the job. A job is due
+  # at each whole multiple of its `every` seconds, and the newest of those that passed is the one that's made up
+  # for. One that's new is first due at the next. A timer is due at its `at` (`Database.timer/5`).
+  defp due(db, jobs, now), do: jobs_due(db, jobs, now) ++ timers_due(db, now)
+
+  defp timers_due(db, now) do
+    Database.query(db, Database.timers())
+
+    for %{"job" => job, "tool" => tool, "inputs" => inputs, "at" => at} <-
+          Database.query(db, "select job, tool, inputs, at from database_timers where at <= ?", [now]),
+        do: {"timer " <> job, at, %{tool: tool, inputs: JSON.decode!(inputs)}}
+  end
+
+  defp jobs_due(db, jobs, now) do
     Database.query(db, """
     create table if not exists database_scheduled (job text primary key, fired integer not null) without rowid
     """)
@@ -418,6 +428,18 @@ defmodule Database.Lease do
 
   # Marks a job as run for the time it was due at. If it's marked already, a server that held the lease
   # meanwhile made the call, and this one's writes aren't kept.
+  defp mark(db, {"timer " <> job, at}) do
+    # One that repeats is next due at the first of its times after now, and one that doesn't is done.
+    repeated = """
+    update database_timers set at = at + every * ((cast(strftime('%s', 'now') as integer) - at) / every + 1)
+    where job = ? and at = ? and every is not null returning job
+    """
+
+    if Database.query(db, repeated, [job, at]) == [] and
+         Database.query(db, "delete from database_timers where job = ? and at = ? and every is null returning job", [job, at]) == [],
+       do: raise("Another server made this timer's call")
+  end
+
   defp mark(db, {job, at}) do
     marked = "update database_scheduled set fired = ? where job = ? and fired < ? returning job"
     if Database.query(db, marked, [at, job, at]) == [], do: raise("Another server made this scheduled call")
