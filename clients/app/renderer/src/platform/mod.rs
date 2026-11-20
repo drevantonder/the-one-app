@@ -55,8 +55,10 @@ mod conformance;
 mod snapshot;
 mod frame_timing;
 pub use frame_timing::Frames;
+pub(crate) use frame_timing::Timing;
 mod pressure;
 pub use pressure::Pressure;
+pub(crate) use pressure::Deadlines;
 #[cfg(target_os = "android")]
 use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion, text_size};
 #[cfg(target_os = "ios")]

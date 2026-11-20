@@ -481,7 +481,8 @@ struct Drawn {
 /// rest moves (a launcher's card under its turning pages, a page under a sheet sliding up), shadows, blurs and all.
 /// What a frame's GPU did, the same on any GPU: the device pixels of quads (and underlines), shadows, glyphs and
 /// pictures (sprites), backdrops and layers' images (rasters) it drew, each counted as often as it's drawn over, the
-/// pixels it copied of the frames before, and the bytes it uploaded to the atlas.
+/// pixels it copied of the frames before, the bytes it uploaded to the atlas, and the device pixels of what it blurred
+/// afresh behind backdrops (`blurred`), where a blur kept from the frames before costs none.
 #[derive(Clone, Copy, Default)]
 struct Work {
     quads: f64,
@@ -491,6 +492,7 @@ struct Work {
     rasters: f64,
     copied: f64,
     uploaded: u64,
+    blurred: f64,
 }
 
 struct Kept {
@@ -709,6 +711,7 @@ impl Renderer {
             "rasters": px(work.rasters),
             "copied": px(work.copied),
             "uploaded": work.uploaded,
+            "blurred": px(work.blurred),
         })
     }
 
@@ -1298,6 +1301,9 @@ impl Renderer {
             return view.clone();
         }
         let size = (frame.width(), frame.height());
+        let mut work = self.work.get();
+        work.blurred += f64::from(size.0) * f64::from(size.1);
+        self.work.set(work);
         if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size) {
             self.backdrop = Some(BackdropTextures { size, source: None, levels: Default::default() });
         }

@@ -130,17 +130,24 @@ impl Screen {
     /// frames of a display `hz` times a second drawn, from its start until `after` ms past its end or nothing's moved
     /// for a frame: each with what it cost, where `track` was drawn and how far what scrolls under its start has
     /// scrolled. → those frames.
-    pub(super) fn play(&mut self, trace: &Trace, every: f64, hz: f64, after: f64, track: Option<Id>, mut draw: Option<&mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>>) -> anyhow::Result<Vec<Value>> {
+    /// `paced`: ms between the frames it draws, where its device draws them less often than its display refreshes
+    /// (a machine others load, as Telemetry measures one): each is a long one, which presses it as a window's do
+    /// (`platform::Deadlines`), and it draws as pressed, as a window would, its pressure as it was again after.
+    #[allow(clippy::too_many_arguments)]
+    pub(super) fn play(&mut self, trace: &Trace, every: f64, hz: f64, paced: Option<f64>, after: f64, track: Option<Id>, mut draw: Option<&mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>>) -> anyhow::Result<Vec<Value>> {
         let clock = self.js.clock().clone();
         if draw.is_some() {
             clock.pause();
             self.idle();
         }
         let paused = clock.paused();
-        self.hz = hz;
+        let refresh = 1000.0 / hz;
+        let frame_ms = paced.unwrap_or(refresh).max(refresh);
+        self.hz = 1000.0 / frame_ms;
         let begun = clock.now();
         let (ms, samples) = (trace.ms(), trace.samples(every));
-        let frame_ms = 1000.0 / hz;
+        let (pressure, mut deadlines, origin) = (self.pressure, crate::platform::Deadlines::default(), web_time::Instant::now());
+        let long = crate::platform::Timing::long(std::time::Duration::from_secs_f64(frame_ms / 1000.0), std::time::Duration::from_secs_f64(refresh / 1000.0));
         let mut finger = Some(self.finger_down(trace.start, begun));
         let (mut next, mut frames) = (0, Vec::new());
         // As many frames as its length and `after` take, and for a trace with no frames drawn, as its moves take.
@@ -162,8 +169,14 @@ impl Screen {
             }
             let Some(draw) = draw.as_mut() else { break };
             self.step(begun + frame - clock.now());
+            if paced.is_some() {
+                let at = origin + std::time::Duration::from_secs_f64(frame / 1000.0);
+                deadlines.frame_at(at, long);
+                self.pressure = pressure.max(deadlines.pressure_at(at));
+            }
             let mut drawn = draw(self)?;
             drawn["at"] = json!((frame * 100.0).round() / 100.0);
+            drawn["pressure"] = json!(self.pressure.name());
             if let Some(rect) = track.and_then(|id| self.rects.get(&id)) {
                 drawn["x"] = json!((rect.x * 100.0).round() / 100.0);
                 drawn["y"] = json!((rect.y * 100.0).round() / 100.0);
@@ -185,6 +198,7 @@ impl Screen {
         if draw.is_some() {
             self.seen = None;
         }
+        self.pressure = pressure;
         Ok(frames)
     }
 }

@@ -38,6 +38,9 @@
 //!   the display drawn as the window draws one, each with what `profile`'s says, `at` (ms since it went down), where
 //!   `track` was drawn (`x`, `y`) and how far what scrolls under its start shows scrolled (`scroll`, with its stretch
 //!   past an end); `over` counts the frames whose painting took longer than `budget_ms`, a frame's time at `hz`.
+//!   With `frame_ms`, a frame is drawn only that often, as a device others load draws them, each a late one that
+//!   presses it as a window's do (each frame's `pressure`); `leaving` is how much it took out is still drawn going at
+//!   its end.
 //! - `host` → `{ok, checks, paced, refresh_hz, ticks, presented, inputs}`, after a second and a half: whether its host
 //!   keeps the renderer's contract with it (`platform`'s), its window kept moving for a second, then still, each check
 //!   `{check, ok, said}`: a tick each refresh, a frame presented each tick, nothing while still, and inputs timed by

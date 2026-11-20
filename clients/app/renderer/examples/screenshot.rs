@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p renderer --example screenshot -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
-//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--gpu] [--measure]
+//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--gpu] [--measure]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -12,7 +12,10 @@
 //! lavapipe, where there's no GPU), or on Windows Direct3D 12's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
-//! `step` moves it. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`).
+//! `step` moves it. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`). `--panel` draws it as a
+//! computer's panel is (a Mac's launcher, its corners `<corner>` round): what its page puts on the system's glass is a
+//! window of its own, each drawn by a renderer of its own from where it is (`Display::arrange`), over the system's glass,
+//! which is a flat colour here, and its picture and costs are theirs.
 //! `--gpu` waits for the GPU after each frame drawn, and says how long that took with its cost (`gpu_ms`): on a real
 //! GPU, its time for the frame, as a device that draws it would take.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
@@ -46,6 +49,7 @@ fn main() -> anyhow::Result<()> {
     let dark = args.iter().any(|arg| arg == "--dark");
     let touch = args.iter().any(|arg| arg == "--touch");
     let gpu_times = args.iter().any(|arg| arg == "--gpu");
+    let panel: Option<f32> = flag("--panel").and_then(|corner| corner.parse().ok());
     // What the window keeps for itself at each edge, as a phone's status bar and home indicator, or a title bar.
     let safe: Vec<f32> = flag("--safe-area").map(|edges| edges.split(',').filter_map(|edge| edge.parse().ok()).collect()).unwrap_or_default();
     let insets = match safe[..] {
@@ -118,6 +122,7 @@ fn main() -> anyhow::Result<()> {
     screen.page = tokens_page;
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
+    screen.panel = panel.map(|corner| renderer::Panel { corner, fill: false, whole: false });
     // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.
     screen.idle();
     let ran = started.elapsed();
@@ -134,6 +139,8 @@ fn main() -> anyhow::Result<()> {
     let mut scene = Scene::default();
     let size = Size { width: Pixels(width), height: Pixels(height) };
     let first_frame = std::cell::Cell::new(None);
+    // A panel's parts, each the size it was made and its renderer.
+    let mut parts: Vec<(Size<DevicePixels>, Renderer)> = Vec::new();
     let worst_paint = std::cell::Cell::new(std::time::Duration::ZERO);
     // A frame drawn, and with `read`, waited for and read back: drawn again once the pictures it decodes in the
     // background are ready, as a window is woken to. → its pixels, if read, and what it cost (`Screen::cost`).
@@ -148,8 +155,35 @@ fn main() -> anyhow::Result<()> {
             }
         }
         let drawing = std::time::Instant::now();
-        renderer.draw(&scene, [0.0, 0.0]);
-        let mut cost = screen.cost(&renderer);
+        // On a panel, each pane of the system's glass its page asks for, its edges on whole points, as a window's are.
+        let panes: Vec<(f32, f32, Size<DevicePixels>)> = screen
+            .glass()
+            .iter()
+            .map(|pane| {
+                let (left, top) = (pane.bounds.origin.x.round(), pane.bounds.origin.y.round());
+                let (right, bottom) = ((pane.bounds.origin.x + pane.bounds.size.width).round(), (pane.bounds.origin.y + pane.bounds.size.height).round());
+                let device = |length: f32| DevicePixels((length * scale).round() as i32);
+                (left * scale, top * scale, Size { width: device(right - left), height: device(bottom - top) })
+            })
+            .collect();
+        let mut cost = if panes.is_empty() {
+            renderer.draw(&scene, [0.0, 0.0]);
+            screen.cost(&renderer)
+        } else {
+            parts.truncate(panes.len());
+            for (at, (_, _, size)) in panes.iter().enumerate() {
+                if parts.get(at).is_none_or(|(made, _)| made != size) {
+                    let made = (*size, Renderer::offscreen(&context, renderer.sprite_atlas().clone(), *size));
+                    if at < parts.len() { parts[at] = made } else { parts.push(made) }
+                }
+            }
+            let mut costs = Vec::new();
+            for ((left, top, _), (_, part)) in panes.iter().zip(&mut parts) {
+                part.draw(&scene, [*left, *top]);
+                costs.push(screen.cost(part));
+            }
+            summed(costs)
+        };
         // How long the GPU took, waited for, where it's asked: on a real GPU, that GPU's time for the frame.
         if gpu_times {
             renderer.finish();
@@ -159,7 +193,29 @@ fn main() -> anyhow::Result<()> {
         if !read && first_frame.get().is_some() {
             return Ok((0, 0, Vec::new(), cost));
         }
-        let (width, height, rgba) = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
+        let (width, height, rgba) = if panes.is_empty() {
+            renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?
+        } else {
+            // The parts over the system's glass, which is the window's grey in its Colour Mode here.
+            let (width, height) = (device.width.0 as u32, device.height.0 as u32);
+            let glass: [u8; 3] = if dark { [30, 30, 32] } else { [236, 236, 238] };
+            let mut rgba: Vec<u8> = (0..width * height).flat_map(|_| [glass[0], glass[1], glass[2], 255]).collect();
+            for ((left, top, _), (_, part)) in panes.iter().zip(&mut parts) {
+                let (w, h, drawn) = part.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
+                for (y, x) in (0..h).flat_map(|y| (0..w).map(move |x| (y, x))) {
+                    let (to_x, to_y) = (x as i64 + *left as i64, y as i64 + *top as i64);
+                    if to_x < 0 || to_y < 0 || to_x >= i64::from(width) || to_y >= i64::from(height) {
+                        continue;
+                    }
+                    let (from, to) = (((y * w + x) * 4) as usize, ((to_y as u32 * width + to_x as u32) * 4) as usize);
+                    let alpha = u32::from(drawn[from + 3]);
+                    for channel in 0..3 {
+                        rgba[to + channel] = ((u32::from(drawn[from + channel]) * alpha + u32::from(rgba[to + channel]) * (255 - alpha)) / 255) as u8;
+                    }
+                }
+            }
+            (width, height, rgba)
+        };
         first_frame.set(first_frame.get().or(Some(gpu.elapsed())));
         Ok((width, height, rgba, cost))
     };
@@ -280,4 +336,16 @@ fn ask(screen: &mut Screen, mut request: Value) -> Option<Value> {
     screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)));
     screen.idle();
     answered.borrow_mut().take()
+}
+
+/// The costs of a panel's parts' frames as one frame's: their draw calls and their GPU's work added up.
+fn summed(costs: Vec<Value>) -> Value {
+    let mut all = costs.first().cloned().unwrap_or(json!({}));
+    for cost in costs.iter().skip(1) {
+        all["draws"] = json!(all["draws"].as_u64().unwrap_or(0) + cost["draws"].as_u64().unwrap_or(0));
+        for (what, value) in cost["work"].as_object().into_iter().flatten() {
+            all["work"][what] = json!(all["work"][what].as_f64().unwrap_or(0.0) + value.as_f64().unwrap_or(0.0));
+        }
+    }
+    all
 }

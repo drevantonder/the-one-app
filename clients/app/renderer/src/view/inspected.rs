@@ -177,7 +177,7 @@ impl Screen {
                 let steps = request.inputs.get("steps").and_then(Value::as_u64).unwrap_or(10).max(1);
                 let ms = request.f64("ms").unwrap_or(200.0).max(0.0);
                 let trace = super::finger::Trace { start, moves: vec![(dx, dy, ms)], lift: true };
-                self.play(&trace, ms / steps as f64, self.hz, 0.0, None, None)?;
+                self.play(&trace, ms / steps as f64, self.hz, None, 0.0, None, None)?;
                 json!({"dragged": {"x": dx, "y": dy}})
             }
             "clock" => {
@@ -257,7 +257,9 @@ impl Screen {
     /// `hz` times a second (60 unless it says), each frame drawn by `draw` as the window draws one, until `after` ms
     /// past its end (2000 unless it says) or nothing moves. → each frame's cost, where `track` (a selector) was drawn
     /// (`x`, `y`), how far what scrolls under its start shows scrolled (`scroll`, its stretch past an end with it), and
-    /// the frame's budget (`budget_ms`), and how many frames' painting took longer (`over`).
+    /// the frame's budget (`budget_ms`), and how many frames' painting took longer (`over`). With `frame_ms`, its
+    /// frames are drawn only that often, as a device others load draws them, and pressed as that presses a window
+    /// (each frame's `pressure`). `leaving` is how much that was taken out is still drawn going at its end.
     pub fn replay(&mut self, request: &Request, draw: &mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>) -> anyhow::Result<Value> {
         let start = self.start_of(request)?;
         let moves: Vec<Value> = request.inputs.get("moves").and_then(Value::as_array).cloned().context("say how it moves: `moves`, each {dx, dy, ms}")?;
@@ -274,10 +276,13 @@ impl Screen {
             _ => None,
         };
         let trace = super::finger::Trace { start, moves, lift };
-        let frames = self.play(&trace, every, hz, after, track, Some(draw))?;
+        let paced = request.f64("frame_ms").map(|ms| ms.max(1.0));
+        let frames = self.play(&trace, every, hz, paced, after, track, Some(draw))?;
         let budget = 1000.0 / hz;
         let over = frames.iter().filter(|frame| frame["paint_ms"].as_f64().is_some_and(|ms| ms > budget)).count();
-        Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "frames": frames, "time": self.js.clock().now(), "paused": true}))
+        // What's been taken out but is still drawn going, which `after` should have seen go.
+        let leaving = self.tree.going().count();
+        Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "leaving": leaving, "frames": frames, "time": self.js.clock().now(), "paused": true}))
     }
 
     /// What the frame painted last cost, as `profile` says it: the mutations its JS made that it applied since the

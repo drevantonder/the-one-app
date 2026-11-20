@@ -1236,6 +1236,19 @@
         "launcher": true,
         "mac": true
       }
+    },
+    "motions": {
+      "Open a category on a loaded Mac": {
+        "from": {
+          "role": "group",
+          "name": "Utilities"
+        },
+        "gesture": {
+          "moves": []
+        },
+        "frameMs": 92,
+        "blurred": true
+      }
     }
   },
   "Launcher, App Library swiped back": {
@@ -1299,7 +1312,19 @@
         "role": "group",
         "name": "Productivity"
       }
-    ]
+    ],
+    "motions": {
+      "Close it on a loaded Mac": {
+        "from": {
+          "x": 700,
+          "y": 500
+        },
+        "gesture": {
+          "moves": []
+        },
+        "frameMs": 92
+      }
+    }
   },
   "App Library, a category open": {
     "like": "App Library",

@@ -86,7 +86,10 @@ async function run(at, folder, scene, requests) {
   const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   const lines = requests.map((request, id) => JSON.stringify({ v: 1, id: id + 1, ...request })).join("\n")
-  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : [])], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  // A computer's launcher is a panel, drawn as one (a Mac's, its glass the system's), as its client says it is.
+  const client = scene.answers?.["one/client"]
+  const panel = client?.launcher && client?.mac ? ["--panel", "0"] : []
+  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...panel], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
 }
@@ -166,10 +169,12 @@ export function spring([duration, bounce], from, velocity, t) {
 /// What iOS would draw after the press lifts, frame by frame from the first after it, where it says: a node let go
 /// springs back by SwiftUI's `.spring` from where it was drawn at the speed the finger had; what scrolls, flung at
 /// the finger's speed, slows as UIScrollView does. A pause before the lift leaves no speed. → each frame's value,
-/// or none before the lift, or none where iOS gives nothing to compare (a stretch past an end springing back).
+/// or none before the lift, or none where iOS gives nothing to compare (a stretch past an end springing back, or a
+/// tap, which moves nothing).
 function ios(frames, way, values, stretches) {
   const lift = stretches.reduce((sum, { ms }) => sum + ms, 0)
   const last = stretches.at(-1)
+  if (!last) return undefined
   const speed = last.dx || last.dy ? ((way.endsWith("along") ? last.dx ?? 0 : last.dy ?? 0) / last.ms) * 1000 : 0
   const at = frames.findIndex((frame) => frame.at >= lift)
   if (at < 0) return undefined
@@ -284,12 +289,12 @@ async function play(built, scene, name, motion, hz, folder) {
   const at = pageFolder(built, scene.page, folder)
   const { moves: stretches, lift } = moves(motion.gesture)
   const taps = scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) }, { op: "clock", step: 1000 }])
-  const replay = { op: "replay", ...selector(motion.from), moves: stretches, lift, hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}) }
+  const replay = { op: "replay", ...selector(motion.from), moves: stretches, lift, hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
   const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, replay])
   const answer = ran.answers.at(-1)
   if (ran.failed || !answer?.result) return { said: `  ${hz} Hz: ${answer?.error ?? ran.said.split("\n").at(-1)}` }
-  const { frames, budget_ms: budget, over } = answer.result
+  const { frames, budget_ms: budget, over, leaving } = answer.result
   const [way, values] = travel(frames)
   const kept = frames.map(({ png, width, height, ...frame }) => frame)
   const beforeAt = against && join(against, relative(out, folder))
@@ -302,7 +307,16 @@ async function play(built, scene, name, motion, hz, folder) {
   const worst = Math.max(...frames.map((frame) => frame.paint_ms))
   const script = Math.max(...frames.map((frame) => frame.script_ms ?? 0))
   const rest = frames.at(-1).at
-  const said = [`  ${hz} Hz: ${way} ${Math.round(Math.max(...values.map(Math.abs)))} pt, at rest after ${Math.round(rest)} ms (${frames.length} frames), ${over} over its ${budget} ms budget, the worst ${worst} ms painting and ${script} ms of JS, in ${Math.round(performance.now() - started)} ms`]
+  const said = [`  ${hz} Hz: ${way} ${Math.round(Math.max(...values.map(Math.abs)))} pt, at rest after ${Math.round(rest)} ms (${frames.length} frames${motion.frameMs ? `, one each ${motion.frameMs} ms` : ""}), ${over} over its ${budget} ms budget, the worst ${worst} ms painting and ${script} ms of JS, in ${Math.round(performance.now() - started)} ms`]
+  // What fails it: anything it took out still drawn once it's settled, and glass it should keep blurred drawn plain.
+  const failed = []
+  if (leaving) failed.push(`${leaving} taken out still drawn going once it settled`)
+  const plain = motion.blurred ? frames.findIndex((frame, n) => n > 0 && !frame.work?.backdrops) : -1
+  if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
+  if (failed.length) {
+    process.exitCode = 1
+    said.push(`  ${hz} Hz FAILS: ${failed.join("; ")}`)
+  }
   if (apple) {
     const compared = frames.flatMap((frame, n) => (apple[n] === undefined ? [] : [Math.abs(values[n] - apple[n])]))
     said.push(`  ${hz} Hz against iOS (${way.startsWith("scrolled") ? "UIScrollView's deceleration" : "SwiftUI's .spring"}, from the lift): at most ${Math.max(...compared).toFixed(1)} pt apart`)

@@ -457,8 +457,11 @@ export type Scene =
   | (() => Element)
   | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion> }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, with what's watched move
- * (`follow`, named as a tap is; what scrolls under it is always watched). */
-export type Motion = { from: Tap; gesture: Gesture; follow?: Tap }
+ * (`follow`, named as a tap is; what scrolls under it is always watched). `frameMs`: its frames drawn only that often,
+ * as a device others load draws them (Telemetry's frame interval), which presses it as a window's late frames do.
+ * `blurred`: glass shows blurred in every frame after its first, as a veil it opens does. However it's played, what it
+ * takes out is gone once it settles. */
+export type Motion = { from: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean }
 /** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
  * a short quick flick; dragged with `pauses` of a fifth of a second along the way; a sheet pulled down and let go; or
  * each stretch it moves (`moves`, a stretch with neither `dx` nor `dy` holding still), held at the end unless `lift`. */
