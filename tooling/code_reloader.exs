@@ -207,15 +207,29 @@ defmodule CodeReloader do
     apps
   end
 
-  # As `one deploy --name <name> --files-from apps/<name>` deploys it for the network.
-  defp deploy(server, name) do
+  # As `one deploy --name <name> --files-from apps/<name>` deploys it for the network. One that requires an app of this
+  # checkout's the network hasn't yet, as one changed to require another does, has that deployed first, as the
+  # refusal says to, and is deployed again.
+  defp deploy(server, name, tried \\ false) do
     folder = Path.join([@root, "apps", name])
     {:ok, paths} = Folder.files(folder)
     files = Map.new(paths, &{&1, File.read!(Path.join(folder, &1))})
 
     case :erpc.call(server, Deploy, :deploy, ["network", name, files], :infinity) do
-      {:ok, _number, _warnings} -> :ok
-      {:error, why} -> why
+      {:ok, _number, _warnings} ->
+        :ok
+
+      {:error, why, %{missing: missing}} ->
+        ours = for %{app: "network/apps/" <> app} <- missing, File.dir?(Path.join([@root, "apps", app])), do: app
+
+        case {tried, ours, Enum.reject(Enum.map(ours, &deploy(server, &1)), &(&1 == :ok))} do
+          {false, [_ | _], []} -> deploy(server, name, true)
+          {_, _, []} -> why
+          {_, _, failed} -> "#{why} (#{Enum.join(failed, "; ")})"
+        end
+
+      {:error, why} ->
+        why
     end
   end
 
