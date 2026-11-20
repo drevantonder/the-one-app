@@ -213,6 +213,13 @@ function strayRows(tree) {
   })
 }
 
+/// What a screen's words may not say to a person: this codebase's own, as a build error's (`entrypoint`, `runtime_version`,
+/// a file and its line), which belongs in Telemetry and to the agents. Each line of a scene's semantic tree that says one.
+const INTERNAL = /entrypoint|runtime_version|\.[mc]?[jt]sx?:?\(?\d+[,:]\d+|\berror: /i
+function internalWords(tree) {
+  return tree.split("\n").filter((line) => INTERNAL.test(line)).map((line) => line.trim())
+}
+
 async function dom(browser, serve, key, scene, folder) {
   const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light" })
   const problems = []
@@ -429,6 +436,11 @@ for (const target of targets) {
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
     // A row is drawn in its card by the `List` it's in: one outside any has none, and floats on its screen's background.
     if (name !== "gallery" && shown.tree !== undefined) for (const row of strayRows(shown.tree)) said.push(`  a row isn't in a List, so it has no card: ${row}`)
+    // A person reads a scene's words: nothing of the build's or the platform's is among them.
+    for (const line of shown.tree === undefined ? [] : internalWords(shown.tree)) {
+      said.push(`  the screen says a word that isn't a person's: ${line}`)
+      process.exitCode = 1
+    }
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)

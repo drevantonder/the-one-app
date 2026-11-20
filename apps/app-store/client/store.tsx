@@ -65,11 +65,10 @@ interface Install {
   app: string | null
   state: "installing" | "installed" | "not_installed" | "recently_deleted" | null
   stage: string | null
-  why: string | null
   deleted: number | null
   trusted: boolean | null
   version: number | null
-  update: { state: "available" | "updating" | "failed"; why: string | null } | null
+  update: { state: "available" | "updating" | "failed" } | null
   requires: Record<string, string>
   required_by: string[]
 }
@@ -376,7 +375,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
   return <Row heading={props.owner.name} text={text()} end={end()} />
 }
 
-/// What's failed of an app for an owner, on the app's page: installing it, or its update.
+/// What's failed of an app for an owner, on the app's page: installing it, or its update. Why is for Telemetry and the agents (`apps`), not a person.
 function Failed(props: { all: Owners; owner: Owner; listed: Listed }) {
   const done = () => props.owner.installs.find((install) => install.app === props.listed.app)
   const busy = () => working() === `${props.owner.who}|${props.listed.app}|retry`
@@ -385,7 +384,7 @@ function Failed(props: { all: Owners; owner: Owner; listed: Listed }) {
     <Show when={done()?.state === "not_installed" || done()?.update?.state === "failed"}>
       <Problem
         heading={heading()}
-        text={(done()!.state === "not_installed" ? done()!.why : done()!.update?.why) ?? undefined}
+        text={done()!.state === "not_installed" ? "This can't be installed yet" : "This update can't be installed yet"}
         action={<Show when={!only(props.all, props.owner)}><Button variant="outline" loading={busy()} onPress={() => retry(props.owner, done()!)}>Try Again</Button></Show>}
       />
     </Show>

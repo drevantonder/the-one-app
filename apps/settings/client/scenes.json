@@ -339,6 +339,88 @@
     ],
     "touch": true
   },
+  "Updates, an app that can't update": {
+    "like": "Settings",
+    "answers": {
+      "apps": {
+        "for": "users/sam",
+        "apps": [
+          {
+            "name": "android-emulator",
+            "for": "network",
+            "app": "network/apps/android-emulator",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "app-store",
+            "for": "network",
+            "app": "network/apps/app-store",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": {
+              "state": "failed",
+              "stage": null,
+              "commit": "446dccc",
+              "commits": 1,
+              "why": "The app's page uses what the UI library doesn't have, where its entrypoint's runtime_version says it has only that:\nstore.tsx(428,11): error: a `For` as a `List`'s rows makes every row at once, which a long list can't start with on a native host: write `<List each={…} keyed={…}>{(item) => <Row … />}</List>`, which makes only the rows near the window"
+            }
+          },
+          {
+            "name": "chrome",
+            "for": "network",
+            "app": "network/apps/chrome",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "containers",
+            "for": "network",
+            "app": "network/apps/containers",
+            "state": "installed",
+            "trusted": false,
+            "requires": {},
+            "required_by": [],
+            "update": {
+              "state": "available",
+              "stage": null,
+              "commit": "abc",
+              "commits": 3,
+              "why": null
+            }
+          },
+          {
+            "name": "git-repos",
+            "for": "network",
+            "app": "network/apps/git-repos",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "gmail",
+            "for": "network",
+            "app": "network/apps/gmail",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          }
+        ]
+      }
+    }
+  },
   "An app": {
     "like": "Settings",
     "page": "client/index.html#app:network:containers"

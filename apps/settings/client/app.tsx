@@ -28,7 +28,6 @@ interface Added {
 interface Update {
   state: string
   stage?: string | null
-  why?: string | null
 }
 
 /** An app as Settings lists it: `settings_apps` with what `apps` says of it. */
@@ -44,6 +43,9 @@ interface App {
   update?: Update | null
   required_by?: string[]
 }
+
+/// What an update says to a person. Why one failed is for Telemetry and the agents (`apps`), never a person's screen.
+const updateText = (update: Update) => (update.state === "failed" ? "This update can't be installed yet" : "Update ready")
 
 /** What `builds` answers that Updates shows. */
 interface Builds {
@@ -300,7 +302,7 @@ function Updates() {
                   <Row
                     start={<Tile icon={app().icon} />}
                     heading={app().title}
-                    text={app().update!.why ?? "Update ready"}
+                    text={updateText(app().update!)}
                     end={<Button variant="outline" loading={working() === app().name} onPress={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
                   />
                 )}
@@ -354,7 +356,7 @@ function AppPage(props: { app: App }) {
           {(allowed) => <Row heading="Notifications" end={<Switch aria-label="Notifications" value={allowed().allowed} onValueChange={allow} />} />}
         </Show>
         <Show when={app().update}>
-          <Row heading="Update ready" text={app().update!.why ?? undefined} end={<Button variant="outline" loading={working() === "update"} onPress={update}>Update</Button>} />
+          <Row heading="Update ready" text={app().update!.state === "failed" ? updateText(app().update!) : undefined} end={<Button variant="outline" loading={working() === "update"} onPress={update}>Update</Button>} />
         </Show>
       </List>
       <Groups in="app" app={app().name} />
