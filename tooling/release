@@ -239,11 +239,14 @@ triple() {
 }
 
 # What a client for a kind of machine is built from: its crate and what it's built with (`tooling/input-hash`), the UI
-# library it has built in (`ui` in clients/app/build.rs), and the protocols it speaks (`core/protocol.json`). Its own
+# library it has built in (`ui` in clients/app/build.rs), the protocols it speaks (`core/protocol.json`), and a Mac's,
+# the bundle it's signed in and how (`mac_bundle_signed`). Its own
 # build isn't in it: that's the version `one --version` says, so a client built for an earlier build still says what
 # it is.
 client_inputs() {
   { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && sha256sum core/protocol.json &&
+    { [[ $1 != macos-* ]] || { find clients/app/macos -type f -print0 | sort -z | xargs -0 sha256sum &&
+      sed -n '/^developer_id_signed() {$/,/^}$/p; /^mac_bundle_signed() {$/,/^}$/p' tooling/release; }; } &&
     git ls-files -z core/ui/src core/ui/build.js core/ui/tables.ts core/ui/package.json core/ui/bun.lock | xargs -0 sha256sum; } |
     sha256sum | cut -d' ' -f1
 }
@@ -405,6 +408,18 @@ developer_id_signed() {
     "$@" >/dev/null
 }
 
+# A Mac's `one`, gzipped in `$1`, signed in its app bundle, `clients/app/macos`, which is the same for every build: the
+# app puts it in place around each build before it runs it (`cli::serving::bundled`), seal and all, so the seal
+# rcodesign makes must be the one there.
+mac_bundle_signed() {
+  local folder bundle
+  folder=$(mktemp -d) && bundle=$folder/app.app && cp -R clients/app/macos "$bundle" && mkdir "$bundle/Contents/MacOS" &&
+    gunzip -c "$1" >"$bundle/Contents/MacOS/one" && chmod +x "$bundle/Contents/MacOS/one" && developer_id_signed "$bundle" &&
+    { cmp -s "$bundle/Contents/_CodeSignature/CodeResources" clients/app/macos/Contents/_CodeSignature/CodeResources ||
+      { echo "The Mac app's seal isn't clients/app/macos's: put rcodesign's in its place." >&2 && false; }; } &&
+    gzip -9 -c "$bundle/Contents/MacOS/one" >"$1" && rm -r "$folder"
+}
+
 # `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
 # which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
 # that machine's system libraries, so each kind builds its own. Each builds at once, beside the servers, in a target
@@ -444,7 +459,8 @@ client() {
         makensis -V2 -DVERSION="${build%%+*}" -DPROGRAM="$exe" -DOUTFILE="$setup" -DCOPYRIGHT="$(grep -m1 '^Copyright' LICENSE)" clients/app/installer.nsi &&
         signed "$setup" && client_inputs "${name#*/}" >"${setup%.exe}.inputs"
     }; } &&
-    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs" &&
+    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && { [[ $name != one/macos-* ]] || mac_bundle_signed "$out/$file.gz"; } &&
+    client_inputs "${name#*/}" >"$out/$file.inputs" &&
     serve_inputs "${name#*/}" >"$out/$file.serves"
 }
 clients=()
@@ -455,7 +471,7 @@ for name in "${mine[@]}"; do
       tooling/on-mac mac-client.yml "$file.gz" "$out" \
         'export RUSTUP_TOOLCHAIN=$RUST && cargo build --release -p app && gzip -9 -c target/release/one >'"$file.gz" \
         -f rust="$(rustc -V | cut -d' ' -f2)" &&
-      client_inputs "${name#*/}" >"$out/$file.inputs" && serve_inputs "${name#*/}" >"$out/$file.serves" ||
+      mac_bundle_signed "$out/$file.gz" && client_inputs "${name#*/}" >"$out/$file.inputs" && serve_inputs "${name#*/}" >"$out/$file.serves" ||
       { echo "$name wasn't built." >&2 && exit 1; }) &
     clients+=($!)
   elif [[ $name == one/* || $name == one-cli/* ]]; then
