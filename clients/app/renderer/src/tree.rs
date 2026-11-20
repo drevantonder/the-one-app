@@ -423,8 +423,28 @@ impl Tree {
             return vec![json!({"frame": id})];
         }
         let text = matches!(node.kind, Kind::Text | Kind::RawText);
-        let children: Vec<Value> =
+        let mut children: Vec<Value> =
             if text { Vec::new() } else { node.children.iter().flat_map(|child| self.read(*child, held)).collect() };
+        // A `list`'s rows say where each is in all of them, which a screen reader reads ("3 of 10,000"), as ARIA's
+        // `aria-posinset` and `aria-setsize` have it: it holds only those near the window.
+        if node.kind == Kind::List {
+            let count = node.prop("count").cloned().unwrap_or(json!(node.children.len()));
+            children = node
+                .children
+                .iter()
+                .flat_map(|child| {
+                    let index = self.nodes.get(child).and_then(|row| row.prop("index")).and_then(Value::as_u64);
+                    let mut read = self.read(*child, held);
+                    for one in read.iter_mut().filter_map(Value::as_object_mut) {
+                        if let Some(index) = index {
+                            one.insert("posinset".into(), json!(index + 1));
+                            one.insert("setsize".into(), count.clone());
+                        }
+                    }
+                    read
+                })
+                .collect();
+        }
         let role = node.str("role").map(str::to_owned).or_else(|| match node.kind {
             Kind::Text | Kind::RawText => Some("text".into()),
             Kind::Image if node.str("alt").is_some_and(|alt| !alt.is_empty()) => Some("img".into()),
@@ -453,6 +473,10 @@ impl Tree {
         }
         let mut out = Map::new();
         out.insert("id".into(), json!(id));
+        // What holds a list's rows says how many there are, as AccessKit has it on the container.
+        if let Some(size) = children.iter().filter(|child| child.get("posinset").is_some()).find_map(|child| child.get("setsize")) {
+            out.insert("setsize".into(), size.clone());
+        }
         if let Some(role) = role {
             out.insert("role".into(), json!(role));
         }

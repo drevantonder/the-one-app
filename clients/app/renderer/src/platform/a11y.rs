@@ -133,6 +133,12 @@ fn add(semantic: &Value, screen: &Screen, density: f64, out: &mut Vec<(NodeId, N
     if let Some(level) = semantic["level"].as_u64().or_else(|| semantic["level"].as_str().and_then(|level| level.parse().ok())) {
         out_node.set_level(level as usize);
     }
+    // Where a list's row is in all of its rows, from 0 as AccessKit counts, and how many there are on what holds them.
+    match (semantic["posinset"].as_u64(), semantic["setsize"].as_u64()) {
+        (Some(position), _) => out_node.set_position_in_set(position.saturating_sub(1) as usize),
+        (None, Some(size)) => out_node.set_size_of_set(size as usize),
+        _ => {}
+    }
     if let Some(description) = semantic["description"].as_str() {
         out_node.set_description(description);
     }
