@@ -402,7 +402,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         // On a phone, another app an app opens opens as a link the page follows.
         #[cfg(mobile)]
         "open_window" => Ok(done(app().shell.emit("open", json!(text("link").unwrap_or_default())))),
-        // An app's Home, or Window → Home Screen.
+        // The Home Screen, from an app's own window.
         #[cfg(desktop)]
         "front" => Ok(done(computer::summon())),
         // On a phone, the Home Screen is under every app's window.

@@ -1249,43 +1249,24 @@ impl Painter<'_> {
         }
     }
 
-    /// A window's breadcrumb over the top of its page (`Breadcrumb`), in a computer's own size, as shadcn's: Home light,
-    /// highlighted under the pointer (`hovered`); a muted /; then the app's icon and its name in semibold. → where
-    /// Home is, and where the breadcrumb ends.
-    pub(super) fn breadcrumb(&mut self, crumb: &Breadcrumb, start: f32, bar: f32, hovered: bool) -> (Bounds<f32>, f32) {
+    /// A window's title over the top of its page (`Title`), in a computer's own size: the app's icon and its name in
+    /// semibold, in the middle of the `bar`, which nothing presses. → where it ends.
+    pub(super) fn title(&mut self, title: &Title, start: f32, bar: f32) -> f32 {
         let conditions = self.conditions;
         let window = self.window;
-        let colour = |id: &str| colour_token(id, conditions);
-        let (home_style, app_style) = chrome_type(conditions);
+        let (_, style) = chrome_type(conditions);
         let middle = bar / 2.0;
-        let (icon, gap, pad) = (16.0, 6.0, 6.0);
+        let (icon, gap) = (16.0, 6.0);
         let mut x = start;
-        // Home, with the ring.
-        let home_words = self.text.paragraph("Home", &home_style, &[], None, None);
-        let home = Bounds { origin: point(x, middle - 11.0), size: Size { width: pad + icon + gap + home_words.size().width.ceil() + pad, height: 22.0 } };
-        if hovered {
-            let radius = crate::tokens::table().radius("radius-md", conditions).map_or(8.0, |radius| corner(radius, home.size));
-            self.quad(home, window, colour("quinary-label"), Edges::default(), Hsla::default(), Corners::all(radius), false, 1.0);
-        }
-        self.picture(&crumb.ring, Bounds { origin: point(x + pad, middle - icon / 2.0), size: Size { width: icon, height: icon } }, 0.0);
-        let home_colour = if hovered { colour("label") } else { colour("secondary-label") };
-        let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
-        let text = Text { style: home_style, color: home_colour, align: 0.0, wrap: false, underline: false, selectable: false };
-        self.paint_text(&home_words, &[], words_at(&home_words, x + pad + icon + gap), home_words.size().width.ceil(), 1.0, text, 1.0, window);
-        x = home.origin.x + home.size.width + 4.0;
-        // A muted /.
-        let slash = self.text.paragraph("/", &home_style, &[], None, None);
-        let muted = colour("secondary-label");
-        self.paint_text(&slash, &[], words_at(&slash, x), slash.size().width.ceil(), 1.0, Text { color: muted, ..text }, 0.6, window);
-        x += slash.size().width.ceil() + 4.0 + pad;
-        // The app.
-        if let Some(src) = &crumb.icon {
+        if let Some(src) = &title.icon {
             self.picture(src, Bounds { origin: point(x, middle - icon / 2.0), size: Size { width: icon, height: icon } }, icon * 0.225);
             x += icon + gap;
         }
-        let name = self.text.paragraph(&crumb.name, &app_style, &[], None, Some(1));
-        self.paint_text(&name, &[], words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("label"), ..text }, 1.0, window);
-        (home, x + name.size().width.ceil())
+        let name = self.text.paragraph(&title.name, &style, &[], None, Some(1));
+        let at = Bounds { origin: point(x, middle - name.size().height / 2.0), size: name.size() };
+        let text = Text { style, color: colour_token("label", conditions), align: 0.0, wrap: false, underline: false, selectable: false };
+        self.paint_text(&name, &[], at, name.size().width.ceil(), 1.0, text, 1.0, window);
+        x + name.size().width.ceil()
     }
 
     /// One of the window's own buttons (`WindowButton`), as a GNOME header bar's: a round button, lit under the
@@ -1461,7 +1442,7 @@ pub(super) fn colour_token(id: &str, conditions: Conditions) -> Hsla {
     crate::tokens::table().colour(id, conditions).map(Hsla::from).unwrap_or_default()
 }
 
-/// What the window draws of its own over its page (its breadcrumb, a notice) is set in: the medium type, as words,
+/// What the window draws of its own over its page (its title, a notice) is set in: the medium type, as words,
 /// and in its medium weight, as a name or an action, each line its size.
 pub(super) fn chrome_type(conditions: Conditions) -> (crate::text::TextStyle, crate::text::TextStyle) {
     let table = crate::tokens::table();

@@ -51,17 +51,14 @@ pub enum Appearance {
 /// answer, where the host has it at once. One it answers later, or a notification, goes to `Screen::message`.
 pub type Asked = Box<dyn FnMut(Value, Appearance) -> Option<Value>>;
 
-/// What a computer's window shows above its page, in its header bar's place: Home, with the One App's ring, which
-/// brings the launcher forward and keeps the window open, a muted "/", then the app's icon and name (DESIGN.md, App
-/// windows), each picture a `data:` address. Its page keeps the bar's height clear, as its host tells it.
-pub struct Breadcrumb {
-    pub ring: String,
+/// What a computer's window shows above its page, in its title row: the app's icon, a `data:` address, and its name
+/// (DESIGN.md, App windows), which nothing presses. Its page keeps the row's height clear, as its host tells it.
+pub struct Title {
     pub icon: Option<String>,
     pub name: String,
     /// How far in from the window's start it begins, in the band its top inset keeps clear, past a Mac's traffic
     /// lights; full screen, where the Mac hides them, it begins at the window's edge (`Screen::full_screen`).
     pub start: f32,
-    pub home: Box<dyn FnMut()>,
 }
 
 /// Where a press moves a window rather than reaching its page (`Screen::title_row`): its title row over its page, its
@@ -162,13 +159,12 @@ const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio
 
 /// The page itself, as an event's node: what a key is told to, once, for what listens to every key (`keydown()`).
 const PAGE: Id = 0;
-/// The window's own nodes beside its page's, as Tab and the inspector reach them: its breadcrumb's Home, its notice
-/// and the notice's action (`Screen::semantics`).
-pub const HOME: Id = u64::MAX - 1;
+/// The window's own nodes beside its page's, as Tab and the inspector reach them: its notice and the notice's action
+/// (`Screen::semantics`).
 pub const NOTICE: Id = u64::MAX - 2;
 pub const NOTICE_ACTION: Id = u64::MAX - 3;
 
-/// How far in from a full-screen window's edge its breadcrumb starts, in points.
+/// How far in from a full-screen window's edge its title starts, in points.
 const EDGE: f32 = 12.0;
 const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
 
@@ -247,13 +243,13 @@ pub struct Screen {
     pub text_size: Option<f32>,
     /// Whose own tokens it draws with, as its page's styles gave them (`tokens::load_page`).
     pub page: u32,
-    /// What its window says above it, on a computer.
-    pub breadcrumb: Option<Breadcrumb>,
+    /// What its window says above it, on a computer: the app's icon and name.
+    pub title: Option<Title>,
     /// Its own window buttons, at its title row's start and at its end, where it has no frame of the system's
     /// (`WindowButton`), and the one last pressed, until its window does what it says.
     pub window_buttons: (Vec<WindowButton>, Vec<WindowButton>),
     window_button: Option<WindowButton>,
-    /// Its window is full screen, where a Mac hides its traffic lights, so its breadcrumb starts at its edge.
+    /// Its window is full screen, where a Mac hides its traffic lights, so its title starts at its edge.
     pub full_screen: bool,
     /// The system's menu for text a secondary click asked for, until its window shows it.
     text_menu: Option<TextMenu>,
@@ -266,7 +262,7 @@ pub struct Screen {
     /// Whether its window is on screen, as its page is told (its host context's `visible`): a panel put away isn't.
     visible: bool,
     /// What the window keeps for itself at each of its page's edges: a computer's title bar, its traffic lights or
-    /// caption buttons, and its breadcrumb; a phone's status bar, notch and home indicator. The host sets it as the
+    /// caption buttons, and its title; a phone's status bar, notch and home indicator. The host sets it as the
     /// window opens and as it changes, and the page is told it as an MCP App is, its host context's `safeAreaInsets`,
     /// which the UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left` lengths are.
     pub insets: Edges<f32>,
@@ -418,7 +414,7 @@ impl Screen {
             pressure: Default::default(),
             text_size: None,
             page: 0,
-            breadcrumb: None,
+            title: None,
             full_screen: false,
             text_menu: None,
             window_buttons: (Vec::new(), Vec::new()),
@@ -552,12 +548,9 @@ impl Screen {
     }
 
     /// The semantic tree, as an agent and a screen reader read it, each frame's page's in its place, after the
-    /// window's own: its breadcrumb's Home and its notice, while they're drawn.
+    /// window's own: its notice, while it's drawn.
     pub fn semantics(&self) -> Value {
         let mut out = Vec::new();
-        if self.chrome.home.is_some() {
-            out.push(json!({"id": HOME, "role": "button", "name": "Home", "description": "Home Screen", "actions": ["click"]}));
-        }
         if let Some(notice) = &self.notice {
             let action = notice.action.as_ref().filter(|_| self.chrome.action.is_some());
             let children: Vec<Value> = action.map(|(label, _)| json!({"id": NOTICE_ACTION, "role": "button", "name": label, "actions": ["click"]})).into_iter().collect();
@@ -567,13 +560,9 @@ impl Screen {
         json!(out)
     }
 
-    /// Presses the window's own node `id` (`HOME`, `NOTICE_ACTION`), as a click on it does. → whether it's one.
+    /// Presses the window's own node `id` (`NOTICE_ACTION`), as a click on it does. → whether it's one.
     pub(crate) fn press_chrome(&mut self, id: Id) -> bool {
         match id {
-            HOME => match self.breadcrumb.as_mut() {
-                Some(crumb) => (crumb.home)(),
-                None => return false,
-            },
             NOTICE_ACTION => match self.notice.as_mut().and_then(|notice| notice.action.as_mut()) {
                 Some((_, action)) => action(),
                 None => return false,
@@ -993,9 +982,9 @@ impl Screen {
             stretched: self.stretched().into_iter().collect(),
             fields,
             caret,
-            hovering: (self.chrome.home.as_ref().is_some_and(hovering), self.chrome.action.as_ref().is_some_and(hovering)),
+            hovering: self.chrome.action.as_ref().is_some_and(hovering),
             notice: self.notice.as_ref().map(|notice| (notice.text.clone(), notice.action.as_ref().map(|(label, _)| label.clone()))),
-            breadcrumb: self.breadcrumb.as_ref().map(|crumb| (crumb.name.clone(), crumb.start)),
+            title: self.title.as_ref().map(|title| (title.name.clone(), title.start)),
             panel: self.panel.map(|panel| (panel.corner, panel.fill)),
             line: self.line(),
             fetched: self.fetched.values().filter(|fetched| fetched.is_some()).count(),
@@ -1060,7 +1049,7 @@ impl Screen {
         Some(Plan { conditions, window, scale, now, caret, everything, changed, moving, below, layered, still })
     }
 
-    /// Styles, lays out and paints the tree into `scene`, as `plan` says, and the window's own breadcrumb and notice
+    /// Styles, lays out and paints the tree into `scene`, as `plan` says, and the window's own title and notice
     /// over it. → what the painter found as it drew.
     fn draw(&mut self, plan: &Plan, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> Drawing {
         let Plan { conditions, window, scale, now, caret, everything, ref changed, ref moving, ref below, ref layered, still } = *plan;
@@ -1161,12 +1150,12 @@ impl Screen {
                 painter.paint(root, point(0.0, 0.0), Transform::NONE, window, 1.0, None, true)
             }
         }
-        // The window's breadcrumb, over its page.
+        // The window's title, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
         let edge = self.full_screen.then_some(EDGE);
         // What's under the pointer, or has the keyboard by Tab, is lit.
         let keyed = |id: Id| self.states.focus_visible && self.focus.focused == Some(id);
-        // Its own window buttons, as a header bar's: at the title row's start, before the breadcrumb, and at its end,
+        // Its own window buttons, as a header bar's: at the title row's start, before the title, and at its end,
         // which the page's top bar stops short of.
         const BUTTON: f32 = 24.0;
         const EDGE_GAP: f32 = 12.0;
@@ -1183,11 +1172,10 @@ impl Screen {
         }
         self.chrome.buttons = buttons;
         let after_buttons = (!starts.is_empty()).then(|| EDGE_GAP + starts.len() as f32 * (BUTTON + 8.0));
-        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, edge.or(after_buttons).unwrap_or(crumb.start), self.insets.top, self.chrome.home.as_ref().is_some_and(hovering) || keyed(HOME)));
-        let home = crumb.map(|(home, _)| home);
+        let title = self.title.as_ref().map(|title| painter.title(title, edge.or(after_buttons).unwrap_or(title.start), self.insets.top));
         // The page's top bar starts after it, and ends before the buttons at the end, which it's laid out again for
         // once either moves.
-        let start = crumb.map_or(0, |(_, end)| (end + 12.0).ceil() as u16);
+        let start = title.map_or(0, |end| (end + 12.0).ceil() as u16);
         let end = if ends.is_empty() { 0 } else { (EDGE_GAP + ends.len() as f32 * (BUTTON + 8.0) + 4.0).ceil() as u16 };
         if (start, end) != (self.chrome.title_start, self.chrome.title_end) {
             (self.chrome.title_start, self.chrome.title_end) = (start, end);
@@ -1203,7 +1191,6 @@ impl Screen {
         self.chrome.drag_regions = std::mem::take(&mut painter.drag_regions);
         self.chrome.kept_regions = std::mem::take(&mut painter.kept_regions);
         Drawing {
-            home,
             placed: painter.placed,
             tab_order: painter.tab_order,
             rects: painter.rects,
@@ -1219,7 +1206,7 @@ impl Screen {
     /// is, the pictures to fetch, what's under the pointer and Tab's order. → where each node listening for
     /// `intersection` is near the window.
     fn keep(&mut self, drawn: Drawing, plan: &Plan) -> Vec<(Id, bool)> {
-        let Drawing { home, placed, mut tab_order, rects, animating, modal, wanted, intersections, framed } = drawn;
+        let Drawing { placed, mut tab_order, rects, animating, modal, wanted, intersections, framed } = drawn;
         // Each frame's page is drawn in the room it had now from the next frame, if that's changed.
         for (id, rect) in framed {
             if let Some(child) = self.frames.get_mut(&id) {
@@ -1236,7 +1223,6 @@ impl Screen {
                 }
             }
         }
-        self.chrome.home = home;
         let moving = self.transitions.finish(plan.now);
         // What's going is gone once nothing in it moves, having been drawn going.
         let still = self.transitions.moving();
@@ -1253,10 +1239,9 @@ impl Screen {
             tab_order.retain(|id| self.within(*id, modal));
         }
         tab_order.retain(|id| !self.tree.inert(*id));
-        // The window's own Home and notice action come first, as they're first in it, unless a modal holds the keyboard.
-        if modal.is_none() {
-            let chrome = [(HOME, self.chrome.home.is_some()), (NOTICE_ACTION, self.chrome.action.is_some())];
-            tab_order.splice(0..0, chrome.into_iter().filter(|(_, drawn)| *drawn).map(|(id, _)| id));
+        // The window's own notice action comes first, as it's first in it, unless a modal holds the keyboard.
+        if modal.is_none() && self.chrome.action.is_some() {
+            tab_order.insert(0, NOTICE_ACTION);
         }
         self.focus.tab_order = tab_order;
         self.rects = rects;
@@ -1371,9 +1356,6 @@ impl Screen {
     pub fn cursor(&self, at: Point<f32>) -> Cursor {
         if let Some(cursor) = self.frame_cursor(at) {
             return cursor;
-        }
-        if self.chrome.home.is_some_and(|home| home.contains(&at)) {
-            return Cursor::Arrow;
         }
         if self.chrome.action.is_some_and(|action| action.contains(&at)) {
             return Cursor::Pointer;
@@ -1528,11 +1510,7 @@ impl Screen {
             self.changed();
             return;
         }
-        // The breadcrumb's Home is the window's, not its page's, and so is its notice's action.
-        if self.chrome.home.is_some_and(|home| home.contains(&at)) {
-            self.chrome.pressing_home = button == 0;
-            return;
-        }
+        // Its notice's action is the window's, not its page's.
         if self.chrome.action.is_some_and(|action| action.contains(&at)) {
             self.chrome.pressing_action = button == 0;
             return;
@@ -1628,14 +1606,6 @@ impl Screen {
                 && let Some((_, action)) = self.notice.as_mut().and_then(|notice| notice.action.as_mut())
             {
                 action();
-            }
-            return;
-        }
-        if std::mem::take(&mut self.chrome.pressing_home) {
-            if self.chrome.home.is_some_and(|home| home.contains(&at))
-                && let Some(crumb) = self.breadcrumb.as_mut()
-            {
-                (crumb.home)();
             }
             return;
         }
@@ -1873,7 +1843,7 @@ impl Screen {
         // Enter or Space on a button presses it alone, as every system's does: the page's `preventDefault` would come
         // too late to stop the press, so the page isn't told of it too (a launcher opening its chosen app behind it).
         let plain = !key.ctrl && !key.meta && !key.alt;
-        let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| matches!(id, HOME | NOTICE_ACTION) || (!self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click"))));
+        let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| id == NOTICE_ACTION || (!self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click"))));
         if !presses {
             self.tell(PAGE, "keydown", key.told());
         }
@@ -2041,7 +2011,7 @@ impl Screen {
     /// something takes a press, which the rest of it doesn't, so the window moves held there, as a title bar does.
     /// What its page says moves the window (`appRegion`) is part of it too, with or without a title row.
     pub fn title_row(&self) -> Option<TitleRow> {
-        let height = if self.breadcrumb.is_some() { self.insets.top } else { 0.0 };
+        let height = if self.title.is_some() { self.insets.top } else { 0.0 };
         if height == 0.0 && self.chrome.drag_regions.is_empty() {
             return None;
         }
@@ -2051,7 +2021,6 @@ impl Screen {
         let takes = |id: &Id, placed: &Placed| placed.pressable || placed.input || self.tree.nodes.get(id).is_some_and(|node| node.listens("pointerdown"));
         let mut taken: Vec<Bounds<f32>> = self.placed.iter().filter(|(id, placed)| takes(id, placed) && inside(*id, placed)).map(|(_, placed)| placed.shown).collect();
         taken.extend(self.chrome.kept_regions.iter().copied());
-        taken.extend(self.chrome.home);
         taken.extend(self.chrome.buttons.iter().map(|(_, bounds)| *bounds));
         taken.extend(self.chrome.action);
         Some(TitleRow { height, taken, regions: self.chrome.drag_regions.iter().map(|(_, bounds)| *bounds).collect() })
@@ -2250,9 +2219,9 @@ struct Editing {
 }
 
 /// What the window draws of its own over its page, as it was last drawn: where its page's top bar starts in its title
-/// row, after its breadcrumb (0 for a window with none); where its page asked for the system's own material, which a
+/// row, after its title (0 for a window with none); where its page asked for the system's own material, which a
 /// panel's host puts under it; where its page says a press moves the window, and where in that it doesn't
-/// (`appRegion`); and where its notice's action and its breadcrumb's Home are, and whether each is pressed.
+/// (`appRegion`); and where its notice's action is, and whether it's pressed.
 #[derive(Default)]
 struct Chrome {
     title_start: u16,
@@ -2264,8 +2233,6 @@ struct Chrome {
     kept_regions: Vec<Bounds<f32>>,
     action: Option<Bounds<f32>>,
     pressing_action: bool,
-    home: Option<Bounds<f32>>,
-    pressing_home: bool,
 }
 
 /// What a frame draws, as `Screen::plan` worked it out: the conditions, the window and its scale, the time on the
@@ -2285,11 +2252,10 @@ struct Plan {
     still: bool,
 }
 
-/// What the painter found as it drew a frame (`Screen::draw`): where Home was drawn, what takes the pointer and the
+/// What the painter found as it drew a frame (`Screen::draw`): what takes the pointer and the
 /// keyboard, where each node is, whether anything moves by itself, the topmost modal, the pictures it wants fetched,
 /// what's near the window and where each frame's page is.
 struct Drawing {
-    home: Option<Bounds<f32>>,
     placed: Vec<(Id, Placed)>,
     tab_order: Vec<Id>,
     rects: Rects,
@@ -2309,9 +2275,9 @@ struct Seen {
     stretched: std::collections::BTreeMap<Id, Point<f32>>,
     fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>, bool)>,
     caret: bool,
-    hovering: (bool, bool),
+    hovering: bool,
     notice: Option<(String, Option<String>)>,
-    breadcrumb: Option<(String, f32)>,
+    title: Option<(String, f32)>,
     panel: Option<(f32, bool)>,
     /// Where the rail's line shows, if it does.
     line: Option<Bounds<f32>>,

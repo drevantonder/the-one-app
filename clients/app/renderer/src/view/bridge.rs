@@ -250,7 +250,6 @@ impl Screen {
     /// Where node `id` was drawn in the last frame.
     pub fn rect(&self, id: Id) -> Option<Rect> {
         let chrome = match id {
-            super::HOME => self.chrome.home,
             super::NOTICE_ACTION => self.chrome.action,
             _ => return self.rects.get(&id).copied(),
         };

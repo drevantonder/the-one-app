@@ -709,8 +709,8 @@ pub(crate) fn about() -> muda::AboutMetadata {
 }
 
 /// A Mac app's menu bar, as every Mac app's: its app menu (About, Settings… ⌘, Hide ⌘H, Hide Others ⌥⌘H, Show All,
-/// Quit), Edit, which a field's copy and paste keys need, and Window (Minimize ⌘M, Zoom, Enter Full Screen ⌃⌘F, Home
-/// Screen ⇧⌘H as Finder's and Safari's Home, Bring All to Front, and every window open, which macOS lists itself).
+/// Quit), Edit, which a field's copy and paste keys need, and Window (Minimize ⌘M, Zoom, Enter Full Screen ⌃⌘F, Bring
+/// All to Front, and every window open, which macOS lists itself).
 /// Its items are heard where the ring's are (`ring`).
 #[cfg(target_os = "macos")]
 fn menu() -> muda::Menu {
@@ -718,7 +718,6 @@ fn menu() -> muda::Menu {
     use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
     let menu = Menu::new();
     let settings = MenuItem::with_id("settings", "Settings…", true, Some(Accelerator::new(Modifiers::META, Code::Comma)));
-    let home = MenuItem::with_id("open", "Home Screen", true, Some(Accelerator::new(Modifiers::META | Modifiers::SHIFT, Code::KeyH)));
     let app = Submenu::with_items(
         crate::NAME,
         true,
@@ -756,8 +755,6 @@ fn menu() -> muda::Menu {
             &PredefinedMenuItem::minimize(None),
             &PredefinedMenuItem::maximize(Some("Zoom")),
             &PredefinedMenuItem::fullscreen(None),
-            &PredefinedMenuItem::separator(),
-            &home,
             &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::bring_all_to_front(None),
         ],

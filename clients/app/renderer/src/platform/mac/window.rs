@@ -1092,7 +1092,7 @@ define_class!(
             self.ivars().send(Input::Focus(false));
         }
 
-        // Full screen, a Mac hides the traffic lights, so the breadcrumb starts at the window's edge.
+        // Full screen, a Mac hides the traffic lights, so the title starts at the window's edge.
         #[unsafe(method(windowWillEnterFullScreen:))]
         fn window_will_enter_full_screen(&self, _notification: &NSNotification) {
             self.ivars().send(Input::FullScreen(true));

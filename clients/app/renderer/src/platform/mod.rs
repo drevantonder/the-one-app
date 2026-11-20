@@ -192,7 +192,7 @@ impl crate::view::Device for Computer {
 }
 
 /// The smallest an app's window can be made, in points, as every desktop app has one: its title row's window
-/// controls, breadcrumb and Back and Forward still fit beside its title.
+/// controls, its title and its page's Back and Forward and title still fit.
 pub const SMALLEST: Size<Pixels> = Size { width: Pixels(480.0), height: Pixels(320.0) };
 
 pub struct WindowOptions {
@@ -474,7 +474,7 @@ impl Windows {
             }
             // An app's window on Linux is unframed, its title row a GNOME header bar with the desktop's window buttons.
             #[cfg(target_os = "linux")]
-            if screen.breadcrumb.is_some() {
+            if screen.title.is_some() {
                 screen.window_buttons = linux::button_layout();
                 self.display.unframe(&native);
             }

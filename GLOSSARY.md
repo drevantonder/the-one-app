@@ -37,13 +37,13 @@ An app's own words are defined in that app's `SKILL.md`.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
 - **Rail**: on a phone or a tablet, what's above every app, its way back to the Home Screen: a home line on the right
-  edge over an app, iOS's home indicator on its side, which a finger pulls in to go home. A computer has none: an app
-  window's breadcrumb goes home instead.
+  edge over an app, iOS's home indicator on its side, which a finger pulls in to go home. A computer has none: its Home
+  Screen comes up by its global shortcut instead.
 - **App window**: on a computer (Mac, Windows, Linux), an app open in a window of its own, which the One App's one
   process draws natively, the app in a sandbox of its own: while one is open, the One App has one icon in the Dock
   or taskbar and one entry in Cmd-Tab or Alt-Tab, with every app's window under it, and on a Mac the menu bar is the
   front window's app's. It asks the network through the One App, which keeps the Home Screen, and each app's shortcut
-  (`shortcuts`) opens it. Its title bar has a breadcrumb, whose Home goes to the Home Screen. In code, it's a native
+  (`shortcuts`) opens it. Its title bar names its app, by its icon and name. In code, it's a native
   window (`native.rs`), and the host (`host.rs`) is what an app's shortcut starts, which asks the One App to open it.
 - **App Store**: the app that installs and removes apps, in the category `app-store`, which a client opens itself
   where there's no launcher yet to open it from.

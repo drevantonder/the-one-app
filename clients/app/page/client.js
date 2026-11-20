@@ -930,7 +930,7 @@ async function list(subject) {
     }
     launcher = launcherIn(resources) || launcher
     if (own) document.title = names.get(own.entrypoint) || document.title
-    crumb()
+    appTitle()
     shortcuts()
     if (launcher || own) on({ type: "listed" })
     if (shown.getSnapshot().context.connection !== "online") return
@@ -1269,8 +1269,7 @@ const showing = (at) => open.get(at ?? "") ?? open.get(shown.getSnapshot().match
 /// The rail: every app's way back to the Home Screen, above every app on a phone or a tablet: a home line on the
 /// window's right edge, iOS's home indicator on its side, which a finger pulls in to go home (`pull`). It keeps out of
 /// the way while something of the app's is open over it (a sheet, a menu), as the device's back does. A computer has
-/// none: each app is a window of its own there, which the computer's own Dock or taskbar goes between, and whose title
-/// bar's breadcrumb goes home (`titleBar`).
+/// none: each app is a window of its own there, which the computer's own Dock or taskbar goes between.
 ///
 /// The apps used lately on this device (`recent`) are what a long press on Android's app icon lists (`shortcuts`).
 const RECENT = 8
@@ -1505,8 +1504,8 @@ async function respond(view, method, params) {
         deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches },
         safeAreaInsets: inFrame ? { top: 0, right: 0, bottom: 0, left: 0 } : insets(view.frame),
         ...(!inFrame && titleRow()),
-        // Whether the window names it above it, in its title bar's breadcrumb (`titled`), so its first screen doesn't.
-        breadcrumb: Boolean(own) && !titleBar.hidden && !inFrame,
+        // Whether the window names it above it, in its title bar (`titled`), so its first screen doesn't.
+        titled: Boolean(own) && !titleBar.hidden && !inFrame,
         // Whether its network answers, which the window keeps it told of.
         connection: shown.getSnapshot().context.connection,
       },
@@ -1945,18 +1944,18 @@ function hear(state) {
 /// A window whose title bar is over the page (`titleBar`), as a Mac's with no title band is: the page keeps its
 /// height clear at its top (`--safe-top`), as every app is told, under the window's own controls (a Mac's traffic
 /// lights). Held there, it drags the window, and double-clicked, it does what a title bar does (on a Mac, as it's set:
-/// zoom). An app's own window has its breadcrumb there, just after the window's controls: Home, which brings the Home
-/// Screen forward and keeps this window open, as Window → Home Screen does (`host.rs`), then the app (`crumb`).
+/// zoom). An app's own window has its title there, just after the window's controls: the app's icon and name
+/// (`appTitle`).
 const titleBar = byId("title-bar")
 /// Where the title row is over an app's page, which its top bar is: where in it the page's own may start, after the
-/// window's controls and breadcrumb, and how far from its end, before the controls there. Nothing where the window
+/// window's controls and title, and how far from its end, before the controls there. Nothing where the window
 /// has no title bar over its page.
 function titleRow() {
   if (titleBar.hidden) return {}
   const style = getComputedStyle(document.documentElement)
   const px = (/** @type {string} */ name) => parseFloat(style.getPropertyValue(name)) || 0
-  const nav = byId("title-bar-nav")
-  const start = nav.hidden ? px("--title-bar-start") : nav.getBoundingClientRect().right + 12
+  const title = byId("title-bar-app")
+  const start = title.hidden ? px("--title-bar-start") : title.getBoundingClientRect().right + 12
   return { titleBar: { start: Math.round(start), end: Math.round(px("--title-bar-end") + 16) } }
 }
 /** @param {import("./host").TitleBar} at */
@@ -1966,13 +1965,13 @@ function titled({ height, start, end }) {
   document.documentElement.style.setProperty("--title-bar-end", `${end}px`)
   document.documentElement.toggleAttribute("data-title-bar", true)
   titleBar.hidden = false
-  byId("title-bar-nav").hidden = !own
-  crumb()
+  byId("title-bar-app").hidden = !own
+  appTitle()
   // Open apps keep it clear too, as it changes.
   placed()
 }
-/// The breadcrumb's last: this window's app, by its icon and name, once its apps are listed.
-function crumb() {
+/// The window's title: its app, by its icon and name, once its apps are listed.
+function appTitle() {
   if (!own) return
   const [picture, name] = byId("title-bar-app").children
   const src = icons.get(own.entrypoint)
@@ -2007,14 +2006,6 @@ document.addEventListener("mouseup", (event) => {
   pressedAt = undefined
   if (event.detail === 2 && inTitleRow(event)) invoke("title_bar_double_click")
 })
-/// Goes to the Home Screen from an app's own window, keeping it open: the breadcrumb's Home, as Window → Home Screen
-/// does (`host.rs`).
-function showHomeScreen() {
-  invoke("front")
-}
-byId("home-screen").addEventListener("click", showHomeScreen)
-// A Mac's Window → Home Screen is ⇧⌘H (`host.rs`), which its tooltip says, as a Mac app's toolbar buttons do.
-if (navigator.platform.startsWith("Mac")) byId("home-screen").title = "Home Screen (⇧⌘H)"
 
 dress()
 shown.subscribe(draw)

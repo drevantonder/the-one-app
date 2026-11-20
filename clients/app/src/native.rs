@@ -321,7 +321,7 @@ struct Page {
     trusted: bool,
     /// The UI library's tables, and its app's styles where it has them.
     tables: Vec<String>,
-    /// Its name and icon, as a `data:` address, as its app lists them, for the window's title and breadcrumb.
+    /// Its name and icon, as a `data:` address, as its app lists them, for the window's title.
     name: Option<String>,
     icon: Option<String>,
 }
@@ -347,7 +347,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
         return Ok(None);
     }
     let trusted = resource["_meta"]["trusted"] == true;
-    // Its icon, as its app lists it, as a `data:` address, for the breadcrumb.
+    // Its icon, as its app lists it, as a `data:` address, for the window's title.
     let icon = match resource["icons"][0]["src"].as_str() {
         Some(src) if src.starts_with("data:") => Some(src.to_owned()),
         Some(src) => crate::hosts::file(src).await.ok().and_then(|file| Some(format!("data:{};base64,{}", file["kind"].as_str()?, file["body"].as_str()?))),
@@ -794,10 +794,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     // popover's colour (DESIGN.md, Launcher).
                     screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux"), whole: instead });
                 } else if cfg!(desktop) && sheet.is_none() {
-                    // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the
-                    // launcher forward and keeps this window open, as Window → Home Screen does.
-                    let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
-                    screen.breadcrumb = Some(renderer::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(computer::summon) });
+                    // Its app's icon and name in its title row (DESIGN.md, App windows).
+                    screen.title = Some(renderer::Title { icon, name: name.clone(), start: BAR.1 as f32 });
                 }
                 windows.open(options, Ok(screen), on_event)
             }
@@ -972,8 +970,8 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     Ok(())
 }
 
-/// The row at a window's top that its breadcrumb is in, with its page's top bar after it (a unified toolbar), 52
-/// points, as macOS's System Settings and Raycast have it, and where the breadcrumb starts in it: on a Mac 8 points
+/// The row at a window's top that its title is in, with its page's top bar after it (a unified toolbar), 52
+/// points, as macOS's System Settings and Raycast have it, and where the title starts in it: on a Mac 8 points
 /// after its traffic lights over the page, three of 14 points, 20 apart, from 20 points in, as AppKit puts them in a
 /// unified toolbar; elsewhere the same height, under the window's own frame.
 #[cfg(target_os = "macos")]
@@ -1121,8 +1119,8 @@ fn respond(
 ) -> Option<Value> {
     let method = message["method"].as_str()?;
     let launcher = state.lock().expect("nothing panics holding it").launcher;
-    // The app asks to be left (`leave`): on a computer, where its window stays open, Home, as its breadcrumb's is; the
-    // launcher is put away, the keyboard back with the app that had it.
+    // The app asks to be left (`leave`): on a computer, where its window stays open, the Home Screen; the launcher is
+    // put away, the keyboard back with the app that had it.
     let framed = state.lock().expect("nothing panics holding it").framed;
     // A page in a frame is its frame's page's, which stays: it leaves nothing.
     if method == "ui/notifications/request-teardown" && !framed {
@@ -1174,9 +1172,9 @@ fn respond(
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
                 "deviceCapabilities": {"touch": cfg!(mobile), "hover": cfg!(desktop)},
-                // A page in a frame is named by nothing above it, nor is the recovery key window's: its first screen
-                // says its heading.
-                "breadcrumb": cfg!(desktop) && !state.framed && state.sheet.is_none(),
+                // Whether its window's title row names it, so its first screen doesn't: a page in a frame is named by
+                // nothing above it, nor is the recovery key window's.
+                "titled": cfg!(desktop) && !state.framed && state.sheet.is_none(),
                 // The place its link names, as its address's `#` says on the DOM (`link()`).
                 "link": state.fragment,
                 "connection": "online",

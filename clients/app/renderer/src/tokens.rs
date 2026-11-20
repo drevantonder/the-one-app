@@ -1,6 +1,6 @@
 //! The design tokens, which aren't the host's: they come with the UI library, over the air, as the app's page does,
 //! as its token table (`load_table`), read as a window opens. The host knows only kinds of token (a colour, light and
-//! dark, a length, a number), never their names or values, but for the few it draws its own window's breadcrumb and
+//! dark, a length, a number), never their names or values, but for the few it draws its own window's title and
 //! notices with.
 
 use std::borrow::Cow;
@@ -65,7 +65,7 @@ pub struct Conditions {
     /// Whose own tokens it draws with, as `load_page` gave them: its page's, where it has any (0, where it has none).
     pub page: u32,
     /// Where its title row has room for its page's top bar, which is in it (a unified toolbar): from the window's start,
-    /// after its controls and breadcrumb, and from its end, before its controls there. The UI library's
+    /// after its controls and title, and from its end, before its controls there. The UI library's
     /// `title-bar-start` and `title-bar-end` lengths are these, where they're not 0, and else its own.
     pub title_bar: [u16; 2],
     /// What 1rem is, in hundredths of a pixel: a phone's own text size, as an iPhone's browser has it

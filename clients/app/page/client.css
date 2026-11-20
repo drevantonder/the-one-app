@@ -189,8 +189,8 @@ iframe {
 :root[data-title-bar] {
   --safe-top: max(env(safe-area-inset-top), var(--title-bar-height));
 }
-/* The title bar is the page's top bar (a unified toolbar), which takes every press but the breadcrumb's: what's
-   empty in it moves the window, as the page and client.js say (`one/drag-window`). */
+/* The title bar is the page's top bar (a unified toolbar): what's empty in it moves the window, as the page and
+   client.js say (`one/drag-window`). */
 #title-bar {
   position: fixed;
   z-index: 5;
@@ -198,73 +198,30 @@ iframe {
   height: var(--safe-top);
   pointer-events: none;
 }
-/* What's just after the window's own controls, level with them, in an app's own window, clear of those at its end. */
-#title-bar-nav {
-  pointer-events: auto;
+/* Its title, just after the window's own controls, level with them, in an app's own window, clear of those at its
+   end: the app's icon and its name, in semibold, in a computer's own size. */
+#title-bar-app {
   position: absolute;
   top: 50%;
   left: var(--title-bar-start);
   max-width: calc(100% - var(--title-bar-start) - var(--title-bar-end, 0px));
-  overflow: hidden;
-  display: flex;
-  align-items: center;
-  translate: 0 -50%;
-}
-/* Its breadcrumb, as shadcn's: Home, light, with the One App's ring, highlighted under the pointer; a muted /; then the
-   app, its icon and its name, in semibold, which isn't pressed. In a computer's own size. */
-#title-bar-nav ol {
-  display: flex;
-  align-items: center;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-  font-size: var(--text-footnote);
-  line-height: 1;
-  white-space: nowrap;
-}
-#title-bar-nav li {
-  display: flex;
-  align-items: center;
-}
-#home-screen,
-#title-bar-app {
   display: flex;
   align-items: center;
   gap: 0.375rem;
-  height: 22px;
+  margin: 0;
   padding: 0 0.375rem;
-}
-#home-screen {
-  app-region: no-drag;
-  border: 0;
-  border-radius: var(--radius-md);
-  background: none;
-  color: var(--muted-foreground);
-  font: inherit;
-  font-weight: var(--body-weight);
-  cursor: default;
-}
-@media (hover: hover) and (pointer: fine) {
-  #home-screen:hover {
-    background: var(--muted);
-    color: var(--foreground);
-  }
-}
-#title-bar-nav .separator {
-  color: var(--muted-foreground);
-  opacity: 0.6;
-}
-#title-bar-app {
+  overflow: hidden;
+  translate: 0 -50%;
   color: var(--foreground);
+  font-size: var(--text-footnote);
   font-weight: var(--label-weight);
+  line-height: 1;
+  white-space: nowrap;
 }
-#title-bar-nav img {
+#title-bar-app img {
   width: 16px;
   height: 16px;
   object-fit: contain;
-}
-#title-bar-app img {
   border-radius: 22.5%;
 }
 /* What the device keeps for itself, measured (client.js's `insets`). */

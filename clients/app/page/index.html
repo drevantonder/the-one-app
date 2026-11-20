@@ -21,15 +21,9 @@
   <p id="banner" role="status" hidden><span id="banner-spinner" class="ui-spinner" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span id="banner-text"></span><button id="banner-retry" class="ui-button press ring" data-variant="ghost">Try Again</button></p>
   <!-- Where the window's title bar is over the page (a Mac's, with no title band), its top: under the window's own
        controls, it drags the window (client.js's `titleBar`). In an app's own window, just after the controls, its
-       breadcrumb (`title-bar-nav`): Home, which brings the Home Screen forward, then the app. -->
+       title (`title-bar-app`): the app's icon and name, which nothing presses. -->
   <div id="title-bar" hidden>
-    <nav id="title-bar-nav" aria-label="Breadcrumb" hidden>
-      <ol>
-        <li><button id="home-screen" class="press ring" type="button" title="Home Screen"><img src="Logo.png" alt="">Home</button></li>
-        <li class="separator" role="presentation" aria-hidden="true">/</li>
-        <li><span id="title-bar-app" aria-current="page"><img alt="" hidden><span></span></span></li>
-      </ol>
-    </nav>
+    <p id="title-bar-app" hidden><img alt="" hidden><span></span></p>
   </div>
   <!-- The rail, above every app on a phone or a tablet (client.js's `rail`): a home line on the window's right edge over
        an app, which a finger pulls in to go home, and which says nothing to a screen reader, as iOS's home indicator
