@@ -32,7 +32,7 @@ use objc2_foundation::{NSNotification, NSNotificationCenter, NSObject, NSRunLoop
 use objc2_quartz_core::{CACurrentMediaTime, CADisplayLink, CAFrameRateRange, CAMetalLayer, kCACornerCurveContinuous};
 use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
-    UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
+    UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIApplicationDidBecomeActiveNotification, UIApplicationState, UIPasteboard,
     UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
     UIColor, UIGestureRecognizer, UIGestureRecognizerState, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow, UIWindowLevelNormal,
 };
@@ -267,6 +267,11 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
             log::info!("native windows ready in {:?}", started.elapsed());
         }
         let windows = windows.as_mut().expect("made above");
+        // In the background, where iOS launches the app for a Shortcut or it goes, Metal refuses its GPU work
+        // (`Windows::background`): iOS's own word on where it is, asked each turn.
+        if let Some(main) = MainThreadMarker::new() {
+            windows.background(UIApplication::sharedApplication(main).applicationState() == UIApplicationState::Background);
+        }
         if APPEARANCE_CHANGED.swap(false, Ordering::Relaxed) {
             for window in windows.windows.values_mut() {
                 if let Ok(screen) = &mut window.screen {
@@ -404,10 +409,11 @@ impl Display {
         let text_input = Plugin(unsafe { text_input_new(controller, id as *mut c_void, said) });
         let a11y = a11y::A11y::new(view as *mut c_void, id);
         // The keyboard came, went or changed: what it covers is read from the view's keyboard guide. A screen reader
-        // started or stopped: it's given the tree, or isn't.
+        // started or stopped: it's given the tree, or isn't. The app came back from the background: it draws again.
         let center = NSNotificationCenter::defaultCenter();
         for name in unsafe {
             [
+                UIApplicationDidBecomeActiveNotification,
                 UIKeyboardDidChangeFrameNotification,
                 UIKeyboardDidHideNotification,
                 UIAccessibilityVoiceOverStatusDidChangeNotification,
@@ -751,8 +757,9 @@ define_class!(
     unsafe impl NSObjectProtocol for View {}
 
     impl View {
-        /// The keyboard came, went or changed, or a screen reader started or stopped (`Display::open`): its window's
-        /// insets are read again, and its tree given.
+        /// The keyboard came, went or changed, a screen reader started or stopped, or the app became active
+        /// (`Display::open`): its window's insets are read again, its tree given, and it's drawn where it's back from
+        /// the background.
         #[unsafe(method(changed:))]
         fn changed(&self, _: &NSNotification) {
             wake();

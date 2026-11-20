@@ -438,6 +438,8 @@ pub struct Windows {
     pressure: Pressure,
     /// What the system last said of its pressure, and when it was asked, which is once a second.
     system: (web_time::Instant, Pressure),
+    /// The app is in the background, where its system refuses its GPU's work (`background`).
+    background: bool,
 }
 
 /// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
@@ -458,7 +460,7 @@ impl Windows {
             let atlas = Arc::new(Atlas::new(&context));
             // The system's fonts where ours lack a character: a fake platform has none, so it draws the same everywhere.
             let text = TextSystem::new(crate::FONT, crate::fonts()?, !cfg!(feature = "fake"));
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal) })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -578,9 +580,25 @@ impl Windows {
         }
     }
 
-    /// What draws `native`, where it has a surface to draw on yet.
+    /// The app goes to the background, or comes back, as an iPhone's does. While it's there, its system refuses its
+    /// GPU's work: Metal fails each command buffer it's given, and what the queue uploads with one, as the glyphs and
+    /// pictures a frame added to the atlas, which the atlas holds as there from then on (letters missing from an
+    /// iPhone's labels, each where a frame drawn in the background first drew it). So its windows' renderers go, as
+    /// a lost surface's do, and what changes meanwhile is drawn once it's back.
+    pub fn background(&mut self, background: bool) {
+        if self.background == background {
+            return;
+        }
+        self.background = background;
+        let parts: Vec<(WindowId, usize)> = self.windows.iter().flat_map(|(id, window)| (0..window.parts.len()).map(|part| (*id, part))).collect();
+        for (id, part) in parts {
+            self.input(id, part, if background { Input::SurfaceLost } else { Input::Surface });
+        }
+    }
+
+    /// What draws `native`, where it has a surface to draw on yet and the app isn't in the background.
     fn renderer(&self, native: &NativeWindow) -> anyhow::Result<Option<Renderer>> {
-        if !native.has_surface() {
+        if self.background || !native.has_surface() {
             return Ok(None);
         }
         drawn_on(&self.context, self.atlas.clone(), native).map(Some)
@@ -976,7 +994,7 @@ impl Windows {
         for window in self.windows.values_mut() {
             for part in &mut window.parts {
                 part.renderer = None;
-                if part.native.has_surface() {
+                if !self.background && part.native.has_surface() {
                     match drawn_on(&context, atlas.clone(), &part.native) {
                         Ok(renderer) => part.renderer = Some(renderer),
                         Err(error) => log::error!("a native window can't draw: {error:#}"),
@@ -1256,7 +1274,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else { return };
         let (room, scale) = (window.room(), window.parts[0].native.scale());
         let (Some(stem), Ok(screen)) = (&window.snapshot, &mut window.screen) else { return };
-        if !window.drawn || window.picture.is_some() || screen.starting() {
+        if self.background || !window.drawn || window.picture.is_some() || screen.starting() {
             return;
         }
         let device = Size { width: DevicePixels((room.width.0 * scale).round() as i32), height: DevicePixels((room.height.0 * scale).round() as i32) };
@@ -1309,6 +1327,7 @@ impl Windows {
             }
             return;
         }
+        let background = self.background;
         let Some(window) = self.windows.get_mut(&id) else { return };
         let Some(at) = window.parts.get(part).map(|part| part.bounds.origin) else { return };
         let input = input.moved_by(at);
@@ -1321,7 +1340,7 @@ impl Windows {
                 if let Some(mut renderer) = part.renderer.take() {
                     renderer.destroy();
                 }
-                if part.native.has_surface() {
+                if !background && part.native.has_surface() {
                     match drawn_on(&self.context, self.atlas.clone(), &part.native) {
                         Ok(renderer) => part.renderer = Some(renderer),
                         Err(error) => log::error!("native window {id} can't draw: {error:#}"),
@@ -1693,6 +1712,38 @@ impl Windows {
         Ok(())
     }
 
+    /// The app goes to the background for `ms` of its time and comes back, as an iPhone's does: its windows lose the
+    /// keyboard, then iOS has them drawn in the other appearance and back, for the app switcher's snapshot of each
+    /// (WWDC 2019's "Implementing Dark Mode on iOS"), while their pages run; then they have it back. → how many frames
+    /// its windows presented while it was there, each lost on an iPhone, its GPU's work refused.
+    pub fn away(&mut self, ms: f64) -> u64 {
+        let frames = |windows: &Windows| windows.windows.values().map(|window| window.frames).sum::<u64>();
+        let ids: Vec<WindowId> = self.windows.keys().copied().collect();
+        let other = match appearance() {
+            crate::Appearance::Light => crate::Appearance::Dark,
+            crate::Appearance::Dark => crate::Appearance::Light,
+        };
+        for &id in &ids {
+            self.display.push(id, Input::Focus(false));
+        }
+        self.run(0.0);
+        self.background(true);
+        let before = frames(self);
+        for appearance in [other, appearance()] {
+            for &id in &ids {
+                self.display.push(id, Input::Appearance(appearance));
+            }
+            self.run(ms / 2.0);
+        }
+        let drawn = frames(self) - before;
+        self.background(false);
+        for &id in &ids {
+            self.display.push(id, Input::Focus(true));
+        }
+        self.run(0.0);
+        drawn
+    }
+
     /// How many frames window `id` has presented, all told.
     pub fn frames(&self, id: WindowId) -> u64 {
         self.windows.get(&id).map_or(0, |window| window.frames)
@@ -1781,11 +1832,10 @@ impl Input {
 #[cfg_attr(any(target_os = "android", target_os = "ios", target_arch = "wasm32", feature = "fake"), allow(dead_code))]
 pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
-    /// It has a surface to draw on, or a new one (Android's view's).
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    /// It has a surface to draw on, or a new one (Android's view's), or the app's back from the background.
     Surface,
-    /// Its surface is going, as its view is hidden or gone: nothing draws on it.
-    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    /// Its surface is going, as its view is hidden or gone, or the app to the background (`Windows::background`):
+    /// nothing draws on it.
     SurfaceLost,
     Expose,
     /// The system went light or dark.

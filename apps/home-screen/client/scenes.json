@@ -800,7 +800,10 @@
   },
   "App Library": {
     "like": "Home, two pages",
-    "page": "client/index.html#library"
+    "page": "client/index.html#library",
+    "checks": {
+      "Back from the background": [{ "away": 2000 }, { "expect": { "text": "Utilities" } }]
+    }
   },
   "Home, couldn't load": {
     "like": "Home, one page of apps",
