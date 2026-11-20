@@ -1136,9 +1136,12 @@ async fn take(here: &Here, record: &Record, program: &Path, builds: &Map<String,
     }
     if next.program != current.program {
         // Both are kept beside the one in place, which they're put in place of only as the pair they're in is taken.
+        // One downloaded and checked before, as a prepare asked again of the same pair has, is taken as it is.
         fs::create_dir_all(here.folder.join("programs").join(PROGRAM))?;
         fs::copy(program.canonicalize()?, here.program(&current.program))?;
-        fs::rename(fetched_program(&builds[PROGRAM], program).await?, here.program(&next.program))?;
+        if !here.program(&next.program).exists() {
+            fs::rename(fetched_program(&builds[PROGRAM], program).await?, here.program(&next.program))?;
+        }
     }
     Ok(())
 }
@@ -1233,9 +1236,25 @@ async fn download(client: &Client) -> Result<Map<String, Value>> {
 }
 
 /// Downloads the build of `name` the network gives, `build`, by its link into `file`, once it's checked it's the
-/// platform's, and checks it's the size and SHA-256 it said.
+/// platform's, and checks it's the size and SHA-256 it said. A download whose connection fails is tried again, after
+/// 2 s and then 4 s, as curl's `--retry` does: a home router's NAT, or GitHub, now and then drops a connection, and one
+/// dropped would leave the server behind until the next build.
 async fn fetch(name: &str, build: &Value, file: &Path) -> Result<()> {
     signed(name, build)?;
+    for wait in [2, 4] {
+        match download_to(build, file).await {
+            Err(error) if error.is::<reqwest::Error>() => {
+                eprintln!("The build {} didn't download ({error:#}); trying again in {wait} s", build["build"]);
+                tokio::time::sleep(Duration::from_secs(wait)).await;
+            }
+            done => return done,
+        }
+    }
+    download_to(build, file).await
+}
+
+/// Downloads `build` by its link into `file`, and checks it's the size and SHA-256 it said.
+async fn download_to(build: &Value, file: &Path) -> Result<()> {
     let link = &build["link"];
     let method = reqwest::Method::from_bytes(link["method"].as_str().unwrap_or("GET").as_bytes())?;
     let mut request = client::web()?.request(method, link["url"].as_str().context("a build has a link")?);
