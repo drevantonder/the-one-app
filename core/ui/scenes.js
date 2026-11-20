@@ -192,6 +192,22 @@ async function tap(frame, name) {
 }
 
 /// A scene drawn on the DOM: its picture and its tree.
+/// The rows (`- listitem`) of a scene's semantic tree (src/drawing-primitives/outline.ts) that have no `list` or `listbox`
+/// above them: each as its line.
+function strayRows(tree) {
+  const lines = tree.split("\n")
+  const depth = (line) => line.length - line.trimStart().length
+  return lines.flatMap((line, at) => {
+    if (!/^\s*- listitem\b/.test(line)) return []
+    for (let up = at - 1, floor = depth(line); up >= 0; up--) {
+      if (depth(lines[up]) >= floor) continue
+      floor = depth(lines[up])
+      if (/^\s*- (list|listbox)\b/.test(lines[up])) return []
+    }
+    return [line.trim()]
+  })
+}
+
 async function dom(browser, serve, key, scene, folder) {
   const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light" })
   const problems = []
@@ -383,6 +399,8 @@ for (const target of targets) {
     })
     const said = [`${name} · ${scene.name}`]
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
+    // A row is drawn in its card by the `List` it's in: one outside any has none, and floats on its screen's background.
+    if (name !== "gallery" && shown.tree !== undefined) for (const row of strayRows(shown.tree)) said.push(`  a row isn't in a List, so it has no card: ${row}`)
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)

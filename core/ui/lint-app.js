@@ -1,7 +1,8 @@
 // `bun run lint:app apps/<app>/client`, from the repo's root: type checks an app's page against the UI library
 // alone, as its tsconfig.json says by extending tsconfig.app.json, with TypeScript's own checker. It fails on an element of
 // the DOM's, `document`, `window` or any other Web API, a stylesheet, a prop a native host can't draw, and a `For` as a
-// `List`'s rows, which makes them all at once (`List each` makes those near the window). A server runs it
+// `List`'s rows, which makes them all at once (`List each` makes those near the window), and a `Row` straight in a `Section`,
+// which has no card (the `List` it's in draws it). A server runs it
 // too, as the UI library it serves holds it (build.js), on the app it deploys, where an entrypoint says its `runtime_version`
 // (`OneCore.Entrypoint.lint/3`). Its errors are TypeScript's, a line each: file, line, column and message, as the folder names it.
 // A raw colour or length in a static style is a warning, not an error: "make it a token" (a line each, as an error's, but
@@ -88,6 +89,13 @@ function dom() {
         for (const child of rows.filter((one) => one.type === "JSXElement" && named(one) === "For")) {
           if (rows.length === 1) found.push(`${at(child)}: error: a \`For\` as a \`List\`'s rows makes every row at once, which a long list can't start with on a native host: write \`<List each={…} keyed={…}>{(item) => <Row … />}</List>\`, which makes only the rows near the window`)
           else noted.push(`${at(child)}: warning: a \`For\` beside other rows in a \`List\` makes every row at once: fine for a few, but a long list's rows go in a \`List each={…}\` of their own`)
+        }
+      }
+      // `<Section><Row /></Section>`: a `Row` is drawn in its card by the `List` it's in, where one outside a list has no
+      // card, as its screen's background, and a line above it as the first row of a list has none.
+      if (node.type === "JSXElement" && named(node) === "Section") {
+        for (const child of node.children.filter((one) => one.type === "JSXElement" && named(one) === "Row")) {
+          found.push(`${at(child)}: error: a \`Row\` in a \`Section\` has no card, which only the \`List\` it's in draws: write \`<List><Row … /></List>\``)
         }
       }
       // `globalThis.document`, `self["window"]`
