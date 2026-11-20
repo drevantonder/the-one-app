@@ -35,7 +35,8 @@
                 "sent_bytes": 200000000,
                 "took": 95000
               }
-            ]
+            ],
+            "overdue": false
           },
           {
             "name": "example-backups",
@@ -66,6 +67,34 @@
                 "sent_bytes": 200000000,
                 "took": 95000
               }
+            ],
+            "overdue": false
+          },
+          {
+            "name": "Cloudflare R2",
+            "kind": "s3",
+            "where": "example.r2.cloudflarestorage.com/home-backups",
+            "machine": null,
+            "item": "Backups R2",
+            "size": 1338501762,
+            "last": {
+              "at": 1766818800000
+            },
+            "overdue": true,
+            "state": "interrupted",
+            "running": {
+              "at": 1767214800000,
+              "machine": "linux"
+            },
+            "problem": null,
+            "backups": [
+              {
+                "name": "r1",
+                "at": 1766818800000,
+                "bytes": 442163316,
+                "sent_bytes": 57201922,
+                "took": 260389
+              }
             ]
           }
         ],
@@ -91,6 +120,12 @@
     "like": "Destinations",
     "taps": [
       "example-backups"
+    ]
+  },
+  "Overdue Destination": {
+    "like": "Destinations",
+    "taps": [
+      "Cloudflare R2"
     ]
   },
   "Restore Sheet": {

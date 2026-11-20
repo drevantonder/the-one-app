@@ -38,11 +38,17 @@ defmodule Backups do
     """
     create table listed (destination text not null, key text not null, tag text not null, object text not null,
       size integer not null, sha256 text not null, primary key (destination, key))
-    """
+    """,
+    # When the network's owners were told a destination couldn't be backed up, until it is again.
+    "create table told (destination text primary key, at integer not null)"
   ]
 
   # How often each schedule backs up, in seconds.
   @schedules %{"hour" => 3600, "day" => 86_400, "week" => 7 * 86_400, "never" => nil}
+
+  # How long past its schedule a destination's last backup may be before it needs someone, in milliseconds: as Time
+  # Machine says it couldn't complete the backup after a missed day.
+  @overdue 86_400_000
 
   @retention "Every backup is kept for a day, then one a day for a week, one a week for a month and one a month for a year."
 
@@ -58,7 +64,9 @@ defmodule Backups do
     %{
       "core" => ">= 0.32.107",
       "database" => "to keep where and when you back up",
-      "vault" => "to keep your storage's keys"
+      "vault" => "to keep your storage's keys",
+      "notifications" => "to tell you when a backup couldn't be made",
+      "telemetry" => "to raise an alert when a backup couldn't be made"
     }
   end
 
@@ -69,7 +77,7 @@ defmodule Backups do
   @impl true
   def hook("settings.sections", _about, call) do
     if Call.owns?(%{call | subject: "network"}),
-      do: [%{in: "settings", name: "Backups", component: "backups", icon: "client/icon.svg", group: "system", order: 1}],
+      do: [%{in: "settings", name: "Backups", component: "backups", icon: "client/icon.svg", group: "system", order: 1, badge: "badge"}],
       else: []
   end
 
@@ -135,6 +143,10 @@ defmodule Backups do
                   size: %{type: "integer", description: "How much it holds, in bytes"},
                   last: %{anyOf: [backup, %{type: "null"}], description: "The newest backup"},
                   backups: %{type: "array", items: backup, description: "Newest first"},
+                  overdue: %{
+                    type: "boolean",
+                    description: "No backup has finished there within its schedule and a day"
+                  },
                   state: %{
                     type: "string",
                     enum: ~w(never backing_up backed_up failed changed interrupted),
@@ -156,12 +168,20 @@ defmodule Backups do
                     }
                   }
                 },
-                required: ~w(name kind where machine item size last backups state running problem)
+                required: ~w(name kind where machine item size last backups overdue state running problem)
               }
             }
           },
           required: ["every", "retention", "machines", "destinations"]
         }
+      },
+      %{
+        name: "badge",
+        read_only: true,
+        description:
+          "How many destinations need you, the red count on Backups in Settings: their last backup failed, or none finished within their schedule and a day",
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{type: "object", properties: %{count: %{type: "integer"}}, required: ["count"]}
       },
       %{
         name: "add",
@@ -328,6 +348,8 @@ defmodule Backups do
     if transaction(call, &query(&1, "select 1 from runs")) == [],
       do: Call.app(call, "database").timer(call, "due", %{}, nil)
 
+    stand(call)
+
     %{
       backups: for(%{} = backup <- made, do: backup),
       failed: for({:failed, name} <- made, do: name),
@@ -335,10 +357,110 @@ defmodule Backups do
     }
   end
 
+  # Settings asks for whoever opens it: the count is for the network's owners, who alone see Backups.
+  def call("badge", _inputs, call) do
+    count =
+      if Call.owns?(%{call | subject: "network"}),
+        do: transaction(call, &standing/1) |> Enum.count(& &1.needs),
+        else: 0
+
+    %{count: count}
+  end
+
   def call(tool, inputs, call) do
     owner!(call)
     owned(tool, inputs, call)
   end
+
+  # How each destination stands: when it was last backed up (when it was added, if never), how often it's to be, its
+  # problem, whether it's overdue, and whether it needs someone: its last backup failed or what's there was changed,
+  # or it's overdue.
+  defp standing(db) do
+    every = @schedules[setting(db, "every")]
+    now = System.os_time(:millisecond)
+    finished = Map.new(query(db, "select destination, max(at) as at from backups group by destination"), &{&1["destination"], &1["at"]})
+    problems = Map.new(query(db, "select * from problems"), &{&1["destination"], &1})
+    told = Map.new(query(db, "select * from told"), &{&1["destination"], &1["at"]})
+
+    for destination <- destinations(db) do
+      since = finished[destination["id"]] || destination["added"]
+      overdue = every != nil and now - since > every * 1000 + @overdue
+      problem = problems[destination["id"]]
+
+      %{
+        id: destination["id"],
+        name: destination["name"],
+        last: finished[destination["id"]],
+        since: since,
+        every: every || 0,
+        overdue: overdue,
+        problem: problem && problem["text"],
+        needs: overdue or problem != nil,
+        told: told[destination["id"]]
+      }
+    end
+  end
+
+  # Says how each destination stands where a person hears of it: to Telemetry, whose `backup` alert fires on it, and
+  # to the network's owners, told once when it starts to need them, and again only after it's backed up.
+  defp stand(call) do
+    standing = transaction(call, &standing/1)
+
+    records =
+      for destination <- standing do
+        %{
+          "name" => "one.backup",
+          "attributes" =>
+            Map.reject(
+              %{
+                "one.destination" => destination.name,
+                "one.backup.last" => destination.since,
+                "one.backup.every" => destination.every,
+                "one.outcome" => if(destination.needs, do: "failed", else: "ok"),
+                "one.problem" => destination.problem
+              },
+              fn {_name, value} -> value in [nil, false] end
+            )
+        }
+      end
+
+    if records != [], do: Call.tool(call, "telemetry", "record", %{"records" => records})
+
+    for %{needs: true, told: nil} = destination <- standing do
+      tell(call, destination)
+      transaction(call, &query(&1, "insert or replace into told (destination, at) values (?, ?)", [destination.id, System.os_time(:millisecond)]))
+    end
+
+    for %{needs: false, told: told} = destination <- standing, told != nil,
+        do: transaction(call, &query(&1, "delete from told where destination = ?", [destination.id]))
+
+    :ok
+  end
+
+  # Tells each of the network's owners that `destination` couldn't be backed up, as Time Machine does.
+  defp tell(call, destination) do
+    when_last =
+      case destination.last do
+        nil -> "#{destination.name} hasn't been backed up yet."
+        at -> "The last backup to #{destination.name} was #{ago(System.os_time(:millisecond) - at)}."
+      end
+
+    members = Call.tool(call, "permissions", "members", %{"of" => "network"})["members"]
+
+    for who <- members,
+        Call.tool(call, "permissions", "check", %{"who" => who, "artifact" => "network", "relation" => "owner"})["may"] do
+      Call.app(call, "notifications").send(call, %{
+        "title" => "Backups couldn't complete the backup",
+        "text" => when_last,
+        "to" => who,
+        "section" => "backups"
+      })
+    end
+  end
+
+  defp ago(ms) when ms < 2 * 3_600_000, do: "#{div(ms, 60_000)} minutes ago"
+  defp ago(ms) when ms < 2 * 86_400_000, do: "#{div(ms, 3_600_000)} hours ago"
+  defp ago(ms), do: "#{div(ms, 86_400_000)} days ago"
 
   # A destination's state, from the backup under way there (`runs`), what's wrong with it and its backups.
   defp state(%{"beat" => beat}, _problem, _listed, now), do: if(now - beat < Run.stale(), do: "backing_up", else: "interrupted")
@@ -356,13 +478,13 @@ defmodule Backups do
   end
 
   defp owned("destinations", _inputs, call) do
-    {destinations, every, problems, backups, runs} =
+    {destinations, every, problems, backups, runs, standing} =
       transaction(call, fn db ->
         {destinations(db), setting(db, "every"), Map.new(query(db, "select * from problems"), &{&1["destination"], &1}),
          query(
            db,
            "select destination, name, at, took, blobs, bytes, sent, sent_bytes from backups order by destination, at desc"
-         ), Map.new(query(db, "select * from runs"), &{&1["destination"], &1})}
+         ), Map.new(query(db, "select * from runs"), &{&1["destination"], &1}), Map.new(standing(db), &{&1.id, &1})}
       end)
 
     now = System.os_time(:millisecond)
@@ -387,6 +509,7 @@ defmodule Backups do
             size: sizes[destination["id"]] || 0,
             last: List.first(listed),
             backups: for(backup <- listed, do: Map.drop(backup, ["destination"])),
+            overdue: standing[destination["id"]].overdue,
             state: state(runs[destination["id"]], problems[destination["id"]], listed, now),
             running: with(%{} = run <- runs[destination["id"]], do: %{at: run["at"], machine: Service.name(run["server"])}),
             problem: problems[destination["id"]] && Map.take(problems[destination["id"]], ["at", "kind", "text"])
@@ -457,9 +580,11 @@ defmodule Backups do
       [destination] = named(db, name)
       for table <- ~w(destinations), do: query(db, "delete from #{table} where id = ?", [destination["id"]])
 
-      for table <- ~w(backups objects problems runs listed),
+      for table <- ~w(backups objects problems runs listed told),
           do: query(db, "delete from #{table} where destination = ?", [destination["id"]])
     end)
+
+    Call.tool(call, "telemetry", "record", %{"records" => [%{"name" => "one.backup", "attributes" => %{"one.destination" => name, "one.outcome" => "removed"}}]})
 
     %{destination: name}
   end
@@ -467,12 +592,16 @@ defmodule Backups do
   defp owned("now", inputs, call) do
     destinations = transaction(call, fn db -> if inputs["destination"], do: named(db, inputs["destination"]), else: destinations(db) end)
     if destinations == [], do: raise("There's nowhere to back up to yet: add a destination first.")
-    %{
-      backups:
-        each(destinations, fn destination ->
-          with :running <- Run.back_up(call, destination), do: raise("It's backing up to #{destination["name"]} already.")
-        end)
-    }
+    try do
+      %{
+        backups:
+          each(destinations, fn destination ->
+            with :running <- Run.back_up(call, destination), do: raise("It's backing up to #{destination["name"]} already.")
+          end)
+      }
+    after
+      stand(call)
+    end
   end
 
   defp owned("schedule", %{"every" => every}, call) do

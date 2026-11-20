@@ -33,6 +33,9 @@ tools for the network (`ONE_SUBJECT=network`, and `subject: "network"` from an a
   what it made them), or one blob's whole name. It changes nothing that's there, so it can't put a database back
   to an earlier moment over what's there now. Settings › Backups does the same, for a person, an app or a file.
 - `remove` stops backing up to a destination. What's there stays.
+- A destination whose last backup failed, or with none finished within its schedule and a day, needs its owners: it's
+  the red count on Backups in Settings (`badge`), Telemetry's `backup` alert, and its owners are notified once, until
+  it's backed up again.
 
 When the bucket itself is gone, the network is restored into an empty one on any machine, with no network running:
 

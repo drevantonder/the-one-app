@@ -12,6 +12,7 @@ defmodule Telemetry.Alerts do
   | `failing` | Half or more of an app's tool calls failed, of 10 or more in 10 min | 10 min with fewer |
   | `unanswered` | An app didn't answer, in 2 or more of the last 5 minutes: a hook it didn't answer in time (`one.hook.timeouts`), or its database's server kept a call waiting without running it (`one.database.lease.wait`, `not_answered`) | 5 min without |
   | `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
+  | `backup` | A destination's last backup is older than its schedule and a day, or its last backup failed, as Backups last said (`one.backup`, which it says each hour and as each backup ends) | Backups says it's backed up, or that the destination is gone |
 
   Each alert is a row of Telemetry's database, one per kind and key (the server, the build, the error's kind, the
   app), moved only by `evaluate/1`, the clock's job every minute: it's `firing` while its symptom is seen, and
@@ -21,7 +22,7 @@ defmodule Telemetry.Alerts do
   What it reads is each batch kept since it last looked that it hasn't read, by its name (`Telemetry.Store.since/3`),
   so one kept late is read all the same, and it keeps of that only what its rules need: each server's last start and
   failure, each kind of error and when it was first and last seen, and per app per minute its calls, its failures and
-  how often it didn't answer. Its first look reads the last 14 days for the kinds of error there were, and has no alert for
+  how often it didn't answer, and what Backups last said of each destination. Its first look reads the last 14 days for the kinds of error there were, and has no alert for
   any of them. Whether a server is one of the network's and ready, and whether the update is held, it asks of the relay
   as it looks (`OneCore.Servers.presence/1`, `OneCore.Servers.network/0`): where the relay doesn't answer, what it
   would have said of stays as it was.
@@ -33,6 +34,7 @@ defmodule Telemetry.Alerts do
   # hour's blob 10 minutes after it ends (`Store.prune/1`), and the rules look back no further.
   @gap 5 * 60_000
   @minute 60_000
+  @day 86_400_000
   # How long an error kind isn't logged before its alert resolves: its recovery window, as Grafana's and Datadog's.
   @recovery 10 * @minute
 
@@ -67,7 +69,9 @@ defmodule Telemetry.Alerts do
     "update alerts set state = 'resolved' where state = 'resolving'",
     "drop table muted",
     # Each app's slowest deploy to show in a window, per minute.
-    "create table deploys (app text not null, minute integer not null, slowest integer not null, primary key (app, minute)) without rowid"
+    "create table deploys (app text not null, minute integer not null, slowest integer not null, primary key (app, minute)) without rowid",
+    # What Backups last said of each destination (`one.backup`).
+    "create table backups (destination text primary key, at integer not null, last integer not null, every integer not null, outcome text not null, problem text)"
   ]
 
   @kinds %{
@@ -76,14 +80,15 @@ defmodule Telemetry.Alerts do
     "error" => "A kind of error not seen in the last 14 days",
     "failing" => "Half or more of an app's tool calls fail, of 10 or more in 10 minutes",
     "unanswered" => "An app doesn't answer for more than a minute",
-    "deploy" => "An app's deploys take over 500 ms to show in its window, in 2 or more of the last 10 minutes"
+    "deploy" => "An app's deploys take over 500 ms to show in its window, in 2 or more of the last 10 minutes",
+    "backup" => "A backup isn't made within its schedule and a day, or the last one failed"
   }
 
   # How long a deploy has to show in a window, from when it began, in milliseconds.
   @deploy_budget 500
 
   # How long each kind's alert stays after its symptom was last seen before it's resolved, in milliseconds.
-  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000}
+  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000, "backup" => 0}
 
   @doc "Each kind of alert, with what fires it."
   def kinds, do: @kinds
@@ -214,6 +219,9 @@ defmodule Telemetry.Alerts do
   defp log(%{"eventName" => "one.server.crash_loop", "attributes" => %{"one.server" => server} = a} = log),
     do: [{:server, server, a["host.name"], ms(log["time"]), {:looping, log["body"]}}]
 
+  defp log(%{"eventName" => "one.backup", "attributes" => %{"one.destination" => destination} = a} = log),
+    do: [{:backup, destination, ms(log["time"]), a["one.backup.last"] || 0, a["one.backup.every"] || 0, a["one.outcome"], a["one.problem"]}]
+
   # What a server's own program says of it is its alert's, not a new kind of error.
   defp log(%{"eventName" => "one.server." <> _}), do: []
 
@@ -333,6 +341,21 @@ defmodule Telemetry.Alerts do
       )
     end
 
+    for {:backup, destination, at, last, every, outcome, problem} <- Enum.sort_by(for({:backup, _, _, _, _, _, _} = said <- signals, do: said), &elem(&1, 2)) do
+      if outcome == "removed",
+        do: query(db, "delete from backups where destination = ? and at <= ?", [destination, at]),
+        else:
+          query(
+            db,
+            """
+            insert into backups (destination, at, last, every, outcome, problem) values (?, ?, ?, ?, ?, ?)
+            on conflict (destination) do update set at = excluded.at, last = excluded.last, every = excluded.every,
+              outcome = excluded.outcome, problem = excluded.problem where excluded.at >= backups.at
+            """,
+            [destination, at, last, every, outcome, problem]
+          )
+    end
+
     # What no rule looks at any more.
     query(db, "delete from minutes where minute < ?", [now - 15 * @minute])
     query(db, "delete from deploys where minute < ?", [now - 15 * @minute])
@@ -436,8 +459,27 @@ defmodule Telemetry.Alerts do
          }}
       end
 
-    Enum.reduce([servers, update, errors, failing, unanswered, deploys], &Map.merge/2)
+    # A destination's last backup older than its schedule and a day, or one that failed: as Time Machine says it
+    # couldn't complete the backup after a missed day.
+    backups =
+      for row <- query(db, "select * from backups", []),
+          row["outcome"] == "failed" or (row["every"] > 0 and now - row["last"] > row["every"] * 1000 + @day),
+          into: %{} do
+        {{"backup", row["destination"]},
+         %{
+           title: "Backups couldn't complete the backup to #{row["destination"]}",
+           text: Enum.join(Enum.reject([last_backup(row["last"], now), row["problem"]], &is_nil/1), " ")
+         }}
+      end
+
+    Enum.reduce([servers, update, errors, failing, unanswered, deploys, backups], &Map.merge/2)
   end
+
+  # When the last backup was, as a person says it.
+  defp last_backup(0, _now), do: "It hasn't been backed up yet."
+  defp last_backup(at, now) when now - at < 2 * 3_600_000, do: "The last backup was #{div(now - at, @minute)} minutes ago."
+  defp last_backup(at, now) when now - at < 2 * @day, do: "The last backup was #{div(now - at, 3_600_000)} hours ago."
+  defp last_backup(at, now), do: "The last backup was #{div(now - at, @day)} days ago."
 
   # A server's symptom, if it has one, while the relay says it's one of the network's (`active`), not one joining or
   # one that left: it keeps restarting, or it's been down 5 minutes and the relay doesn't say it's ready.

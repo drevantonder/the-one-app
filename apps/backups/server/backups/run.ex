@@ -67,16 +67,16 @@ defmodule Backups.Run do
     if started == [], do: :running, else: run(%{call | forwarded: true}, opened, began)
   end
 
-  # Does `fun`, and keeps what it raised as the destination's problem, raising it again. A scheduled backup's call is
-  # passed on to no other server, so one that needs another, as one whose keys are in a Vault only another opens, fails
-  # here too.
+  # Does `fun`, and keeps what it raised as the destination's problem, raising it again. A call already passed on to
+  # the server holding Backups' database, as a scheduled backup's is made there, is passed on no further, so one that
+  # needs another server, as one whose keys are in a Vault only another opens, fails here too.
   defp failing(call, destination, began, fun) do
     try do
       fun.()
     catch
       :throw, {OneCore.Call, :forwarding_loop} ->
-        raise "#{OneCore.Servers.name(call.server) || "This server"}, which makes the scheduled backups, can't do it " <>
-                "alone: the network's Vault, which holds its keys, opens only on another server. Choose the servers " <>
+        raise "Its keys couldn't be read on #{OneCore.Servers.name(call.server) || "this server"}, which holds Backups' " <>
+                "database: the network's Vault, which holds them, opens only on another server. Choose the servers " <>
                 "that open it in Vault › Security."
     end
   rescue

@@ -127,7 +127,7 @@
             "name": "Backups",
             "group": "system",
             "order": 1,
-            "count": null,
+            "count": 1,
             "kinds": null,
             "service": false
           },
