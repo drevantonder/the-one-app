@@ -495,13 +495,14 @@ if (ssh && !device) throw new Error(`No tier in devices.json is measured on ${ss
 /// CPU's time for the frame (painting it and drawing it for the GPU) and its JS's since the frame before (this machine's, as its Geekbench score is to the
 /// tier's) and its GPU's (what the device
 /// measured takes for the frame's work at the tier's pixels, as its GPU's score is to the tier's), the frame dropped
-/// where either is longer than the tier's frame. → each tier's name, the frames dropped of those drawn, the worst and why.
-export function judge(frames, hz) {
+/// where either is longer than the tier's frame. Its JS counts only where the frame `waits` for it: what a wheel scrolls
+/// is drawn whatever its JS is doing. → each tier's name, the frames dropped of those drawn, the worst and why.
+export function judge(frames, hz, waits = true) {
   // Drawn on the device itself, its own frames' times: the GPU's by its timestamps, its thread's painting and drawing.
   if (device) {
     if (device.hz !== hz) return []
     const times = frames.filter((frame) => frame.draws > 0).map((frame) => {
-      const [gpuMs, cpuMs, jsMs] = [frame.gpu_ms ?? 0, frame.paint_ms + frame.draw_ms, frame.script_ms ?? 0]
+      const [gpuMs, cpuMs, jsMs] = [frame.gpu_ms ?? 0, frame.paint_ms + frame.draw_ms, waits ? frame.script_ms ?? 0 : 0]
       const ms = Math.max(gpuMs, cpuMs, jsMs)
       return { ms, by: ms === gpuMs ? "GPU" : ms === jsMs ? "JS" : "CPU" }
     })
@@ -522,7 +523,7 @@ export function judge(frames, hz) {
           const gpuMs = gpu ? (shaded + (work.uploaded / 1e6) * pixels * gpu.costs.uploaded + gpu.constant) * (anchor.gpu / tier.gpu) + frame.draws * gpu.costs.draws * (tier.draws ?? 1) * (anchor.cpu / tier.cpu) : 0
           // The thread that paints a frame then draws it for the GPU; its JS runs on a thread of its own beside, and a
           // frame waits for whichever's longer.
-          const [cpuMs, jsMs] = hostScore ? [frame.paint_ms + (frame.draw_ms ?? 0), frame.script_ms ?? 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
+          const [cpuMs, jsMs] = hostScore ? [frame.paint_ms + (frame.draw_ms ?? 0), waits ? frame.script_ms ?? 0 : 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
           const ms = Math.max(gpuMs, cpuMs, jsMs)
           return { ms, by: ms === gpuMs ? "GPU" : ms === jsMs ? "JS" : "CPU" }
         })
@@ -561,6 +562,9 @@ async function play(built, scene, name, motion, hz, folder) {
   const answer = ran.answers.at(-1)
   if (ran.failed || !answer?.result) return { said: `  ${hz} Hz: ${answer?.error ?? ran.said.split("\n").at(-1)}` }
   const { frames, budget_ms: budget, over, leaving } = answer.result
+  // Whether its frames wait for its page's JS: a wheel's notches and the pointer moving don't, as a window scrolls them
+  // at once, as a browser's compositor does (`Windows::waits`); a press, a key or a finger does.
+  const waits = !events?.every((event) => ["wheel", "move"].includes(event.kind))
   const [way, values] = travel(frames)
   const kept = frames.map(({ png, width, height, ...frame }) => frame)
   const beforeAt = against && join(against, relative(out, folder))
@@ -592,7 +596,7 @@ async function play(built, scene, name, motion, hz, folder) {
   // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.
   const tier = motion.keeps && devices.tiers.find((tier) => tier.name === motion.keeps)
   if (motion.keeps && (!tier || (!hostScore && !device))) failed.push(tier ? `this CPU isn't one of devices.json's hosts, to judge "${motion.keeps}" by` : `no tier named "${motion.keeps}" in devices.json`)
-  const keeping = tier?.hz === hz && (hostScore || device) && judge(frames, hz).find(({ tier }) => tier === motion.keeps)
+  const keeping = tier?.hz === hz && (hostScore || device) && judge(frames, hz, waits).find(({ tier }) => tier === motion.keeps)
   if (keeping?.dropped) failed.push(`${keeping.tier} drops ${keeping.dropped} of ${keeping.drawn} frames (the worst ${keeping.worst.ms.toFixed(1)} ms, its ${keeping.worst.by})`)
   if (failed.length) {
     process.exitCode = 1
@@ -602,7 +606,7 @@ async function play(built, scene, name, motion, hz, folder) {
     const compared = frames.flatMap((frame, n) => (apple[n] === undefined ? [] : [Math.abs(values[n] - apple[n])]))
     said.push(`  ${hz} Hz against iOS (${way.startsWith("scrolled") ? "UIScrollView's deceleration" : "SwiftUI's .spring"}, from the lift): at most ${Math.max(...compared).toFixed(1)} pt apart`)
   }
-  const judged = judge(frames, hz)
+  const judged = judge(frames, hz, waits)
   if (judged.length)
     said.push(`  ${hz} Hz on devices: ${judged.map(({ tier, dropped, drawn, worst }) => `${tier} drops ${dropped} of ${drawn} frames (the worst ${worst.ms.toFixed(1)} ms, its ${worst.by})`).join("; ")}`)
   if (before) {

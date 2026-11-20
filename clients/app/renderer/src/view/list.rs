@@ -127,7 +127,8 @@ impl Screen {
 
     /// Asks each list that listens for `range` for the rows it needs, as it was drawn in a window `height` tall, where
     /// that's changed: from half a window behind what shows to two ahead, the way it's moving, or a window and a
-    /// quarter each way.
+    /// quarter each way; near its start or end, as many rows, those it has none of on one side on the other, so the
+    /// rows a scroll from there needs are made while it's still, as a collection view's prefetching makes them ahead.
     pub(super) fn ask_lists(&mut self, height: f32) {
         let mut asks = Vec::new();
         for (id, listed) in &mut self.layout.lists {
@@ -146,6 +147,8 @@ impl Screen {
                 Some(moved) if moved > 0.5 => (2.0 * height, height / 2.0),
                 _ => (1.25 * height, 1.25 * height),
             };
+            let (before, after) = ((behind - top).max(0.0), (bottom + ahead - offsets[count]).max(0.0));
+            let (behind, ahead) = (behind + after, ahead + before);
             listed.was = Some(rect.y);
             let (first, shown) = (starting(top - behind), starting(top));
             let told = [first, ending(bottom + ahead).max(first), shown, ending(bottom).max(shown)];
