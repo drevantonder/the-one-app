@@ -71,6 +71,9 @@ struct Views {
     missed: AtomicBool,
     /// Whether this device hears its notifications yet: from when the window first shows its person's home.
     hearing: AtomicBool,
+    /// When each app a server said was just deployed began deploying, by its name, in milliseconds since the Unix
+    /// epoch, until its window is next drawn (`deployed`).
+    deploys: Mutex<HashMap<String, u64>>,
 }
 
 impl Views {
@@ -724,6 +727,20 @@ fn launcher_shown(shown: bool) {
     native::computer::shown(shown);
 }
 
+/// An app's window was drawn: if a server said the app was deployed in the last minute, how long from when its deploy
+/// began to this, as the app's log says and Telemetry hears (`one.client.deploy.window`), whose budget is 500 ms. The
+/// deploy's start is the server's clock, as close to this device's as the internet's time keeps them.
+pub(crate) fn deployed(app: &str) {
+    let Ok(views) = views() else { return };
+    let Some(began) = views.deploys.lock().expect("no view panics").remove(app) else { return };
+    let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map_or(0, |now| now.as_millis() as u64);
+    let ms = now.saturating_sub(began);
+    if ms < 60_000 {
+        eprintln!("{app} showed its deploy {ms} ms after it began");
+        views.client.report(json!({"name": "one.client.deploy.window", "value": ms, "attributes": {"one.app": app}}));
+    }
+}
+
 #[cfg_attr(mobile, tauri::command)]
 fn opened(view: String, ms: u32) -> Result<(), String> {
     let views = views()?;
@@ -1041,6 +1058,7 @@ async fn opens() {
         on_screen: Mutex::new(HashSet::from(["main".to_owned()])),
         missed: AtomicBool::new(false),
         hearing: AtomicBool::new(false),
+        deploys: Mutex::default(),
     };
     if app.views.set(views).is_err() {
         return;
@@ -1073,6 +1091,11 @@ async fn opens() {
             }
             if message["method"] != "notifications/one/changed" {
                 continue;
+            }
+            for (app, began) in message["params"]["deployed"].as_object().into_iter().flatten() {
+                if let Some(began) = began.as_u64() {
+                    views.deploys.lock().expect("no view panics").insert(app.clone(), began);
+                }
             }
             let listed = views.listed(None).await.unwrap_or_default();
             let stale = views.stale(&message["params"], &listed);

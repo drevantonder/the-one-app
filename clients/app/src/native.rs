@@ -680,6 +680,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 Event::Drawn => {
                     let ms = started.elapsed().as_millis() as u64;
                     Opening::drawn(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()), &app);
+                    crate::deployed(&app);
                     let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
                     // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
                     if !(launcher && cfg!(desktop)) {
