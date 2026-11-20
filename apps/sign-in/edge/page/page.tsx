@@ -415,7 +415,7 @@ function shows(): Shows {
           }
         // Done, as Google's and GitHub's device pages are: nothing left to answer here.
         case "approved":
-          return { mark: doneMark, heading: `${now.name} is signed in`, done: now.unlocked ? "It holds your key too. You can close this page and go back to it." : "You can close this page and go back to it." }
+          return { mark: <DoneMark />, heading: `${now.name} is signed in`, done: now.unlocked ? "It holds your key too. You can close this page and go back to it." : "You can close this page and go back to it." }
         case "denied":
           return { heading: `${now.name} wasn't approved`, done: "You can close this page." }
         // A code that has ended is started again only on its device, so there's nothing to try again here.
@@ -461,7 +461,9 @@ function shows(): Shows {
 }
 
 /// The check mark a device page shows once it's done.
-const doneMark = <span class="done-mark"><Icon name="check" /></span>
+function DoneMark() {
+  return <span class="done-mark"><Icon name="check" /></span>
+}
 
 /// Continue with Google as the button, and the passkey as the second way, `passkey` saying what that does.
 const withGoogleFirst = (passkey: string) => ({ button: "Continue with Google", onSignIn: withGoogle, stop: passkey, onStop: signIn })
