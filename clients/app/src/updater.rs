@@ -123,7 +123,9 @@ pub async fn caught_up() {
 /// beside it (`cli::serving::take_program`) or by it.
 #[cfg(desktop)]
 async fn take(latest: &str) {
-    if cli::serving::count(latest) <= cli::serving::count(::client::BUILD) {
+    // A developer's build is what they're trying, which the network's never takes the place of: one on a network
+    // being built took the network's latest release and started again on that (21 Nov).
+    if cfg!(debug_assertions) || cli::serving::count(latest) <= cli::serving::count(::client::BUILD) {
         return;
     }
     {
