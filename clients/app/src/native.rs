@@ -168,14 +168,14 @@ pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
 
 /// Tells Telemetry how smoothly something moved on `app`'s window, and says it in the app's log: how many frames, their
 /// intervals' median and 95th percentile, how many were long (shown twice or more), the display's refresh and the
-/// time this thread spent on a frame. Each is a histogram by the app, what moved it and the display's rate, so
+/// time this thread spent painting and drawing a frame. Each is a histogram by the app, what moved it and the display's rate, so
 /// `metric` reads them over time.
 fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
     let ms = |time: std::time::Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
     let hz = (1.0 / frames.refresh.as_secs_f64()).round();
     let load = Load::now();
     eprintln!(
-        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz, work p95 {} ms, {load}",
+        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz, paint p95 {} ms, draw p95 {} ms, {load}",
         frames.kind,
         ms(frames.took),
         frames.frames,
@@ -183,7 +183,8 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         ms(frames.p95),
         ms(frames.longest),
         frames.long,
-        ms(frames.work)
+        ms(frames.paint),
+        ms(frames.draw)
     );
     let Ok(views) = crate::views() else { return };
     let attributes = json!({"one.view": app, "one.motion": frames.kind, "one.display.hz": hz, "one.system.busy": load.busy()});
@@ -194,7 +195,8 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         ("one.client.native.frames", f64::from(frames.frames)),
         ("one.client.native.frames.long", f64::from(frames.long)),
         ("one.client.native.frame.interval.p95", ms(frames.p95)),
-        ("one.client.native.frame.work.p95", ms(frames.work)),
+        ("one.client.native.frame.paint.p95", ms(frames.paint)),
+        ("one.client.native.frame.draw.p95", ms(frames.draw)),
     ] {
         views.client.report(json!({"name": name, "value": value, "attributes": attributes}));
     }

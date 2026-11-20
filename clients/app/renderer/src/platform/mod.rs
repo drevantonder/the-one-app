@@ -1019,6 +1019,7 @@ impl Windows {
                     Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
                 }
             }
+            let painted = web_time::Instant::now();
             let glass = window.screen.as_ref().map(|screen| screen.glass().to_vec()).unwrap_or_default();
             if !window.arrange(&self.display, &self.context, &self.atlas, &glass) {
                 window.missed(&self.context, &self.atlas);
@@ -1032,7 +1033,7 @@ impl Windows {
             if window.screen.as_ref().is_ok_and(Screen::held) {
                 window.timing.input("drag");
             }
-            if let Some(frames) = window.timing.drawn(began.elapsed(), moving, self.display.refresh()) {
+            if let Some(frames) = window.timing.drawn(painted - began, painted.elapsed(), moving, self.display.refresh()) {
                 (window.on_event)(Event::Frames(frames));
             }
             if std::mem::take(&mut window.placing) {
