@@ -209,7 +209,7 @@ async function forward(
   const mismatch = modern && mismatched(headers, call);
   if (mismatch) return Response.json({ jsonrpc: "2.0", id: null, error: { code: -32020, message: `Header mismatch: ${mismatch}` } }, { status: 400 });
   const subject = "device" in from ? meta.subject : undefined;
-  // Which app's page asked, as the window's page says of each (`clients/app/page/client.js`), which a server holds
+  // Which app's page asked, as the window's page says of each (`clients/app/page/bridge.js`), which a server holds
   // that page to (`OneCore.Mcp`).
   const app = "device" in from ? meta.app : undefined;
   const traceparent = traced(meta.traceparent ?? headers?.get("traceparent") ?? undefined);

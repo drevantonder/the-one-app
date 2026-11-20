@@ -146,7 +146,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 
 ## Opening, the connection and updates (17 Nov)
 
-- The window's states and the connection's are the owner's signed-off machines (`client.js`, `State` in core/client): a new state or move is theirs to sign off.
+- The window's states and the connection's are the owner's signed-off machines (`window-machine.js`, `move-machine.js`, `page-machine.js`, `State` in core/client): a new state or move is theirs to sign off.
 - Opening is the `Steps` look: "Connecting to your network" the first time, "Can't reach your network" while it's offline with nothing kept, then "Opening Home Screen". A launcher kept from before opens without the network.
 - With the launcher showing, a network that doesn't answer is a thin banner at the top, as Slack and Gmail have, and everything else stays: "Reconnecting…" as it tries again, and nothing once it's back.
 - No launcher: "There's no Home Screen yet." with Open App Store, or "Only Andre can install a Home Screen for Everyone" where the person can't.

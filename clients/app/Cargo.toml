@@ -151,7 +151,7 @@ jni = "0.21"
 # A phone's app is Tauri's: `custom-protocol` builds it with its page inside it, however it's built. A `one:` link
 # opens it at what it links to (`links`): what Spotlight, an App Shortcut or an Android shortcut opens. The opener
 # opens the sign-in page in the device's own browser, where a passkey works. An app's haptics (`one/haptic` in
-# client.js) are an iPhone's; Android's plays them through the web view instead (`MainActivity`), as the plugin's
+# bridge.js) are an iPhone's; Android's plays them through the web view instead (`MainActivity`), as the plugin's
 # Vibrator there doesn't follow the system's Touch feedback.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
 tauri = { version = "2", features = ["custom-protocol"], optional = true }

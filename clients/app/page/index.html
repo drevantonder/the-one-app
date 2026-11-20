@@ -11,7 +11,7 @@
   <link rel="stylesheet" href="tokens.css">
   <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="client.css">
-  <!-- XState 5.33.3's UMD build, as core/ui has it, which the window's states are written with (client.js). -->
+  <!-- XState 5.33.3's UMD build, as core/ui has it, which the window's states are written with (window-machine.js). -->
   <script src="xstate.umd.min.js"></script>
   <script type="module" src="client.js"></script>
 </head>
@@ -20,12 +20,12 @@
        that it's reconnecting as it tries again. -->
   <p id="banner" role="status" hidden><span id="banner-spinner" class="ui-spinner" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span id="banner-text"></span><button id="banner-retry" class="ui-button press ring" data-variant="ghost">Try Again</button></p>
   <!-- Where the window's title bar is over the page (a Mac's, with no title band), its top: under the window's own
-       controls, it drags the window (client.js's `titleBar`). In an app's own window, just after the controls, its
+       controls, it drags the window (chrome.js's `titleBar`). In an app's own window, just after the controls, its
        title (`title-bar-app`): the app's icon and name, which nothing presses. -->
   <div id="title-bar" hidden>
     <p id="title-bar-app" hidden><img alt="" hidden><span></span></p>
   </div>
-  <!-- The rail, above every app on a phone or a tablet (client.js's `rail`): a home line on the window's right edge over
+  <!-- The rail, above every app on a phone or a tablet (rail.js's `rail`): a home line on the window's right edge over
        an app, which a finger pulls in to go home, and which says nothing to a screen reader, as iOS's home indicator
        doesn't. -->
   <div id="line" aria-hidden="true" data-away></div>

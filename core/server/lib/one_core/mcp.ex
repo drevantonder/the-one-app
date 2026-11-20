@@ -491,7 +491,7 @@ defmodule OneCore.Mcp do
             %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
 
           # Whether its app is trusted goes too: the client lets only a trusted app's page change the device
-          # or ask for someone else (`clients/app/page/client.js`). So does the runtime version its native page needs
+          # or ask for someone else (`clients/app/page/bridge.js`). So does the runtime version its native page needs
           # (`runtimeVersion`), which a native host that has it draws itself, and one that hasn't opens in a web view.
           entrypoint ->
             Map.merge(resource, %{
@@ -649,7 +649,7 @@ defmodule OneCore.Mcp do
 
   # Which app called a tool is said only by a server that runs the apps of whoever it asks for, its subject: one
   # acting for them (a request that says its `actor`). Any other server's call is its person's. A client calls as nobody's app, unless it says an app's page asked
-  # (`app`, which the app's window says of each page: `clients/app/page/client.js`). A trusted app's page then calls
+  # (`app`, which the app's window says of each page: `clients/app/page/bridge.js`). A trusted app's page then calls
   # as its person does, since its server code may do anything they may. An untrusted app's calls as its server code
   # does in its sandbox (`OneCore.Sandbox`): its own app's tools as its person, the tools of the apps it requires as
   # itself, and nothing else. A client may say an app asked that didn't, which is its person's to do, and gives them

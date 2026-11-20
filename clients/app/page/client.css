@@ -1,6 +1,6 @@
 /* The window's own page: the frames its apps are drawn in, the launcher's under the rest, and a problem above
    them. Every frame fills the window, edge to edge, under the status bar and the home indicator, as an iPhone app
-   does: each is told how far those reach (client.js's `insets`), and its own bar, its end and its controls keep
+   does: each is told how far those reach (chrome.js's `insets`), and its own bar, its end and its controls keep
    clear of them while what scrolls passes under. Android's window is already clear of its bars, and tells the page
    of none. */
 :root {
@@ -183,14 +183,14 @@ iframe {
   border: 0;
   background: var(--background);
 }
-/* A window whose title bar is over the page, as a Mac's with no title band is (client.js's `titleBar`): what's drawn
+/* A window whose title bar is over the page, as a Mac's with no title band is (chrome.js's `titleBar`): what's drawn
    runs to its top, under the window's own controls, and keeps the title bar's height clear there, as it does what a
    phone keeps for itself. */
 :root[data-title-bar] {
   --safe-top: max(env(safe-area-inset-top), var(--title-bar-height));
 }
 /* The title bar is the page's top bar (a unified toolbar): what's empty in it moves the window, as the page and
-   client.js say (`one/drag-window`). */
+   bridge.js say (`one/drag-window`). */
 #title-bar {
   position: fixed;
   z-index: 5;
@@ -224,7 +224,7 @@ iframe {
   object-fit: contain;
   border-radius: 22.5%;
 }
-/* What the device keeps for itself, measured (client.js's `insets`). */
+/* What the device keeps for itself, measured (chrome.js's `insets`). */
 #safe-area {
   position: fixed;
   inset: 0;
@@ -264,7 +264,7 @@ iframe[inert] {
   }
 }
 
-/* While the window moves between the launcher and an app (client.js's `moves`), both frames are seen and take taps,
+/* While the window moves between the launcher and an app (move-machine.js's `moves`), both frames are seen and take taps,
    the one that moves over the other above it. */
 iframe[data-move] {
   z-index: 1;
@@ -312,7 +312,7 @@ iframe[data-move] {
   display: none;
 }
 
-/* The rail (client.js's `rail`): over an app, a home line in the middle of the window's right edge: iOS's home indicator on its side, 4 by
+/* The rail (rail.js's `rail`): over an app, a home line in the middle of the window's right edge: iOS's home indicator on its side, 4 by
    64 points, black over white and white over black, as iOS's is: white, less what's under it. A finger takes it from a fingertip's width in from the edge, and Android's most it lets
    an app keep from its back gesture, 200 dp, is far taller. */
 #line {
@@ -341,7 +341,7 @@ iframe[data-move] {
   background: white;
   transition: opacity var(--move-settle) var(--ease-settle);
 }
-/* While a finger pulls it in, it's under the finger, with the app (client.js's `pull`). */
+/* While a finger pulls it in, it's under the finger, with the app (rail.js's `pull`). */
 #line[data-pulled]::before {
   opacity: 0;
 }

@@ -1,6 +1,6 @@
 //! The rail over a phone's app windows (DESIGN.md, The rail): the home line its screen draws on the right edge
 //! (`Screen::rail`), which a finger pulls in to go home, as the window page's line does over an app in a frame
-//! (client.js's `pull` and `moves`, whose numbers these are). Pulled in far enough to say so, the window follows the
+//! (rail.js's `pull` and move-machine.js's `moves`, whose numbers these are). Pulled in far enough to say so, the window follows the
 //! finger, its right edge under it, shrinking to a card over the Home Screen, dimmed; let go past `PULLED` or flicked
 //! in, a spring carries it on into the icon it was opened from, or with none, it shrinks away, and every app's window
 //! closes; short of that, it springs back. A tap does nothing, and the first finger to come in takes it: another on the
@@ -178,7 +178,7 @@ impl Pull {
 }
 
 /// Steps the rail's spring at `p`, going `velocity` a second, `dt` seconds on toward `target`, as the page's moves
-/// have it (client.js's `spring`): → where it is, how fast it goes, and whether it's still there. A step late, as when
+/// have it (move-machine.js's `spring`): → where it is, how fast it goes, and whether it's still there. A step late, as when
 /// the app was in the background, is taken as a frame's, so nothing jumps.
 pub fn spring(p: f32, velocity: f32, target: f32, dt: f32) -> (f32, f32, bool) {
     let (off, velocity) = SPRING.at(f64::from(p - target), f64::from(velocity), f64::from(dt.min(1.0 / 30.0)));

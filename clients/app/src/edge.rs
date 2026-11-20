@@ -1,5 +1,5 @@
 //! An iPhone's swipe in from the left edge goes back as its Back does: at an app's first screen, the page's move home
-//! follows the finger as far across the window as it's come (`grab`, `drag` and `release` in client.js), as a pop
+//! follows the finger as far across the window as it's come (`grab`, `drag` and `release` in gestures.js), as a pop
 //! does, and let go, it carries on if it's past halfway or flicked, and otherwise springs back; deeper in, let go far
 //! enough, it goes back a screen. It's on wherever the page says back has somewhere to go (`navigation_gestures`).
 

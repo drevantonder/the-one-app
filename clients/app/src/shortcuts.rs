@@ -579,7 +579,7 @@ mod device {
     }
 }
 
-/// Android lists its apps itself (`shortcuts` in page/client.js).
+/// Android lists its apps itself (`shortcuts` in page/shortcuts.js).
 #[cfg(target_os = "android")]
 mod device {
     pub fn keep(_shortcuts: &[super::Shortcut]) -> anyhow::Result<()> {

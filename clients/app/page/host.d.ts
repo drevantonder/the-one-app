@@ -48,7 +48,7 @@ export interface View {
   statusBar?: boolean
 }
 
-/** What moves an open app's page (`client.js`): it drew, didn't, showed an error, was loaded against a version that's
+/** What moves an open app's page (`page-machine.js`): it drew, didn't, showed an error, was loaded against a version that's
  * gone, went off screen, its window may not be in use, it was opened again, or its person pressed Reload or Try Again. */
 export type Paged =
   | { type: "drawn" }
@@ -100,7 +100,7 @@ export interface State extends Told {
   connection: Connection | "behind"
 }
 
-/** What the window knows as it moves (`client.js`): the device's session and whether its network answers, as they
+/** What the window knows as it moves (`window-machine.js`): the device's session and whether its network answers, as they
  * were last told, whether the launcher is loading, whether an update for this device is ready, and what its state
  * says. */
 export interface Context {
@@ -118,7 +118,7 @@ export interface Context {
   behind?: boolean
 }
 
-/** What moves the window's move between its launcher and its apps (`client.js`'s `moveMachine`): an app to show,
+/** What moves the window's move between its launcher and its apps (`move-machine.js`'s `moveMachine`): an app to show,
  * coming back or going on, and the icon it comes out of or goes back into; one the device has already drawn the move
  * to; the spring at rest; the window covering every app; and a finger taking the move, back or with `home` all the
  * way to the Home Screen (the rail's line), moving it and letting go, at `velocity`, in moves a second, and `end`,
@@ -132,7 +132,7 @@ export type Shown =
   | { type: "drag"; p: number }
   | { type: "release"; velocity: number; end?: 0 | 1 }
 
-/** What moves the window (`client.js`). */
+/** What moves the window (`window-machine.js`). */
 export type Moved =
   | Extract<Shown, { type: "show" | "popped" | "grab" | "drag" | "release" }>
   | { type: "session"; told: Told }
@@ -246,17 +246,17 @@ declare global {
       core: { invoke: Invoke; addPluginListener(app: string, event: string, handler: (payload: unknown) => void): Promise<unknown> }
       event: { listen: Listen }
     }
-    /** The device's own back (`client.js`). */
+    /** The device's own back (`gestures.js`). */
     back: () => boolean
-    /** Android's back gesture coming in from the edge, as far in as `progress`, and let go short (`client.js`). */
+    /** Android's back gesture coming in from the edge, as far in as `progress`, and let go short (`gestures.js`). */
     backStarted: () => void
     backProgressed: (progress: number) => void
     backCancelled: () => void
-    /** An iPhone's swipe in from the edge taking the move, moving it as far as `p`, and letting it go (`client.js`). */
+    /** An iPhone's swipe in from the edge taking the move, moving it as far as `p`, and letting it go (`gestures.js`). */
     grab: () => void
     drag: (p: number) => void
     release: (velocity: number, end?: 0 | 1) => void
-    /** A tap on an iPhone's status bar (`client.js`). */
+    /** A tap on an iPhone's status bar (`gestures.js`). */
     scrollToTop: () => void
   }
   /** Where Android's app hears whether something is open over the app that's showing (`MainActivity`). */

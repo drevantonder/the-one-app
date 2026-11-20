@@ -2,7 +2,7 @@
 // shows one in its own system's UI and never in an app. An app's page only asks for it (`showRecoveryKey`,
 // `useRecoveryKey`) and hears whether it was done; it's drawn in a window of the client's own over the app's, and only
 // this page's host answers what it asks here (`one/recovery`, in native.rs), so the key never reaches an app's page.
-// On the web, the window page's own dialog does the same (`recoveryKey` in page/client.js), in the same words.
+// On the web, the window page's own dialog does the same (`recoveryKey` in page/bridge.js), in the same words.
 import { createComponent as h, createSignal, Show } from "/ui/client/solid.js"
 import { Button, Input, render, Screen, Section, Text } from "/ui/client/native/ui.js"
 import { ask, cancelOnEscape } from "/client/ask.js"

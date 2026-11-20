@@ -2,7 +2,7 @@
 //! scrolls the one scroll view that asks to be (`scrollsToTop`), which in the web view is its page, and that doesn't
 //! scroll: its apps' frames do. So the page's says no, and an unseen scroll view a point high along the window's top
 //! is asked instead (`scrollViewShouldScrollToTop:`). It says no too, and has the page scroll the app that's
-//! showing to its top (`scrollToTop` in client.js).
+//! showing to its top (`scrollToTop` in gestures.js).
 
 use std::sync::OnceLock;
 

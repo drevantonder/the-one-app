@@ -344,7 +344,7 @@ pub(crate) async fn file(address: &str) -> Result<Value, String> {
 }
 
 /// What an app's native window changes of this device (`client({ ... })` in the UI library), answered as the window
-/// page answers a web view's (`respond` in client.js): its person signs it out, a phone's push tries again, a phone's
+/// page answers a web view's (`respond` in bridge.js): its person signs it out, a phone's push tries again, a phone's
 /// Settings page opens, it becomes a server or stops being one, or it takes its update.
 async fn change(args: &Value) -> Result<Value, String> {
     use crate::*;
@@ -417,7 +417,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         // Escape on the launcher, or its page done with it (`leave`).
         #[cfg(desktop)]
         "hide" => Ok(done(computer::hide(true))),
-        // As tall as the launcher's content, or its tallest (`fit` in client.js).
+        // As tall as the launcher's content, or its tallest (`fit` in bridge.js).
         #[cfg(desktop)]
         "resize" if launcher => Ok(done(computer::resize(None, args["height"].as_f64()))),
         "theme" if launcher => Ok(done(theme(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),

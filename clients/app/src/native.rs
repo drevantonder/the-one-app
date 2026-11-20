@@ -6,7 +6,7 @@
 //!
 //! It asks what a page would, over the same channel a web view's window does (`hosts`), here an in-memory one: its
 //! files, and what the page asks of its client, which an MCP App asks its host (JSON-RPC). What a web view's window
-//! page answers itself (`respond` in page/client.js) is answered here: `ui/initialize`, `ping` and `one/client`'s
+//! page answers itself (`respond` in page/bridge.js) is answered here: `ui/initialize`, `ping` and `one/client`'s
 //! Colour Mode; the rest is the client's, as from the app (`request`).
 //!
 //! The app's client offers the network the inspector's protocol (`renderer::inspect`) for this device's native windows,
@@ -1009,7 +1009,7 @@ impl Started {
 }
 
 /// What makes the pages a window's frames show, each another app's page in a sandbox of its own (`frame`): only a
-/// trusted app's page shows one, as on the DOM (`one/frame` in page/client.js).
+/// trusted app's page shows one, as on the DOM (`one/frame` in page/bridge.js).
 fn frames(window: Arc<OnceLock<WindowId>>) -> renderer::MakeFrame {
     Box::new(move |node, src, subject| {
         let (frames, src, subject) = (window.clone(), src.to_owned(), subject.map(str::to_owned));
@@ -1279,7 +1279,7 @@ fn respond(
         return None;
     }
     // Its page logs its errors as an MCP App logs to its host, and Telemetry hears them as its app's, as a web view's
-    // (`exception` in clients/app/page/client.js).
+    // (`exception` in clients/app/page/util.js).
     if method == "notifications/message" && message["params"]["level"] == "error" {
         let data = &message["params"]["data"];
         let app = state.lock().expect("nothing panics holding it").entrypoint.split('/').next().unwrap_or_default().to_owned();
@@ -1361,7 +1361,7 @@ fn respond(
                 let _ = to.send(json!({"id": "theme", "command": "theme", "args": {"theme": theme}}));
                 Some(Ok(json!({"theme": theme})))
             } else if changes.is_empty() {
-                // What the client says of itself, as the window page answers (`respond` in client.js); a computer's
+                // What the client says of itself, as the window page answers (`respond` in bridge.js); a computer's
                 // launcher's page lays itself out as one (`client().launcher` in home.tsx), and a phone's is its Home
                 // Screen. Only Android's page pins shortcuts, and no native window does yet.
                 let mut client = crate::client().unwrap_or_else(|_| json!({}));
@@ -1380,10 +1380,10 @@ fn respond(
             }
         }
         // A shortcut on the device's own home screen is Android's page's to pin: a native window has none yet, which it
-        // says, as a device without them does (client.js).
+        // says, as a device without them does (bridge.js).
         "one/pin-shortcut" => Some(Err(json!({"code": -32000, "message": "This device can't put that app on its home screen"}))),
         // A person's recovery key is shown and typed in the client's own window over the app (`recovery`), for whoever
-        // the app asks for, and the app is told only whether it was done (`whom` in client.js).
+        // the app asks for, and the app is told only whether it was done (`whom` in bridge.js).
         "one/recovery-key" if state.sheet.is_none() => {
             let said = params["subject"].as_str().filter(|_| state.trusted).map(str::to_owned);
             let subject = said.or_else(|| state.subject.clone());
@@ -1500,7 +1500,7 @@ fn respond(
             let mut meta = if state.trusted { params["_meta"].as_object().cloned().unwrap_or_default() } else { Default::default() };
             meta.insert("app".into(), json!(app));
             // It asks for whoever its window was opened for, a group or the network, unless a trusted app's page says
-            // whom (`whom` in client.js).
+            // whom (`whom` in bridge.js).
             if let Some(subject) = state.subject.as_ref().filter(|_| !meta.get("subject").is_some_and(Value::is_string)) {
                 meta.insert("subject".into(), json!(subject));
             }
@@ -1535,7 +1535,7 @@ pub(crate) async fn go(link: String, subject: Option<String>) {
     }
 }
 
-/// The page `app` opens first, for `subject`, as its apps are listed (`launcherIn` in client.js): the last one listed,
+/// The page `app` opens first, for `subject`, as its apps are listed (`launcherIn` in apps.js): the last one listed,
 /// or the launcher's, for its own app.
 #[cfg(desktop)]
 pub(crate) async fn first(app: &str, subject: Option<&str>) -> Option<String> {
