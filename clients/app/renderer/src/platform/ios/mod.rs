@@ -147,6 +147,9 @@ thread_local! {
     static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
     /// Where UIKit predicts the finger down is going, as its last move came (`Predictor`).
     static PREDICTED: Cell<Option<Point<f32>>> = const { Cell::new(None) };
+    /// When UIKit says the finger's latest touch happened (`UITouch.timestamp`, on `CACurrentMediaTime`'s clock), for
+    /// the touch tao tells next, which says nothing of when.
+    static TOUCHED: Cell<Option<f64>> = const { Cell::new(None) };
     static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
@@ -196,6 +199,11 @@ fn handle<T>(event: &Event<'_, T>) -> bool {
 
 /// Window `id` heard `event` from tao.
 fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
+    // How long ago the device says a touch happened, which how fast it went is worked out from.
+    let ago = matches!(event, WindowEvent::Touch(_)).then(|| TOUCHED.take()).flatten().map(|stamp| ((CACurrentMediaTime() - stamp) * 1000.0).max(0.0));
+    if matches!(event, WindowEvent::Touch(_)) && windows.check.is_some() {
+        windows.record.input("touch", ago.and_then(|ago| Instant::now().checked_sub(Duration::from_secs_f64(ago / 1000.0))));
+    }
     // A finger on the rail's line is the line's, which the page doesn't hear.
     if let WindowEvent::Touch(touch) = event
         && let Some(window) = windows.windows.get(&id)
@@ -225,7 +233,9 @@ fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
                 TouchPhase::Ended => Phase::Up,
                 _ => Phase::Cancelled,
             };
-            touch_at(screen, native, id, touch.id, point(at.x, at.y), phase);
+            screen.happened(ago);
+            touch_at(screen, native, id, touch.id, point(at.x, at.y), phase, crate::motion::now() - ago.unwrap_or(0.0));
+            screen.happened(None);
         }
         // The app going to the background leaves its windows as they are, the keyboard with what had it, as an
         // iPhone's own apps do: only in use no longer, as Android's window losing focus is.
@@ -665,10 +675,16 @@ define_class!(
     unsafe impl NSObjectProtocol for Predictor {}
 
     impl Predictor {
+        #[unsafe(method(touchesBegan:withEvent:))]
+        fn touches_began(&self, touches: *mut AnyObject, _event: *mut AnyObject) {
+            stamped(touches);
+        }
+
         /// A finger moved: where UIKit predicts it's going (`predictedTouchesForTouch:`), the furthest, in its view's
         /// points, for its move tao tells next (`PREDICTED`). tao hears no `UIEvent`, which UIKit predicts by.
         #[unsafe(method(touchesMoved:withEvent:))]
         fn touches_moved(&self, touches: *mut AnyObject, event: *mut AnyObject) {
+            stamped(touches);
             unsafe {
                 let touch: *mut AnyObject = msg_send![touches, anyObject];
                 let view: *mut AnyObject = msg_send![self, view];
@@ -683,18 +699,28 @@ define_class!(
 
         /// The finger's gone: it's failed, as it never recognizes, so UIKit resets it for the next.
         #[unsafe(method(touchesEnded:withEvent:))]
-        fn touches_ended(&self, _touches: *mut AnyObject, _event: *mut AnyObject) {
+        fn touches_ended(&self, touches: *mut AnyObject, _event: *mut AnyObject) {
+            stamped(touches);
             PREDICTED.set(None);
             let _: () = unsafe { msg_send![self, setState: UIGestureRecognizerState::Failed] };
         }
 
         #[unsafe(method(touchesCancelled:withEvent:))]
-        fn touches_cancelled(&self, _touches: *mut AnyObject, _event: *mut AnyObject) {
+        fn touches_cancelled(&self, touches: *mut AnyObject, _event: *mut AnyObject) {
+            stamped(touches);
             PREDICTED.set(None);
             let _: () = unsafe { msg_send![self, setState: UIGestureRecognizerState::Failed] };
         }
     }
 );
+
+/// Keeps when UIKit says a finger's touch happened, for the touch tao tells next (`TOUCHED`).
+fn stamped(touches: *mut AnyObject) {
+    let touch: *mut AnyObject = unsafe { msg_send![touches, anyObject] };
+    if !touch.is_null() {
+        TOUCHED.set(Some(unsafe { msg_send![touch, timestamp] }));
+    }
+}
 
 define_class!(
     // SAFETY: UIView has no subclassing requirements, and `Card` doesn't implement `Drop`.
@@ -813,7 +839,8 @@ fn slide(windows: &mut Windows) {
 /// it pressed isn't pressed, stretching past its end as a rubber band; let go, the pan carries on as a fling, or
 /// springs back (`Screen::release_scroll`). One on an input gives it the keyboard as it lifts,
 /// as a phone's own fields do, so one that lands there to scroll doesn't. One that lands on a fling stops it.
-fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, finger: u64, at: Point<f32>, phase: Phase) {
+/// `time` is when it happened, on `motion::now`'s clock.
+fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, finger: u64, at: Point<f32>, phase: Phase, time: f64) {
     screen.touch = true;
     TOUCHES.with(|touches| {
         let mut touches = touches.borrow_mut();
@@ -833,7 +860,7 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let on_input = !edge && screen.input_at(at);
                 let start = if caught { point(at.x - native.slid(), at.y) } else { at };
                 let mut velocity = crate::motion::Velocity::default();
-                velocity.add(at, crate::motion::now());
+                velocity.add(at, time);
                 touches.insert(id, Touch { finger, edge, pops, start, last: at, moved: false, panning: false, on_input, stopped, velocity });
                 if !edge && !on_input && !stopped {
                     screen.pointer_down(at, 0, false);
@@ -841,7 +868,7 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
             }
             Phase::Moved => {
                 let Some(touch) = touches.get_mut(&id) else { return };
-                touch.velocity.add(at, crate::motion::now());
+                touch.velocity.add(at, time);
                 if touch.pops {
                     return;
                 }
@@ -877,8 +904,8 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
             Phase::Up => {
                 let Some(mut touch) = touches.remove(&id) else { return };
                 // How fast it was going, against the finger, as a pan scrolls.
-                touch.velocity.add(at, crate::motion::now());
-                let (now, going) = (Instant::now(), touch.velocity.get(crate::motion::now()));
+                touch.velocity.add(at, time);
+                let (now, going) = (Instant::now(), touch.velocity.get(time));
                 let velocity = point(-going.x, -going.y);
                 // Over a screen of the page's, it goes back a screen, the app's window staying where it is.
                 if touch.pops {

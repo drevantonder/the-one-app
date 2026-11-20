@@ -206,7 +206,9 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         // A second finger isn't followed.
         if (action > MotionEvent.ACTION_CANCEL) return true;
         if (speed != null) speed.addMovement(e);
-        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped);
+        // How long ago Android says it happened, which how fast the finger went is worked out from.
+        float ago = android.os.SystemClock.uptimeMillis() - e.getEventTime();
+        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped, ago);
         // What's dragged is drawn where Android predicts the finger will be as the next frame shows, so it keeps up.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && action != MotionEvent.ACTION_CANCEL) {
             if (predictor == null) predictor = new MotionPredictor(getContext());
@@ -319,7 +321,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native void nativeSurfaceDestroyed(long id);
     private native boolean nativeBack(long id);
     private native void nativeActive(long id, boolean active);
-    private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped);
+    private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped, float ago);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
     private native void nativePredicted(long id, float x, float y);
     private native void nativeLongPress(long id, float x, float y);

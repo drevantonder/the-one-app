@@ -613,9 +613,13 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv,
 /// it the keyboard as it lifts, as a phone's own fields do, so one that lands there to scroll doesn't. One that
 /// `stopped` a fling only stopped it.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean) -> jboolean {
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean, ago: jfloat) -> jboolean {
     let id = id as WindowId;
+    let ago = f64::from(ago).max(0.0);
     let panning = with_windows(|windows| {
+        if windows.check.is_some() {
+            windows.record.input("touch", std::time::Instant::now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0)));
+        }
         let Some(window) = windows.windows.get(&id) else { return false };
         let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
@@ -634,6 +638,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
         let Ok(screen) = &mut window.screen else { return false };
         window.dirty = true;
         screen.touch = true;
+        screen.happened(Some(ago));
         TOUCHES.with(|touches| {
             let mut touches = touches.borrow_mut();
             match action {
@@ -688,6 +693,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                 }
             }
         });
+        screen.happened(None);
         TOUCHES.with(|touches| touches.borrow().get(&id).is_some_and(|touch| touch.panning))
     });
     panning.unwrap_or(false).into()

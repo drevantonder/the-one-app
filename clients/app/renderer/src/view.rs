@@ -285,6 +285,8 @@ pub struct Screen {
     pointer: Option<Point<f32>>,
     /// The pointer is a finger, as a phone's is, which pointer events say (`pointerType`).
     pub touch: bool,
+    /// When the device says the input being handled happened, on the page's clock (`happened`).
+    happened: Option<f64>,
     /// Its window has the rail's home line over its page, as a phone's app window has (DESIGN.md, The rail), and
     /// whether a finger's pulling it home, which takes the line with it.
     pub rail: bool,
@@ -415,6 +417,7 @@ impl Screen {
             states: States::default(),
             pointer: None,
             touch: false,
+            happened: None,
             rail: false,
             pulled: false,
             captured: None,
@@ -1372,9 +1375,9 @@ impl Screen {
             let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
             let mut told = json!({
                 "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": if self.touch { "touch" } else { "mouse" }, "button": button,
-                // When, in milliseconds by the page's clock, as `performance.now()` says it: what a swipe's speed is
-                // worked out by.
-                "timeStamp": self.js.clock().now(),
+                // When it happened, in milliseconds by the page's clock, as `performance.now()` says it: what a
+                // swipe's speed is worked out by.
+                "timeStamp": self.input_time(),
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
             if let Some((delta, phase)) = wheel {
@@ -1709,6 +1712,18 @@ impl Screen {
             }
         }
         self.changed();
+    }
+
+    /// The input about to be handled happened `ago` milliseconds before now, as its device says (a touch's own time),
+    /// or nothing says when (`None`), which times it as it's handled: how fast a press went is worked out from when
+    /// each of its moves happened, not when each was handled, which moves handled together get wrong.
+    pub fn happened(&mut self, ago: Option<f64>) {
+        self.happened = ago.map(|ago| self.js.clock().now() - ago.max(0.0));
+    }
+
+    /// When the input being handled happened, on the page's clock.
+    pub(super) fn input_time(&self) -> f64 {
+        self.happened.unwrap_or_else(|| self.js.clock().now())
     }
 
     /// Gives the keyboard to `id`, or to nothing, telling the app what had it and what has it, where they listen. An

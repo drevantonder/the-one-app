@@ -56,7 +56,7 @@ impl Screen {
         self.drag = chain.iter().find_map(|id| {
             let (along, down) = ways(self.tree.nodes.get(id)?.prop("drag")?);
             let mut velocity = Velocity::default();
-            velocity.add(at, self.js.clock().now());
+            velocity.add(at, self.input_time());
             (along || down).then_some(Drag { id: *id, along, down, start: at, began: false, velocity })
         });
     }
@@ -85,7 +85,7 @@ impl Screen {
         let Some((along, down)) = self.tree.nodes.get(&id).and_then(|node| node.prop("drag")).map(ways) else { return false };
         self.coasts.remove(&scroller);
         let mut velocity = Velocity::default();
-        velocity.add(finger, self.js.clock().now());
+        velocity.add(finger, self.input_time());
         self.drag = Some(Drag { id, along, down, start: finger, began: true, velocity });
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("dragstart")) {
             self.tell(id, "dragstart", json!({"clientX": finger.x, "clientY": finger.y}));
@@ -96,7 +96,7 @@ impl Screen {
     /// The press moved to `at`: past a few points, its node follows it, the way it drags, and gives past its
     /// constraints.
     pub(super) fn drag_moved(&mut self, at: Point<f32>) {
-        let (threshold, time) = (if self.touch { FINGER } else { MOUSE }, self.js.clock().now());
+        let (threshold, time) = (if self.touch { FINGER } else { MOUSE }, self.input_time());
         let Some(drag) = self.drag.as_mut() else { return };
         drag.velocity.add(at, time);
         let by = point(if drag.along { at.x - drag.start.x } else { 0.0 }, if drag.down { at.y - drag.start.y } else { 0.0 });
@@ -163,9 +163,9 @@ impl Screen {
     /// speed it had, its page told how far it went and how fast.
     pub(super) fn drag_up(&mut self, at: Point<f32>, cancelled: bool) {
         let Some(mut drag) = self.drag.take().filter(|drag| drag.began) else { return };
-        let now = self.js.clock().now();
-        drag.velocity.add(at, now);
-        let going = if cancelled { point(0.0, 0.0) } else { drag.velocity.get(now) };
+        let (time, now) = (self.input_time(), self.js.clock().now());
+        drag.velocity.add(at, time);
+        let going = if cancelled { point(0.0, 0.0) } else { drag.velocity.get(time) };
         let velocity = point(if drag.along { going.x } else { 0.0 }, if drag.down { going.y } else { 0.0 });
         self.transitions.release(drag.id, velocity, now);
         self.changed();
