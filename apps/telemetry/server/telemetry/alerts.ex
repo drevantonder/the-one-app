@@ -11,6 +11,7 @@ defmodule Telemetry.Alerts do
   | `error` | A kind of error logged that wasn't in the last 14 days: its first line, numbers and ids aside. A fault, a crash or a client's exception, not a tool refusing (a `RuntimeError`) | It stops being new an hour later |
   | `failing` | Half or more of an app's tool calls failed, of 10 or more in 10 min | 10 min with fewer |
   | `unanswered` | An app didn't answer, in 2 or more of the last 5 minutes: a hook it didn't answer in time (`one.hook.timeouts`), or its database's server kept a call waiting without running it (`one.database.lease.wait`, `not_answered`) | 5 min without |
+| `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
 
   Each alert is a row of Telemetry's database, one per kind and key (the server, the build, the error's kind, the
   app), moved only by `evaluate/1`, the clock's job every minute: it's `firing` while its symptom is seen, and
@@ -62,7 +63,9 @@ defmodule Telemetry.Alerts do
     # Alerts that were told, and a kind's mute, from when it notified people.
     "update alerts set state = 'firing' where state = 'notified'",
     "update alerts set state = 'resolved' where state = 'resolving'",
-    "drop table muted"
+    "drop table muted",
+    # Each app's slowest deploy to show in a window, per minute.
+    "create table deploys (app text not null, minute integer not null, slowest integer not null, primary key (app, minute)) without rowid"
   ]
 
   @kinds %{
@@ -70,11 +73,15 @@ defmodule Telemetry.Alerts do
     "update" => "The network's update is held",
     "error" => "A kind of error not seen in the last 14 days",
     "failing" => "Half or more of an app's tool calls fail, of 10 or more in 10 minutes",
-    "unanswered" => "An app doesn't answer for more than a minute"
+    "unanswered" => "An app doesn't answer for more than a minute",
+    "deploy" => "An app's deploys take over 500 ms to show in its window, in 2 or more of the last 10 minutes"
   }
 
+  # How long a deploy has to show in a window, from when it began, in milliseconds.
+  @deploy_budget 500
+
   # How long each kind's alert stays after its symptom was last seen before it's resolved, in milliseconds.
-  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000}
+  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000}
 
   @doc "Each kind of alert, with what fires it."
   def kinds, do: @kinds
@@ -228,6 +235,9 @@ defmodule Telemetry.Alerts do
   defp metric(%{"name" => "one.database.lease.wait", "attributes" => %{"one.app" => app, "one.outcome" => "not_answered"}} = point),
     do: [{:unanswered, app, minute(point["time"]), point["count"]}]
 
+  defp metric(%{"name" => "one.client.deploy.window", "attributes" => %{"one.app" => app}} = point),
+    do: [{:deploy, app, minute(point["time"]), round(point["max"] || point["sum"] || 0)}]
+
   defp metric(_point), do: []
 
   # Where an error was, as a person reads it: what logged it, if it said, on the server or client it was on.
@@ -310,8 +320,20 @@ defmodule Telemetry.Alerts do
       )
     end
 
+    for {:deploy, app, minute, took} <- signals do
+      query(
+        db,
+        """
+        insert into deploys (app, minute, slowest) values (?, ?, ?)
+        on conflict (app, minute) do update set slowest = max(slowest, excluded.slowest)
+        """,
+        [app, minute, took]
+      )
+    end
+
     # What no rule looks at any more.
     query(db, "delete from minutes where minute < ?", [now - 15 * @minute])
+    query(db, "delete from deploys where minute < ?", [now - 15 * @minute])
     query(db, "delete from seen where last < ?", [now - Store.days() * 86_400_000])
     query(db, "delete from servers where max(coalesce(failed, 0), coalesce(started, 0), coalesce(looping, 0)) < ?", [now - Store.days() * 86_400_000])
     query(db, "delete from alerts where ended < ?", [now - 7 * 86_400_000])
@@ -386,7 +408,27 @@ defmodule Telemetry.Alerts do
          }}
       end
 
-    Enum.reduce([servers, update, errors, failing, unanswered], &Map.merge/2)
+    deploys =
+      for row <-
+            query(
+              db,
+              """
+              select app, count(*) as minutes, max(slowest) as slowest from deploys where slowest > ? and minute > ?
+              group by app having count(*) >= 2
+              """,
+              [@deploy_budget, now - 10 * @minute]
+            ),
+          into: %{} do
+        {{"deploy", row["app"]},
+         %{
+           title: "#{called.(row["app"])} is slow to show its deploys",
+           text:
+             "In #{row["minutes"]} of the last 10 minutes a deploy took up to #{row["slowest"]} ms to show in its " <>
+               "window, over its #{@deploy_budget} ms budget."
+         }}
+      end
+
+    Enum.reduce([servers, update, errors, failing, unanswered, deploys], &Map.merge/2)
   end
 
   # A server's symptom, if it has one, while the relay says it's one of the network's (`active`), not one joining or
