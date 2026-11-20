@@ -26,11 +26,10 @@
     said.add(kind)
     parent.postMessage({ jsonrpc: "2.0", method: "notifications/one/seen", params: { [kind]: value } }, "*")
   }
-  /** What the page's own page is drawn as, where this can't: the DOM. */
+  /** Where the renderer can't open the page: its client shows that it didn't open, and why. */
   const unopened = (/** @type {unknown} */ why) => {
     console.warn("the renderer didn't open this page:", why)
     seen("unopened", String(why))
-    location.replace(page)
   }
   try {
     if (!navigator.gpu) throw new Error("this browser has no WebGPU")

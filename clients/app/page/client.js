@@ -217,6 +217,8 @@ const pageMachine = setup({
     load: ({ context }) => reloadPage(context.view),
     // Loaded again, it's shown no error yet.
     clear: assign({ errored: false }),
+    // Its renderer couldn't open it, and says why, so it has failed at once (`unopened`).
+    unopened: assign({ why: ({ event }) => (event.type === "unopened" ? event.why : undefined) }),
     failed: ({ context }) => {
       const { view, why } = context
       // How long it took to open is told only of an open that ended with it drawn.
@@ -246,7 +248,7 @@ const pageMachine = setup({
     loading: {
       entry: ["unwaited", "busy"],
       exit: "idle",
-      on: { drawn: "current", stale: "reloading", retry: "reloading" },
+      on: { drawn: "current", stale: "reloading", retry: "reloading", unopened: { target: "failed", actions: "unopened" } },
       ...waiting,
     },
     // Tried again, as the window opens again, it says again that it's drawn.
@@ -265,7 +267,7 @@ const pageMachine = setup({
     reloading: {
       entry: ["clear", "load", "unwaited", "busy"],
       exit: "idle",
-      on: { drawn: "current", stale: { target: "reloading", reenter: true }, retry: { target: "reloading", reenter: true } },
+      on: { drawn: "current", stale: { target: "reloading", reenter: true }, retry: { target: "reloading", reenter: true }, unopened: { target: "failed", actions: "unopened" } },
       ...waiting,
     },
     failed: {
@@ -1654,6 +1656,8 @@ addEventListener("message", async ({ source, data }) => {
       gestures()
     }
     if (errored) page(view, { type: "errored" })
+    // The renderer's frame couldn't open its page (clients/web/renderer), and says why.
+    if (method === "notifications/one/seen" && typeof params.unopened === "string") page(view, { type: "unopened", why: params.unopened })
     return
   }
   try {

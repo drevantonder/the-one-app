@@ -60,6 +60,7 @@ export type Paged =
   | { type: "opened" }
   | { type: "reload" }
   | { type: "retry" }
+  | { type: "unopened"; why: string }
 
 /** A file a server lists for an app's page (MCP's `resources/list`). */
 export interface Resource {
