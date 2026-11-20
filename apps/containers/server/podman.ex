@@ -422,22 +422,47 @@ defmodule Containers.Podman do
 
   @doc """
   Streams the container's display as WebRTC video, to the app whose SDP offer `request` has, as JSON, with the ICE
-  servers to use: the image desktop's `webrtc-stream` answers it and carries on by itself until the app goes. Gives
-  the SDP answer.
+  servers to use and WebRTC's sender for each kind of machine (`webrtc`'s `sender`): this machine's, put in the
+  container, answers it with its display for its source, and carries on by itself until the app goes. Gives the SDP
+  answer.
   """
   def stream(service, id, request) do
     OneCore.Service.touch(service, id)
-    file = "/tmp/webrtc-stream-#{System.unique_integer([:positive])}.json"
+    request = JSON.decode!(request)
+    sender = sender(service, request["sender"])
+    config = Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => "/tmp/stream.log", "source" => %{"kind" => "x11"}})
+
+    # Named for its build, so a stream already running from the one before isn't written over.
+    program = "/tmp/" <> Path.basename(sender)
+    file = "/tmp/stream-#{System.unique_integer([:positive])}.json"
 
     within(service, fn folder ->
-      File.write!(Path.join(folder, "request"), request)
-      podman!(service, ["cp", Path.join(folder, "request"), "#{id}:#{file}"])
+      File.write!(Path.join(folder, "stream.json"), JSON.encode!(config))
+      podman!(service, ["cp", sender, "#{id}:#{program}"])
+      podman!(service, ["cp", Path.join(folder, "stream.json"), "#{id}:#{file}"])
     end)
 
-    case run(service, ["exec", id, "webrtc-stream", file], 30) do
+    case run(service, ["exec", id, program, file], 30) do
       %{exit: 0, stdout: output} -> output
       %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
     end
+  end
+
+  # WebRTC's sender for this kind of machine, which its containers are too, downloaded the first time, and checked.
+  defp sender(service, senders) do
+    [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
+    %{"url" => url, "sha256" => sha256} = senders["linux-" <> arch] || raise "WebRTC has no sender for linux-#{arch}"
+    file = Path.join(OneCore.Service.folder(service), "stream-#{sha256}")
+
+    if not File.exists?(file) do
+      %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false, receive_timeout: 300_000)
+      if Base.encode16(:crypto.hash(:sha256, body), case: :lower) != sha256, do: raise("#{url} isn't the file expected")
+      File.write!(file <> ".part", body)
+      File.chmod!(file <> ".part", 0o755)
+      File.rename!(file <> ".part", file)
+    end
+
+    file
   end
 
   @doc "Runs xdotool in the container, on its display, with `args` as its words, and gives what it printed."

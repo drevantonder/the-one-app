@@ -365,7 +365,7 @@ defmodule Containers do
       %{
         name: "screen",
         description:
-          "Look at or act on a container's screen, for Computer Use, whose tools are how agents use a screen: they say what each action takes. `resize` makes the display width × height, and a maximised window follows it. `stream` is for a person's app to show it as live video over WebRTC (the image desktop's): with no `offer`, the ICE servers to connect with; with the app's whole SDP `offer`, {answer}, the screen's.",
+          "Look at or act on a container's screen, for Computer Use, whose tools are how agents use a screen: they say what each action takes. `resize` makes the display width × height, and a maximised window follows it. `stream` is for a person's app to show it as live video over WebRTC (the image desktop's, or any with an X display): with no `offer`, the ICE servers to connect with; with the app's whole SDP `offer`, {answer}, the screen's.",
         inputs:
           one(
             %{
@@ -579,15 +579,17 @@ defmodule Containers do
     %{done: "Resized to #{width}×#{height}"}
   end
 
-  # A stream's ICE servers, for the app, then, with its offer, the sender in the container (`webrtc-stream`) started
-  # with its own, and its answer. Both are given only to whoever reaches the container, as everything here is.
+  # A stream's ICE servers, for the app, then, with its offer, WebRTC's sender put in the container and started with
+  # its own, and its answer. Both are given only to whoever reaches the container, as everything here is.
   def call("screen", %{"action" => "stream"} = inputs, call) do
     c = container!(call, inputs)
     ice_servers = Call.tool(call, "webrtc", "ice_servers", %{})
 
     case inputs["offer"] do
       nil -> ice_servers
-      offer -> %{"answer" => Service.call(call, Podman, :stream, [c.id, JSON.encode!(Map.put(ice_servers, "offer", offer))], c.server)}
+      offer ->
+        request = Map.merge(ice_servers, %{"offer" => offer, "sender" => Call.tool(call, "webrtc", "sender", %{})})
+        %{"answer" => Service.call(call, Podman, :stream, [c.id, JSON.encode!(request)], c.server)}
     end
   end
 

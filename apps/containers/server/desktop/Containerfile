@@ -1,7 +1,7 @@
 # The image `desktop`: a virtual display (TigerVNC's Xvnc, :99, which RandR resizes while it runs, as Xvfb can't) with a
 # window manager (Openbox) and Google Chrome on it, for an agent to see with `screenshot` and to drive with xdotool,
 # through Chrome's DevTools Protocol on port 9222, or through Playwright's MCP server (`playwright-mcp`), and for a
-# person to watch and use as live video (`webrtc-stream`, GStreamer's WebRTC).
+# person to watch and use as live video (WebRTC's sender, which Containers puts in it to stream).
 #
 # It's Google's own Chrome, so a person signs in to it, and to Google, as they would on their own computer. Chrome's
 # terms don't let it be passed on, so it's never published to a registry: each machine builds this itself, downloading
@@ -13,8 +13,6 @@ FROM docker.io/library/node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tigervnc-standalone-server x11-xserver-utils openbox xdotool imagemagick x11-utils sqlite3 \
     fonts-dejavu-core fonts-noto-color-emoji fonts-wqy-microhei ca-certificates curl procps \
-    gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
-    gstreamer1.0-nice python3-gst-1.0 gir1.2-gst-plugins-bad-1.0 python3-xlib \
  && (curl -fL --progress-bar -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_$(dpkg --print-architecture).deb 2>&1 \
     || echo "E: Couldn't download Chrome from Google" >&2) | tr '\r' '\n' \
  && apt-get install -y --no-install-recommends /tmp/chrome.deb \
@@ -27,5 +25,4 @@ RUN apt-get update \
 ENV DISPLAY=:99 SCREEN=1280x800x24
 COPY --chmod=755 desktop.sh /usr/local/bin/desktop
 COPY --chmod=755 browser.sh /usr/local/bin/browser
-COPY --chmod=755 webrtc-stream.py /usr/local/bin/webrtc-stream
 CMD ["desktop"]
