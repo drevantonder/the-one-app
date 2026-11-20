@@ -939,9 +939,11 @@ async function walk(built, scene, folder) {
     // Round to where it started.
     if (n > 1 && node && node.node === stops[1].node?.node) break
   }
+  // Where a node is, in points, is in the picture's device pixels (a Surface's two a point).
   const same = (one, other, rect) => {
-    const [x0, y0] = [Math.max(0, Math.floor(rect.x) - 4), Math.max(0, Math.floor(rect.y) - 4)]
-    const [x1, y1] = [Math.min(one.width, Math.ceil(rect.x + rect.width) + 4), Math.min(one.height, Math.ceil(rect.y + rect.height) + 4)]
+    const scale = one.width / scene.size[0]
+    const [x0, y0] = [Math.max(0, Math.floor((rect.x - 4) * scale)), Math.max(0, Math.floor((rect.y - 4) * scale))]
+    const [x1, y1] = [Math.min(one.width, Math.ceil((rect.x + rect.width + 4) * scale)), Math.min(one.height, Math.ceil((rect.y + rect.height + 4) * scale))]
     for (let y = y0; y < y1; y++) if (one.data.compare(other.data, (y * one.width + x0) * 4, (y * one.width + x1) * 4, (y * one.width + x0) * 4, (y * one.width + x1) * 4) !== 0) return false
     return true
   }
