@@ -26,6 +26,7 @@ pub(crate) use paint::{Decoded, Picture};
 mod bounce;
 mod bridge;
 mod drag;
+mod finger;
 pub use bridge::TextInputConnection;
 mod frames;
 mod list;
@@ -297,6 +298,9 @@ pub struct Screen {
     placed: Vec<(Id, Placed)>,
     /// Whether anything moved by itself in the last frame.
     animating: bool,
+    /// How many frames a second its display shows, which its page's frames come at while its clock is paused and
+    /// stepped (`step`): 60 unless the inspector's `replay` says.
+    hz: f64,
     again: bool,
     /// What's on its way from one value to another as a style changed.
     transitions: transition::Transitions,
@@ -411,6 +415,7 @@ impl Screen {
             placed: Vec::new(),
             layers: HashMap::new(),
             animating: false,
+            hz: 60.0,
             again: false,
             transitions: Default::default(),
             layout: Retained::default(),

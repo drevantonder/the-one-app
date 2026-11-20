@@ -547,17 +547,17 @@ impl Windows {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("its app didn't open"))));
         };
         window.dirty = true;
-        if !matches!(request.op.as_str(), "snap" | "profile") {
+        if !matches!(request.op.as_str(), "snap" | "profile" | "replay") {
             return screen.inspect(request, reply);
         }
         // Painted afresh, as it is now: a window with no surface (Android's view while it's hidden) has drawn nothing,
-        // and the scene it last drew may be older than what it shows. Each of a profile's frames after the first is
-        // painted as the window paints one, from what changed.
+        // and the scene it last drew may be older than what it shows. Each of a profile's or a replay's frames after the
+        // first is painted as the window paints one, from what changed.
         let device = Size { width: DevicePixels((room.width.0 * scale).round() as i32), height: DevicePixels((room.height.0 * scale).round() as i32) };
         let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
         let mut scene = crate::render::scene::Scene::default();
         let (text, atlas) = (&mut self.text, &self.atlas);
-        let snaps = request.op == "snap" || request.inputs.get("snap").and_then(serde_json::Value::as_bool) != Some(false);
+        let snaps = crate::inspect::snaps(&request);
         let mut afresh = true;
         let mut draw = |screen: &mut Screen| -> anyhow::Result<serde_json::Value> {
             if std::mem::take(&mut afresh) {
@@ -577,6 +577,7 @@ impl Windows {
         };
         let answered = match request.op.as_str() {
             "snap" => draw(screen),
+            "replay" => screen.replay(&request, &mut draw),
             _ => screen.profile(&request, &mut draw),
         };
         renderer.destroy();

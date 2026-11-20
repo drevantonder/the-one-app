@@ -28,6 +28,14 @@
 //!   its scene), its draw calls, and its glyph and picture atlas's `tiles`, `textures`, `bytes` and how much of them
 //!   is `filled`. The first is painted whole, the rest as the window paints a frame, from what changed; one where
 //!   nothing changed costs nothing. The clock stays paused.
+//! - `replay` (a selector, or a point, where a press goes down; `moves`, each `{dx, dy, ms}`, a stretch with neither
+//!   holding still; `lift`, true unless given; `hz`, the display's frames a second, 60 unless given; `input_hz`, its
+//!   moves a second, `hz` unless given; `after`, ms to keep drawing past its end, 2000 unless given, stopping once
+//!   nothing moves; `track`, a selector of a node to follow; `snap`: true for each frame's picture) → `{hz, budget_ms,
+//!   over, frames, time, paused}`: the press played as `drag` plays it, each move at its own time, and every frame of
+//!   the display drawn as the window draws one, each with what `profile`'s says, `at` (ms since it went down), where
+//!   `track` was drawn (`x`, `y`) and how far what scrolls under its start shows scrolled (`scroll`, with its stretch
+//!   past an end); `over` counts the frames whose painting took longer than `budget_ms`, a frame's time at `hz`.
 //! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
 //!   presses there as a mouse does, so what takes it is what a person's press reaches, as the window drew it (what
 //!   doesn't take the pointer, `pointerEvents: "none"`, and what's clipped away are passed over): an input takes the
@@ -160,6 +168,17 @@ impl Request {
     /// The point it names, if it names one.
     pub fn point(&self) -> Option<(f32, f32)> {
         Some((self.f32("x")?, self.f32("y")?))
+    }
+}
+
+/// Whether a request that draws frames reads each back as a picture: `snap` always, `profile` unless it says `snap`
+/// false, and `replay` only where it says `snap` true.
+pub fn snaps(request: &Request) -> bool {
+    let said = request.inputs.get("snap").and_then(Value::as_bool);
+    match request.op.as_str() {
+        "snap" => true,
+        "replay" => said == Some(true),
+        _ => said != Some(false),
     }
 }
 

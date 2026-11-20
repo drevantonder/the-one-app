@@ -169,10 +169,10 @@ fn main() -> anyhow::Result<()> {
             println!("{}", renderer::inspect::answer(&request.id, renderer::inspect::png(w, h, rgba)));
             continue;
         }
-        // Each of its frames drawn as the window draws one, and read back unless it says `snap: false`.
-        if request.op == "profile" {
-            let snaps = request.inputs.get("snap").and_then(Value::as_bool) != Some(false);
-            let profiled = screen.profile(&request, &mut |screen| {
+        // Each of its frames drawn as the window draws one, and read back where it asks for pictures.
+        if request.op == "profile" || request.op == "replay" {
+            let snaps = renderer::inspect::snaps(&request);
+            let mut draw = |screen: &mut Screen| {
                 let (w, h, rgba, mut cost) = frame(screen, snaps)?;
                 if snaps {
                     for (name, value) in renderer::inspect::png(w, h, rgba)?.as_object().into_iter().flatten() {
@@ -180,7 +180,8 @@ fn main() -> anyhow::Result<()> {
                     }
                 }
                 Ok(cost)
-            });
+            };
+            let profiled = if request.op == "replay" { screen.replay(&request, &mut draw) } else { screen.profile(&request, &mut draw) };
             println!("{}", renderer::inspect::answer(&request.id, profiled));
             continue;
         }

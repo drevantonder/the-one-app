@@ -163,43 +163,13 @@ impl Screen {
                 json!({"scrolled": {"x": scrolled.x, "y": scrolled.y}})
             }
             "drag" => {
-                let start = match request.selects() {
-                    true => self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()).context("that node isn't drawn")?,
-                    false => request.point().context("say where to drag from: a node, by a selector, or a point, x and y")?,
-                };
+                // `steps` even moves over `ms`, each at its own time, the clock stepped to each where it's paused.
+                let start = self.start_of(request)?;
                 let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
                 let steps = request.inputs.get("steps").and_then(Value::as_u64).unwrap_or(10).max(1);
                 let ms = request.f64("ms").unwrap_or(200.0).max(0.0);
-                let at = |part: f32| crate::geometry::point(start.0 + dx * part, start.1 + dy * part);
-                // A finger, in a window for one, pans what scrolls under it once it's moved past the slop, as a phone's
-                // does, where that scrolls that way, and is otherwise what it's on's.
-                let finger = self.touch;
-                let mut panning = false;
-                if !finger {
-                    self.pointer_moved(at(0.0));
-                }
-                if !(finger && self.catch_scroll(at(0.0))) {
-                    self.pointer_down(at(0.0), 0, false);
-                }
-                for step in 1..=steps {
-                    if self.js.clock().paused() {
-                        self.step(ms / steps as f64);
-                    }
-                    let (was, now) = (at((step - 1) as f32 / steps as f32), at(step as f32 / steps as f32));
-                    if finger && !panning && (now.x - start.0).hypot(now.y - start.1) > 10.0 && self.pans(at(0.0), crate::geometry::point(now.x - start.0, now.y - start.1)) {
-                        panning = true;
-                        self.pointer_cancel(now);
-                    }
-                    match panning {
-                        true => drop(self.drag_scroll(at(0.0), crate::geometry::point(was.x - now.x, was.y - now.y))),
-                        false => self.pointer_moved(now),
-                    }
-                }
-                let seconds = (ms / 1000.0).max(0.001) as f32;
-                match panning {
-                    true => self.release_scroll(at(0.0), crate::geometry::point(-dx / seconds, -dy / seconds)),
-                    false => self.pointer_up(at(1.0), 0),
-                }
+                let trace = super::finger::Trace { start, moves: vec![(dx, dy, ms)], lift: true };
+                self.play(&trace, ms / steps as f64, self.hz, 0.0, None, None)?;
                 json!({"dragged": {"x": dx, "y": dy}})
             }
             "clock" => {
@@ -224,7 +194,7 @@ impl Screen {
                 }
                 json!({"time": clock.now(), "paused": clock.paused()})
             }
-            op => bail!("there's no op {op}: window, tree, query, snap, profile, tap, type, ime, key, scroll, drag, clock and settle are"),
+            op => bail!("there's no op {op}: window, tree, query, snap, profile, replay, tap, type, ime, key, scroll, drag, clock and settle are"),
         })
     }
 
@@ -273,6 +243,35 @@ impl Screen {
         Ok(json!({"frames": frames, "time": clock.now(), "paused": true}))
     }
 
+    /// The inspector's `replay`: a press goes down where it says (a selector, or `x`, `y`), moves along `moves` (each
+    /// `{dx, dy, ms}`, a stretch with neither holding still), sampled `input_hz` times a second (`hz` unless it says),
+    /// and lifts unless `lift` is false, with the clock paused and stepped to each move and each frame of a display
+    /// `hz` times a second (60 unless it says), each frame drawn by `draw` as the window draws one, until `after` ms
+    /// past its end (2000 unless it says) or nothing moves. → each frame's cost, where `track` (a selector) was drawn
+    /// (`x`, `y`), how far what scrolls under its start shows scrolled (`scroll`, its stretch past an end with it), and
+    /// the frame's budget (`budget_ms`), and how many frames' painting took longer (`over`).
+    pub fn replay(&mut self, request: &Request, draw: &mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>) -> anyhow::Result<Value> {
+        let start = self.start_of(request)?;
+        let moves: Vec<Value> = request.inputs.get("moves").and_then(Value::as_array).cloned().context("say how it moves: `moves`, each {dx, dy, ms}")?;
+        let moves = moves.iter().map(|one| (one["dx"].as_f64().unwrap_or(0.0) as f32, one["dy"].as_f64().unwrap_or(0.0) as f32, one["ms"].as_f64().unwrap_or(0.0).max(0.0))).collect();
+        let lift = request.inputs.get("lift").and_then(Value::as_bool) != Some(false);
+        let hz = request.f64("hz").unwrap_or(60.0).clamp(1.0, 480.0);
+        let every = 1000.0 / request.f64("input_hz").unwrap_or(hz).clamp(1.0, 1000.0);
+        let after = request.f64("after").unwrap_or(2000.0).max(0.0);
+        let track = match request.inputs.get("track") {
+            Some(Value::Object(selector)) => {
+                let selector = Request { id: Value::Null, op: "query".into(), inputs: selector.clone() };
+                Some(inspect::one(&self.tree, &selector).context("`track` selects no node")?)
+            }
+            _ => None,
+        };
+        let trace = super::finger::Trace { start, moves, lift };
+        let frames = self.play(&trace, every, hz, after, track, Some(draw))?;
+        let budget = 1000.0 / hz;
+        let over = frames.iter().filter(|frame| frame["paint_ms"].as_f64().is_some_and(|ms| ms > budget)).count();
+        Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "frames": frames, "time": self.js.clock().now(), "paused": true}))
+    }
+
     /// What the frame painted last cost, as `profile` says it: the mutations its JS made that it applied since the
     /// frame before (`mutations`), how long it took to lay out (`layout_ms`) and to style, lay out and paint all told
     /// (`paint_ms`), and, as `renderer` drew it, its draw calls (`draws`) and what its atlas holds (`atlas`).
@@ -289,16 +288,16 @@ impl Screen {
 
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order, each once
     /// what came before it has run: this waits on the app's JS thread.
-    fn step(&mut self, ms: f64) {
-        // While its page asks for frames, they come as a 60 Hz display's would, on its clock.
-        const FRAME: f64 = 1000.0 / 60.0;
+    pub(super) fn step(&mut self, ms: f64) {
+        // While its page asks for frames, they come as its display's would, on its clock.
+        let frame_ms = 1000.0 / self.hz;
         let clock = self.js.clock().clone();
         clock.pause();
         self.idle();
         let mut left = ms;
         loop {
             // The next frame's, at least a microsecond on, so a clock a hair short of one isn't stepped by nothing.
-            let frame = self.framing().then(|| FRAME - clock.now().rem_euclid(FRAME)).map(|next| if next < 0.001 { next + FRAME } else { next });
+            let frame = self.framing().then(|| frame_ms - clock.now().rem_euclid(frame_ms)).map(|next| if next < 0.001 { next + frame_ms } else { next });
             let Some(next) = self.js.due().into_iter().chain(frame).reduce(f64::min).filter(|next| *next <= left) else { break };
             let framed = frame == Some(next);
             let next = next.max(0.0);
