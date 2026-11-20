@@ -389,6 +389,8 @@ pub struct Renderer {
     draws: std::cell::Cell<u32>,
     /// What the last frame's GPU did (`Work`).
     work: std::cell::Cell<Work>,
+    /// Its thread's time on a CPU drawing since it was last asked (`drawing`).
+    on_cpu: std::cell::Cell<web_time::Duration>,
     /// Its passes' time on the GPU, where the GPU can say (`Stamps`), and how long it last waited for an image of its
     /// surface to draw on.
     stamps: Option<Stamps>,
@@ -641,6 +643,7 @@ impl Renderer {
             atlas_groups: Default::default(),
             draws: Default::default(),
             work: Default::default(),
+            on_cpu: Default::default(),
             stamps: Stamps::new(&context.device, &context.queue),
             acquired: Default::default(),
         }
@@ -721,6 +724,12 @@ impl Renderer {
     /// of the frames before (`Kept`), as a GPU profiler counts them.
     pub fn draws(&self) -> u32 {
         self.draws.get()
+    }
+
+    /// Its thread's time on a CPU (`platform::on_cpu`) drawing frames since this was last asked: making their commands
+    /// and handing them to the GPU, not the GPU's own time, nor waiting for it.
+    pub fn drawing(&self) -> web_time::Duration {
+        self.on_cpu.take()
     }
 
     fn drew(&self) {
@@ -825,6 +834,13 @@ impl Renderer {
 
     /// Draws the box of `scene` whose top left is `origin`, in device pixels, as big as the target.
     pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
+        let started = crate::platform::on_cpu();
+        let drawn = self.draw_frame(scene, origin);
+        self.on_cpu.set(self.on_cpu.get() + crate::platform::on_cpu().saturating_sub(started));
+        drawn
+    }
+
+    fn draw_frame(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
         self.drew = web_time::Instant::now();
         self.atlas.before_frame();
         self.draws.set(0);

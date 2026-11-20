@@ -319,8 +319,9 @@ impl Screen {
     /// What its frames cost since this was last asked, as `profile` says it: the mutations its JS made that it applied
     /// (`mutations`), how long its JS thread ran (`script_ms`), how long it took to lay out (`layout_ms`) and to style,
     /// lay out and paint all told (`paint_ms`), how many times it painted (`painted`: none where nothing changed, more
-    /// than one where it painted again before the display's refresh), and, as `renderer` last drew it, its draw calls
-    /// (`draws`), what its GPU did (`work`, `Renderer::work`) and what its atlas holds (`atlas`).
+    /// than one where it painted again before the display's refresh), its thread's CPU time drawing those frames for
+    /// the GPU (`draw_ms`), and, as `renderer` last drew it, its draw calls (`draws`), what its GPU did (`work`,
+    /// `Renderer::work`) and what its atlas holds (`atlas`).
     pub fn cost(&mut self, renderer: &crate::render::renderer::Renderer) -> Value {
         let ms = |time: Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
         let cost = std::mem::take(&mut self.cost);
@@ -330,6 +331,7 @@ impl Screen {
             "layout_ms": ms(cost.layout),
             "paint_ms": ms(cost.paint),
             "painted": cost.painted,
+            "draw_ms": ms(renderer.drawing()),
             "draws": renderer.draws(),
             "work": renderer.work(),
             "atlas": renderer.sprite_atlas().usage(),

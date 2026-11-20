@@ -86,14 +86,19 @@ export function moves(gesture) {
 /// What the inspector selects for a tap's name, as `scenes.js` presses it.
 export const selector = (tap) => (typeof tap === "string" ? { name: tap } : tap)
 
-/// A built page's folder as the harness loads it: its `index.html` with what it loads beside it.
-export function pageFolder(built, page, folder) {
+/// A built page's folder as the harness loads it: its `index.html` with what it loads beside it, and each app it `uses`
+/// (whose components it draws, as Settings draws its sections) built and beside it as `<app>/client/`, as scenes.js has it.
+export function pageFolder(built, page, folder, uses = []) {
   const at = join(folder, "page")
   rmSync(at, { recursive: true, force: true })
   mkdirSync(at, { recursive: true })
   writeFileSync(join(at, "index.html"), readFileSync(join(built, page), "utf8").replace(/(src|href)="(\.\.\/)+/g, '$1="').replace(/(src|href)="\.\//g, '$1="'))
   symlinkSync(join(built, "assets"), join(at, "assets"))
   beside(join(built, dirname(page)), at)
+  for (const app of uses) {
+    mkdirSync(join(at, app))
+    symlinkSync(usedApp(app), join(at, app, "client"))
+  }
   if (existsSync(join(built, "styles.json"))) cpSync(join(built, "styles.json"), join(at, "styles.json"))
   return at
 }
@@ -113,6 +118,19 @@ export function servedAsIs(target, built) {
 export function beside(from, at) {
   if (!existsSync(from)) return
   for (const entry of readdirSync(from)) if (AS_IS.test(entry) && !existsSync(join(at, entry))) symlinkSync(join(from, entry), join(at, entry))
+}
+
+/// An app another's page uses, its client built once a run, beside `--out`'s. → where.
+const usedApps = new Map()
+function usedApp(app) {
+  if (!usedApps.has(app)) {
+    const folder = join(out, ".uses", app)
+    rmSync(folder, { recursive: true, force: true })
+    const made = Bun.spawnSync(["bun", here("dist/build/app.js"), join(root, "apps", app, "client"), folder])
+    if (made.exitCode !== 0) throw new Error(`${app}'s components didn't build: ${made.stderr}`)
+    usedApps.set(app, folder)
+  }
+  return usedApps.get(app)
 }
 
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
@@ -140,8 +158,8 @@ export async function scenesOf(target, built, folder, all = false) {
     const whole = (scene) => (scene.like ? { ...whole(scenes[scene.like]), taps: undefined, ...scene, answers: { ...whole(scenes[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
-      .filter((scene) => (all || (checking ? scene.checks : scene.motions)) && !scene.component && !scene.uses)
-      .map(({ name, page = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], answers, taps, size, touch, motions, checks, seeds }))
+      .filter((scene) => (all || (checking ? scene.checks : scene.motions)) && !scene.component)
+      .map(({ name, page = "client/index.html", uses = [], answers = {}, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], uses, answers, taps, size, touch, motions, checks, seeds }))
   }
   // The gallery lists its own, drawn at `#scenes`.
   const listing = { link: "scenes", size: [390, 844], answers: {} }
@@ -293,7 +311,7 @@ const cpuName = process.platform === "darwin" ? Bun.spawnSync(["sysctl", "-n", "
 const hostScore = Object.entries(devices.hosts).find(([name]) => cpuName.includes(name))?.[1]
 
 /// What each tier with `hz` frames a second would take for each of `frames`, played at one device pixel a point: its
-/// CPU's time for the frame and its JS's since the frame before (this machine's, as its Geekbench score is to the
+/// CPU's time for the frame (painting it and drawing it for the GPU) and its JS's since the frame before (this machine's, as its Geekbench score is to the
 /// tier's) and its GPU's (what the device
 /// measured takes for the frame's work at the tier's pixels, as its GPU's score is to the tier's), the frame dropped
 /// where either is longer than the tier's frame. → each tier's name, the frames dropped of those drawn, the worst and why.
@@ -310,8 +328,9 @@ export function judge(frames, hz) {
           const work = frame.work
           const shaded = gpu ? ["quads", "shadows", "sprites", "backdrops", "rasters", "copied"].reduce((sum, kind) => sum + (work[kind] / 1e6) * pixels * gpu.costs[kind], 0) : 0
           const gpuMs = gpu ? (shaded + (work.uploaded / 1e6) * pixels * gpu.costs.uploaded + gpu.constant) * (anchor.gpu / tier.gpu) + frame.draws * gpu.costs.draws * (tier.draws ?? 1) * (anchor.cpu / tier.cpu) : 0
-          // Its JS runs on a thread of its own beside the one that paints, and a frame waits for whichever's longer.
-          const [cpuMs, jsMs] = hostScore ? [frame.paint_ms, frame.script_ms ?? 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
+          // The thread that paints a frame then draws it for the GPU; its JS runs on a thread of its own beside, and a
+          // frame waits for whichever's longer.
+          const [cpuMs, jsMs] = hostScore ? [frame.paint_ms + (frame.draw_ms ?? 0), frame.script_ms ?? 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
           const ms = Math.max(gpuMs, cpuMs, jsMs)
           return { ms, by: ms === gpuMs ? "GPU" : ms === jsMs ? "JS" : "CPU" }
         })
@@ -325,7 +344,7 @@ export function judge(frames, hz) {
 /// the contact sheet.
 async function play(built, scene, name, motion, hz, folder) {
   mkdirSync(folder, { recursive: true })
-  const at = pageFolder(built, scene.page, folder)
+  const at = pageFolder(built, scene.page, folder, scene.uses)
   const { moves: stretches, lift, trace } = moves(motion.gesture)
   const events = trace && JSON.parse(readFileSync(join(scene.from, trace), "utf8"))
   const taps = scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) }, { op: "clock", step: 1000 }])
@@ -476,7 +495,7 @@ function requests(steps, folder) {
 
 /// Plays each check of `scene`, once as it is and with each seed. → each check's name and how each run went.
 async function check(built, scene, folder) {
-  const at = pageFolder(built, scene.page, folder)
+  const at = pageFolder(built, scene.page, folder, scene.uses)
   const taps = scene.taps.flatMap((tap) => [pressed(tap), { op: "clock", step: 1000 }])
   const played = Object.entries(scene.checks).flatMap(([name, steps]) =>
     [0, ...Array.from({ length: seeds }, (_, n) => n + 1), ...(scene.seeds ?? [])].map((seed) => ({ name, steps, seed })),

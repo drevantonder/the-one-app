@@ -1281,6 +1281,888 @@
       720
     ]
   },
+  "Accounts, a long Vault": {
+    "like": "Accounts",
+    "answers": {
+      "vault_list": {
+        "items": [
+          {
+            "name": "GitHub",
+            "artifact": "vault/github",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.github.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Cloudflare",
+            "artifact": "vault/cloudflare",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.cloudflare.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Fly.io",
+            "artifact": "vault/fly-io",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.flyio.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Stripe",
+            "artifact": "vault/stripe",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.stripe.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "OpenAI",
+            "artifact": "vault/openai",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.openai.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Anthropic",
+            "artifact": "vault/anthropic",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.anthropic.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Google Cloud",
+            "artifact": "vault/google-cloud",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.googlecloud.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "AWS",
+            "artifact": "vault/aws",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.aws.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "DigitalOcean",
+            "artifact": "vault/digitalocean",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.digitalocean.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Hetzner",
+            "artifact": "vault/hetzner",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.hetzner.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Vercel",
+            "artifact": "vault/vercel",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.vercel.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Netlify",
+            "artifact": "vault/netlify",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.netlify.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Supabase",
+            "artifact": "vault/supabase",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.supabase.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Neon",
+            "artifact": "vault/neon",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.neon.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Postmark",
+            "artifact": "vault/postmark",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.postmark.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Twilio",
+            "artifact": "vault/twilio",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.twilio.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Slack",
+            "artifact": "vault/slack",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.slack.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Linear",
+            "artifact": "vault/linear",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.linear.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Notion",
+            "artifact": "vault/notion",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.notion.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Figma",
+            "artifact": "vault/figma",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.figma.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Sentry",
+            "artifact": "vault/sentry",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.sentry.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Datadog",
+            "artifact": "vault/datadog",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.datadog.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "npm",
+            "artifact": "vault/npm",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.npm.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Docker Hub",
+            "artifact": "vault/docker-hub",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.dockerhub.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Apple Developer",
+            "artifact": "vault/apple-developer",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.appledeveloper.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Google Play",
+            "artifact": "vault/google-play",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.googleplay.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Tailscale",
+            "artifact": "vault/tailscale",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.tailscale.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "1Password import",
+            "artifact": "vault/1password-import",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.1passwordimport.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Backblaze",
+            "artifact": "vault/backblaze",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.backblaze.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Mailgun",
+            "artifact": "vault/mailgun",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.mailgun.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Resend",
+            "artifact": "vault/resend",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.resend.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Algolia",
+            "artifact": "vault/algolia",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.algolia.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Mapbox",
+            "artifact": "vault/mapbox",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.mapbox.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Shopify",
+            "artifact": "vault/shopify",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.shopify.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Xero",
+            "artifact": "vault/xero",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.xero.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Canva",
+            "artifact": "vault/canva",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.canva.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Dropbox",
+            "artifact": "vault/dropbox",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.dropbox.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Zoom",
+            "artifact": "vault/zoom",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.zoom.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Calendly",
+            "artifact": "vault/calendly",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.calendly.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Airtable",
+            "artifact": "vault/airtable",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "alex@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.airtable.com"
+            ],
+            "access": [],
+            "sign_in": true
+          }
+        ],
+        "requests": [
+          {
+            "id": "r1",
+            "title": "Example API",
+            "state": "waiting",
+            "app": null,
+            "by": "Claude on Alex's Laptop",
+            "why": "To read the build status",
+            "hosts": [
+              "api.example.com"
+            ],
+            "fields": [
+              {
+                "name": "api_key"
+              }
+            ]
+          }
+        ],
+        "apps": [
+          {
+            "name": "backups",
+            "title": "Backups"
+          }
+        ],
+        "types": []
+      }
+    },
+    "motions": {
+      "A mouse wheel's notches scroll it": {
+        "gesture": {
+          "trace": "traces/windows-wheel.json"
+        },
+        "keeps": "Intel UHD laptop at 4K"
+      }
+    }
+  },
   "Notifications": {
     "like": "Settings",
     "page": "client/index.html#notifications/settings",
