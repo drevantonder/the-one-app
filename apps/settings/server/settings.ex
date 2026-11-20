@@ -131,8 +131,18 @@ defmodule Settings do
     do: %{count: sections(call) |> Enum.map(&(&1.count || 0)) |> Enum.sum()}
 
   def call("apps", _inputs, call) do
+    listed = Call.apps(call)
+    # Whether whoever asks owns what each is installed for, asked once for each of those (the network, a group, them),
+    # all at once: each is a question for the app that decides who may reach what.
+    owns =
+      listed
+      |> Enum.map(& &1.installed)
+      |> Enum.uniq()
+      |> Task.async_stream(&{&1, Call.owns?(%{call | subject: &1})}, timeout: :infinity)
+      |> Map.new(fn {:ok, owns} -> owns end)
+
     apps =
-      for app <- Call.apps(call) do
+      for app <- listed do
         %{
           name: app.name,
           app: app.app,
@@ -140,7 +150,7 @@ defmodule Settings do
           title: app.title || app.name,
           icon: Apps.Icons.address(app.icon),
           category: app.category,
-          removes: Call.owns?(%{call | subject: app.installed})
+          removes: owns[app.installed]
         }
       end
 
