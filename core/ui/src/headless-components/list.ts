@@ -46,6 +46,7 @@ export function createList(props: { opens: () => boolean }) {
     keydown(event: Keyed) {
       // Only where a row has it: a field or a switch in one keeps its own keys.
       if (roving.focused() === undefined) return
+      const sent = wanted()
       setWanted(undefined)
       // Home and End go to the first and last row of the lists, which a long list may not have drawn: its list keeps
       // that row, and it takes the keyboard where it's drawn.
@@ -62,13 +63,17 @@ export function createList(props: { opens: () => boolean }) {
           return setWanted({ list: edge.list, index })
         }
       }
-      // The next row of a long list is the one after it by its index, drawn or not, where the rows drawn have a gap.
+      // The next row of a long list is the one after it by its index, drawn or not, where the rows drawn have a gap;
+      // after a row the keyboard is still being sent to, the one after that, so no key is lost while the page is busy.
       const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
       const here = step ? ordered().find((row) => row.key === roving.focused()) : undefined
-      const length = here && lengths.get(here.list)
-      if (here?.at && length && !event.altKey && !event.ctrlKey && !event.metaKey) {
-        const index = here.at() + step
-        if (index >= 0 && index < length() && !ordered().some((row) => row.list === here.list && row.at?.() === index)) return (event.preventDefault(), typeahead.reset(), setWanted({ list: here.list, index }))
+      const from = sent ?? (here?.at && { list: here.list, index: here.at() })
+      const length = from && lengths.get(from.list)
+      if (step && from && length && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        const index = Math.min(Math.max(from.index + step, 0), length() - 1)
+        const drawn = ordered().find((row) => row.list === from.list && row.at?.() === index)
+        if (sent && drawn) return (event.preventDefault(), typeahead.reset(), roving.focus(drawn.key), moved(drawn.key))
+        if (sent || !drawn) return (event.preventDefault(), typeahead.reset(), setWanted({ list: from.list, index }))
       }
       const to = roving.keydown(event)
       if (to !== undefined) return (typeahead.reset(), moved(to))

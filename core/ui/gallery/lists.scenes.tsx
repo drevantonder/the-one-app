@@ -110,6 +110,8 @@ export default {
   ),
   "Lists/A long list by the keyboard": {
     size: [750, 475],
+    // Each failed once: an arrow pressed before the row the last one went to was drawn went nowhere.
+    seeds: [4, 6],
     render: () => (
       <List each={Array.from({ length: 10000 }, (_, at) => `Note ${at + 1}`)}>{(note) => <Row heading={note()} text="19 Nov" onPress={() => {}} />}</List>
     ),
