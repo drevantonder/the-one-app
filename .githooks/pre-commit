@@ -32,3 +32,15 @@ if git diff --cached --name-only | grep -q '^core/ui/src/tokens\.\(ts\|css\)$'; 
     exit 1
   }
 fi
+
+# An app's page is checked against the UI library as a server checks it where it deploys it (`lint:app`, as
+# `OneCore.Entrypoint.lint/3` runs it), where the network would otherwise refuse the app's update after it's pushed.
+for app in $(git diff --cached --name-only --diff-filter=d | sed -n 's|^apps/\([^/]*\)/client/.*|\1|p' | sort -u); do
+  [ -f "apps/$app/client/tsconfig.json" ] || continue
+  (cd core/ui && bun install --frozen-lockfile --ignore-scripts --silent) || exit 1
+  (cd "apps/$app/client" && [ ! -f package.json ] || bun install --frozen-lockfile --ignore-scripts --silent) || exit 1
+  bun core/ui/lint-app.js "apps/$app/client" >&2 || {
+    echo "apps/$app/client fails the UI library's check above, which every deploy runs, so the network would refuse it." >&2
+    exit 1
+  }
+done
