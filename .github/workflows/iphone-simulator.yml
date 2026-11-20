@@ -38,13 +38,13 @@ jobs:
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
-      - uses: taiki-e/install-action@v2
-        with:
-          tool: tauri-cli@2.12.4
       - run: brew install xcodegen cloudflared cameroncooke/axe/axe
       - uses: Swatinem/rust-cache@v2
         with:
           key: ios-sim
+      # Built here, for this Mac: a prebuilt one for Intel, run by Rosetta, takes the simulator for an Intel one
+      # (`ARCHS=x86_64`). The cache keeps it.
+      - run: command -v cargo-tauri || cargo install tauri-cli --version 2.12.4 --locked
       - uses: mozilla-actions/sccache-action@v0.0.9
       - working-directory: clients/app
         run: gen/apple/generate && cargo tauri ios build --target aarch64-sim --debug --ci
