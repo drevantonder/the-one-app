@@ -1024,7 +1024,11 @@ async fn opens() {
             }
         }
     });
-    client.watch(true).await;
+    // Its servers are told it's watching behind it: that connects to each of them, and waits for the slowest, which is
+    // no reason for a window to wait to start its page, which waits for its session (`start`): 3 to 9 s on the
+    // owner's Mac, as one of its servers restarted (20 Nov).
+    let watching = client.clone();
+    spawn(async move { watching.watch(true).await });
     follows(client).await
 }
 
