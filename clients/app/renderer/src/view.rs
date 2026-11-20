@@ -2368,6 +2368,9 @@ fn lay_out(layout: &mut Retained, text: &mut TextSystem, root: NodeId, available
                 AvailableSpace::MaxContent => None,
             };
             let size = match measure {
+                // A text with no words has no lines, so it's no taller than its padding, as CSS lays out a block
+                // with nothing in it: a row's heading that isn't there leaves no line above its text.
+                Measure::Text { words, .. } if words.is_empty() => Size { width: 0.0, height: 0.0 },
                 Measure::Text { words, runs, text: style, lines } => text.paragraph(words, &style.style, runs, width.filter(|_| style.wrap), *lines).size(),
                 Measure::Input { words, text: style, multiline } => {
                     let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
