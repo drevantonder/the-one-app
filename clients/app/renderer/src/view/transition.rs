@@ -342,6 +342,10 @@ impl Flip {
 /// back once let go.
 struct Dragged {
     held: bool,
+    /// Let go, but its page hasn't yet answered where it goes (`dragend`): it carries on at the speed it was let go at,
+    /// till the frame that draws where it now goes (`answered`), from which it springs there.
+    coasting: bool,
+    answered: bool,
     axes: [Axis; 2],
     spring: Option<Spring>,
 }
@@ -359,14 +363,16 @@ struct Axis {
 impl Dragged {
     /// How far from where it rests, and how fast, at `now`, along each way.
     fn state(&self, now: f64) -> [(f64, f64); 2] {
-        self.axes.map(|axis| match (self.held, self.spring) {
-            (false, Some(spring)) => spring.at(axis.off, axis.velocity, ((now - axis.start) / 1000.0).max(0.0)),
+        let seconds = |axis: &Axis| ((now - axis.start) / 1000.0).max(0.0);
+        self.axes.map(|axis| match (self.held, self.coasting, self.spring) {
+            (false, true, _) => (axis.off + axis.velocity * seconds(&axis), axis.velocity),
+            (false, false, Some(spring)) => spring.at(axis.off, axis.velocity, seconds(&axis)),
             _ => (axis.off, 0.0),
         })
     }
 
     fn done(&self, now: f64) -> bool {
-        !self.held && self.spring.is_some() && self.state(now).iter().all(|(off, velocity)| Spring::arrived(*off, *velocity, 0.1))
+        !self.held && !self.coasting && self.spring.is_some() && self.state(now).iter().all(|(off, velocity)| Spring::arrived(*off, *velocity, 0.1))
     }
 }
 
@@ -497,8 +503,8 @@ impl Transitions {
 
     /// Node `id` is dragged `offset` pixels, along and down, from where its style puts it, held there.
     pub fn hold(&mut self, id: Id, offset: Point<f32>) {
-        let dragged = self.dragged.entry(id).or_insert(Dragged { held: true, axes: [Axis::default(); 2], spring: None });
-        dragged.held = true;
+        let dragged = self.dragged.entry(id).or_insert(Dragged { held: true, coasting: false, answered: false, axes: [Axis::default(); 2], spring: None });
+        (dragged.held, dragged.coasting, dragged.answered) = (true, false, false);
         dragged.spring = None;
         for (axis, by) in dragged.axes.iter_mut().zip([offset.x, offset.y]) {
             axis.off = f64::from(by);
@@ -506,13 +512,22 @@ impl Transitions {
         }
     }
 
-    /// Node `id` is let go at `now` going `velocity` pixels a second, along and down: it springs back from where it
-    /// is to where its style puts it.
-    pub fn release(&mut self, id: Id, velocity: Point<f32>, now: f64) {
+    /// Node `id` is let go at `now` going `velocity` pixels a second, along and down: it springs from where it is to
+    /// where its style puts it, or where its page is yet to say where it goes (`answered`), carries on at that speed
+    /// till it does, so it's never pulled back toward where it was before its page has moved it.
+    pub fn release(&mut self, id: Id, velocity: Point<f32>, now: f64, answered: bool) {
         let Some(dragged) = self.dragged.get_mut(&id).filter(|dragged| dragged.held) else { return };
-        dragged.held = false;
+        (dragged.held, dragged.coasting, dragged.answered) = (false, !answered, false);
         for (axis, speed) in dragged.axes.iter_mut().zip([velocity.x, velocity.y]) {
             (axis.velocity, axis.start) = (f64::from(speed), now);
+        }
+    }
+
+    /// Node `id`'s page has said where it goes, let go: from the next frame, it springs there from where it's got to,
+    /// at the speed it has.
+    pub fn answered(&mut self, id: Id) {
+        if let Some(dragged) = self.dragged.get_mut(&id) {
+            dragged.answered = true;
         }
     }
 
@@ -539,6 +554,14 @@ impl Transitions {
             }
         }
         let rests = [computed.look.translate.0.of(size.width), computed.look.translate.1.of(size.height)];
+        // Its page has answered: it springs from where it's coasted to, now.
+        if dragged.coasting && dragged.answered {
+            let state = dragged.state(now);
+            dragged.coasting = false;
+            for (axis, (off, velocity)) in dragged.axes.iter_mut().zip(state) {
+                (axis.off, axis.velocity, axis.start) = (off, velocity, now);
+            }
+        }
         let state = dragged.state(now);
         for (((axis, rest), (off, velocity)), styled) in dragged.axes.iter_mut().zip(rests).zip(state).zip(styled) {
             if let Some(was) = axis.rest.or(styled).filter(|was| *was != rest && !dragged.held) {

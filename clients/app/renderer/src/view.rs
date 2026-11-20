@@ -298,6 +298,8 @@ pub struct Screen {
     /// A trackpad's fingers dragging what drags (`drag_wheel`): where they'd be as a finger, and once lifted, that the
     /// scrolling the system goes on with is theirs too.
     trackpad: drag::Trackpad,
+    /// What was let go, and the call of the page's that tells it so, until the page has run it.
+    letting_go: Option<(Id, u64)>,
     /// What was going (`Tree::leaving`) as the last frame was drawn.
     going: HashSet<Id>,
     /// What scrolls by itself or past its end, as a finger left it (`bounce`).
@@ -416,6 +418,7 @@ impl Screen {
             scrolled: HashMap::new(),
             drag: None,
             trackpad: drag::Trackpad::default(),
+            letting_go: None,
             going: HashSet::new(),
             coasts: HashMap::new(),
             states: States::default(),
@@ -801,6 +804,14 @@ impl Screen {
         }
         if self.js.sent() > answering {
             self.heard = self.js.sent();
+        }
+        // What was let go springs to where its page now puts it, once its page has run what told it so.
+        if let Some((id, call)) = self.letting_go
+            && self.editing.heard >= call
+        {
+            self.letting_go = None;
+            self.transitions.answered(id);
+            self.changed();
         }
         if came {
             // What says `autofocus` takes the keyboard as it says so, as an active menu item does.

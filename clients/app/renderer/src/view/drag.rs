@@ -1,7 +1,9 @@
 //! A node a pointer or a finger drags, as Motion's `drag` has it: pressed and moved past a few points, it follows the
-//! pointer here, where the input arrives, with no turn of its page's JS between, along the way its `drag` says ("x",
-//! "y", or `true`, both), held in by `dragConstraints` (pixels it may go up, left, right and down from where its style
-//! puts it) past which it gives as a rubber band, as loose as `dragElastic` says (0 none, Motion's default 0.5). Let go,
+//! pointer here one to one from there, as UIScrollView's pan does once it's recognised (nothing jumps the few points),
+//! where the input arrives, with no turn of its page's JS between, along the way its `drag` says ("x", "y", or `true`,
+//! both), held in by `dragConstraints` (pixels it may go up, left, right and down from where its style puts it) past
+//! which it gives as UIScrollView's rubber band against what it's dragged within, as loose as `dragElastic` says (0
+//! none, Motion's default 0.5, UIScrollView's 0.55). Let go,
 //! its page hears `dragend` once, with how far it went (`offset`) and how fast it was going (`velocity`, pixels a
 //! second), and it springs from where it is, at that speed, to where its style puts it, wherever its page moves that
 //! meanwhile (`transition::Transitions::release`).
@@ -149,7 +151,6 @@ impl Screen {
         let (threshold, time) = (if self.touch { FINGER } else { MOUSE }, self.input_time());
         let Some(drag) = self.drag.as_mut() else { return };
         drag.velocity.add(at, time);
-        let by = point(if drag.along { at.x - drag.start.x } else { 0.0 }, if drag.down { at.y - drag.start.y } else { 0.0 });
         if !drag.began {
             let moved = point(at.x - drag.start.x, at.y - drag.start.y);
             if moved.x.hypot(moved.y) < threshold {
@@ -161,7 +162,8 @@ impl Screen {
                 self.drag = None;
                 return;
             }
-            drag.began = true;
+            // It's dragged from here, as UIScrollView's pan's translation starts again as it's recognised.
+            (drag.began, drag.start) = (true, at);
             // Once it's dragged, it's not pressed.
             self.states.pressed = None;
             let id = drag.id;
@@ -169,6 +171,8 @@ impl Screen {
                 self.tell(id, "dragstart", json!({"clientX": at.x, "clientY": at.y}));
             }
         }
+        let Some(drag) = self.drag.as_ref() else { return };
+        let by = point(if drag.along { at.x - drag.start.x } else { 0.0 }, if drag.down { at.y - drag.start.y } else { 0.0 });
         self.hold_at(by);
     }
 
@@ -198,7 +202,9 @@ impl Screen {
         let constraints = node.prop("dragConstraints");
         let bound = |side: &str| constraints.and_then(|constraints| constraints[side].as_f64()).map(|px| px as f32);
         let elastic = node.prop("dragElastic").and_then(Value::as_f64).map_or(ELASTIC, |elastic| elastic as f32);
-        let size = self.rects.get(&id).map_or((0.0, 0.0), |rect| (rect.width, rect.height));
+        // As stretchy as UIScrollView's against its bounds: what it's dragged within, as a pager's strip is the window.
+        let within = self.tree.parent(id).and_then(|parent| self.rects.get(&parent)).or(self.rects.get(&id));
+        let size = within.map_or((0.0, 0.0), |rect| (rect.width, rect.height));
         let give = |by: f32, least: Option<f32>, most: Option<f32>, size: f32| match (least.map(|least| -least), most) {
             (Some(least), _) if by < least => least + rubber_band(by - least, size, elastic),
             (_, Some(most)) if by > most => most + rubber_band(by - most, size, elastic),
@@ -217,12 +223,15 @@ impl Screen {
         drag.velocity.add(at, time);
         let going = if cancelled { point(0.0, 0.0) } else { drag.velocity.get(time) };
         let velocity = point(if drag.along { going.x } else { 0.0 }, if drag.down { going.y } else { 0.0 });
-        self.transitions.release(drag.id, velocity, now);
+        let answers = self.tree.nodes.get(&drag.id).is_some_and(|node| node.listens("dragend"));
+        self.transitions.release(drag.id, velocity, now, !answers);
         self.changed();
-        if self.tree.nodes.get(&drag.id).is_some_and(|node| node.listens("dragend")) {
+        if answers {
             let offset = json!({"x": if drag.along { at.x - drag.start.x } else { 0.0 }, "y": if drag.down { at.y - drag.start.y } else { 0.0 }});
             let rect = self.rects.get(&drag.id).map(|rect| json!({"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}));
             self.tell(drag.id, "dragend", json!({"clientX": at.x, "clientY": at.y, "rect": rect, "offset": offset, "velocity": {"x": velocity.x, "y": velocity.y}, "canceled": cancelled}));
+            // It springs once its page has had its turn with that (`pump`).
+            self.letting_go = Some((drag.id, self.js.sent()));
         }
     }
 }
