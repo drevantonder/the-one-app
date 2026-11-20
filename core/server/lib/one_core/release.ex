@@ -206,9 +206,12 @@ defmodule OneCore.Release do
     next = %{"build" => status["next_build"], "program" => status["next_program"]}
     checked = at == "checked" and on?({build, program}, next)
 
+    # One that checked a pair older than the network's is asked again, as the list it read was older than the edge's;
+    # one that checked a newer pair isn't, as it would check the same again, over and over (20 Nov, once a second for
+    # an hour), and waits for the edge to read the newer list, within five minutes.
     behind =
       (at == "up_to_date" and not on?({build, program}, Map.put(status, "build", Builds.build()))) or
-        (at == "checked" and not checked)
+        (at == "checked" and not checked and older?(next, {build, program}))
 
     # Said once until the program says it began, though the updater says it again to every server as each moves on.
     asked = :persistent_term.get({__MODULE__, :asked}, nil) == {build, program}
@@ -239,6 +242,12 @@ defmodule OneCore.Release do
     latest = update["latest"] || %{}
     {latest["server-code"] || update["build"], latest[server["program_name"]]}
   end
+
+  # Whether the pair `next` a server checked is older than `target` in its build or its `one`.
+  defp older?(next, {build, program}),
+    do:
+      Builds.count(next["build"]) < Builds.count(build) or
+        (program != nil and Builds.count(next["program"]) < Builds.count(program))
 
   @doc """
   Whether a server on the pair `server`, its `build` and `program`, is on `target`, any `one` where either doesn't say,
@@ -301,7 +310,10 @@ defmodule OneCore.Release do
         _ -> "Updating… #{update["done"]} of #{update["of"]}"
       end
 
-    Enum.join([now | for(%{"name" => name, "why" => why} <- update["went_back"] || [], do: "#{name} didn't update: #{why}")], " · ")
+    Enum.join(
+      [now | for(%{"name" => name, "why" => why} <- update["went_back"] || [], do: "#{name} didn't update: #{why}")],
+      " · "
+    )
   end
 
   # How long this server goes without a call before it's quiet enough to restart, as the one ready server, in
