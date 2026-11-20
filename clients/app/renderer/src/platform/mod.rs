@@ -2026,3 +2026,31 @@ pub(crate) enum Input {
     #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     Picked(crate::tree::Id, String),
 }
+
+/// How long this thread has run on a CPU, as its system counts it (POSIX's `CLOCK_THREAD_CPUTIME_ID`, Windows'
+/// `GetThreadTimes`): what its JS cost, whatever else the machine ran meanwhile, which its time by the clock isn't, so
+/// a busy machine's doesn't read as a slow page; on the web, which can't ask, its time by the clock.
+#[cfg(unix)]
+pub fn on_cpu() -> std::time::Duration {
+    let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    // Safety: it writes only the timespec it's given.
+    unsafe { libc::clock_gettime(libc::CLOCK_THREAD_CPUTIME_ID, &mut time) };
+    std::time::Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
+}
+
+#[cfg(windows)]
+pub fn on_cpu() -> std::time::Duration {
+    use ::windows::Win32::Foundation::FILETIME;
+    let [mut created, mut exited, mut kernel, mut user] = [FILETIME::default(); 4];
+    // Safety: the current thread's pseudo-handle, and the times it writes into.
+    let _ = unsafe { ::windows::Win32::System::Threading::GetThreadTimes(::windows::Win32::System::Threading::GetCurrentThread(), &mut created, &mut exited, &mut kernel, &mut user) };
+    let ticks = |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
+    // In ticks of 100 ns.
+    std::time::Duration::from_nanos((ticks(kernel) + ticks(user)) * 100)
+}
+
+#[cfg(target_arch = "wasm32")]
+pub fn on_cpu() -> std::time::Duration {
+    thread_local!(static SINCE: web_time::Instant = web_time::Instant::now());
+    SINCE.with(web_time::Instant::elapsed)
+}

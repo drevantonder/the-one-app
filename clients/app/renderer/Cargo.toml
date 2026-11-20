@@ -171,6 +171,8 @@ arboard = { version = "3", default-features = false }
 # A Mac's and an iPhone's: the GPU, by wgpu on Metal, and the main thread's queue, by objc2's bindings.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["metal"] }
+# Its JS thread's time on a CPU (CLOCK_THREAD_CPUTIME_ID), what a frame's JS cost (`js::quickjs`).
+libc = "0.2"
 # The face Core Text's cascade draws a character in that the fonts before it hadn't (`text::fallback`), as fontique
 # itself reaches Core Text.
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFString"] }

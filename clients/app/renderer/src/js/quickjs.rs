@@ -363,12 +363,12 @@ impl Thread {
             let (mut threw, mut ran, mut collect, mut spent) = (Vec::new(), 0, true, Duration::ZERO);
             loop {
                 // A timer due now runs now, its clock paused or not.
-                let firing = std::time::Instant::now();
+                let firing = crate::platform::on_cpu();
                 while sandbox.due().is_some_and(|due| due <= 0.0) {
                     threw.extend(sandbox.fire().err());
                     collect = true;
                 }
-                spent += firing.elapsed();
+                spent += crate::platform::on_cpu().saturating_sub(firing);
                 let (due, timers, framing) = (sandbox.due(), sandbox.timers(), sandbox.framing());
                 let now = time.now();
                 // It's started once what its module posted as it ran is here too, so its window shows that.
@@ -391,9 +391,9 @@ impl Thread {
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             if still.is_some_and(|still| still <= wait) {
                                 collect = false;
-                                let collecting = std::time::Instant::now();
+                                let collecting = crate::platform::on_cpu();
                                 on.memory.store(sandbox.collect(), Ordering::Relaxed);
-                                spent += collecting.elapsed();
+                                spent += crate::platform::on_cpu().saturating_sub(collecting);
                             }
                             None
                         }
@@ -405,7 +405,7 @@ impl Thread {
                     },
                 };
                 collect |= first.is_some();
-                let running = std::time::Instant::now();
+                let running = crate::platform::on_cpu();
                 // Every call that's come runs in this turn, and what they changed goes back as one batch; with a seed,
                 // one that came with others now and then waits for a turn of its own, as a busy device's thread
                 // takes what came in two.
@@ -418,7 +418,7 @@ impl Thread {
                         Call::Fire => {}
                     }
                 }
-                spent += running.elapsed();
+                spent += crate::platform::on_cpu().saturating_sub(running);
             }
         })?;
         Ok(Thread { calls, shared, clock, sent: 0 })
@@ -768,3 +768,4 @@ impl Loader for Modules {
         Ok(module)
     }
 }
+

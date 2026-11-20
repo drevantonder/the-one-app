@@ -403,7 +403,8 @@ pub struct Screen {
 
 /// What its frames cost since it was last asked (`Screen::cost`), as a browser's performance panel says a frame's: the
 /// mutations its JS made that it applied, how long its JS thread spent running, how long laying its tree out and
-/// painting it all took, and how many times it painted. Frames that changed nothing cost their JS all the same.
+/// painting it all took, each its thread's time on a CPU (`platform::on_cpu`), so a busy machine doesn't read as slow
+/// work, and how many times it painted. Frames that changed nothing cost their JS all the same.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Cost {
     mutations: u64,
@@ -970,7 +971,7 @@ impl Screen {
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         self.tell_room(size);
         self.paint_frames(scale, text, atlas);
-        let started = Instant::now();
+        let started = crate::platform::on_cpu();
         self.cost.script += self.js.script();
         // A frame that changes nothing paints nothing: the scene drawn last is kept.
         let Some(plan) = self.plan(size, scale) else { return };
@@ -984,7 +985,7 @@ impl Screen {
         scene.finish();
         self.settle_focus(modal);
         self.tell_placed(intersections);
-        self.cost.paint += started.elapsed();
+        self.cost.paint += crate::platform::on_cpu().saturating_sub(started);
         self.cost.painted += 1;
     }
 
@@ -1195,7 +1196,7 @@ impl Screen {
         }
         painter.layout.place_fixed(painter.tree);
         let available = taffy::geometry::Size { width: AvailableSpace::Definite(window.size.width), height: AvailableSpace::Definite(window.size.height) };
-        let laying_out = Instant::now();
+        let laying_out = crate::platform::on_cpu();
         let mut measured = lay_out(painter.layout, painter.text, root, available);
         // A list's rows laid out as other than it placed them for (a row grown, or one it hadn't drawn) are placed again
         // as they are, and laid out again, in this frame, as rows in a column would be.
@@ -1208,7 +1209,7 @@ impl Screen {
             measured = lay_out(painter.layout, painter.text, root, available);
             self.again |= painter.layout.measure_lists(painter.tree);
         }
-        self.cost.layout += laying_out.elapsed();
+        self.cost.layout += crate::platform::on_cpu().saturating_sub(laying_out);
         match measured {
             Err(error) => log::error!("its layout failed: {error}"),
             Ok(()) => {
