@@ -937,7 +937,8 @@ impl Screen {
             decoded: self.pictures.decoded,
             frames: self.frames.iter().map(|(id, child)| (*id, child.screen.frame)).collect(),
         };
-        if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) && self.stale_lists().is_empty() {
+        // What changed since (`changed`), as a node held by a finger that's moved, is drawn, though nothing else did.
+        if !self.animating && self.changed.is_none() && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) && self.stale_lists().is_empty() {
             return None;
         }
         // What's kept of what only moves, grows or fades is drawn again where what it draws from changed: anything
