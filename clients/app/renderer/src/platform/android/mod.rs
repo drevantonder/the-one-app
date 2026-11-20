@@ -268,6 +268,11 @@ impl Display {
 
     pub fn flush(&self) {}
 
+    /// How pressed the device is, as its system says: it says nothing here yet.
+    pub fn pressure(&self) -> crate::platform::Pressure {
+        crate::platform::Pressure::Nominal
+    }
+
     /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
     pub fn refresh(&self) -> Option<std::time::Duration> {
         None

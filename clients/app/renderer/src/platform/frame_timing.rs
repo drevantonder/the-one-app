@@ -53,12 +53,20 @@ impl Timing {
     }
 
     /// A frame was drawn, after `paint` and `draw` on this thread: `moving` says whether something on it still moves.
-    /// → what its frames did, once it's still after moving.
-    pub(crate) fn drawn(&mut self, paint: Duration, draw: Duration, moving: bool, refresh: Option<Duration>) -> Option<Frames> {
+    /// → how long after the frame before it was, while something moves, and what its frames did, once it's still after
+    /// moving.
+    pub(crate) fn drawn(&mut self, paint: Duration, draw: Duration, moving: bool, refresh: Option<Duration>) -> (Option<Duration>, Option<Frames>) {
+        let now = Instant::now();
+        let interval = self.frames.last().map(|(at, ..)| now.duration_since(*at));
         if moving || !self.frames.is_empty() {
-            self.frames.push((Instant::now(), paint, draw));
+            self.frames.push((now, paint, draw));
         }
-        if moving { None } else { self.end(refresh) }
+        (interval, if moving { None } else { self.end(refresh) })
+    }
+
+    /// Whether a frame `interval` after the one before it is a long one, which the display showed the one before twice.
+    pub(crate) fn long(interval: Duration, refresh: Duration) -> bool {
+        interval.as_secs_f32() > refresh.as_secs_f32() * LONG
     }
 
     /// Whether what moved has been still long enough to be said, though its page still asks for frames.
@@ -88,7 +96,7 @@ impl Timing {
             p50: at(&intervals, 0.5),
             p95: at(&intervals, 0.95),
             longest: intervals[intervals.len() - 1],
-            long: intervals.iter().filter(|interval| interval.as_secs_f32() > refresh.as_secs_f32() * LONG).count() as u32,
+            long: intervals.iter().filter(|interval| Timing::long(**interval, refresh)).count() as u32,
             refresh,
             paint: at(&paint, 0.95),
             draw: at(&draw, 0.95),

@@ -55,6 +55,8 @@ mod conformance;
 mod snapshot;
 mod frame_timing;
 pub use frame_timing::Frames;
+mod pressure;
+pub use pressure::Pressure;
 #[cfg(target_os = "android")]
 use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion, text_size};
 #[cfg(target_os = "ios")]
@@ -407,6 +409,9 @@ pub struct Windows {
     /// The inspector's `host` check under way, and what the host has done since it started.
     check: Option<conformance::Check>,
     record: conformance::Record,
+    /// Whether the last frames met the display's refresh, and how pressed the device is, as that and its system say.
+    deadlines: pressure::Deadlines,
+    pressure: Pressure,
 }
 
 /// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
@@ -424,7 +429,7 @@ impl Windows {
             let context = context?;
             let atlas = Arc::new(Atlas::new(&context));
             let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default() })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -448,6 +453,7 @@ impl Windows {
             screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !options.root;
             screen.appearance = appearance();
             screen.reduced_motion = reduced_motion();
+            screen.pressure = self.pressure;
             if let Some(clipboard) = clipboard() {
                 screen.clipboard = clipboard;
             }
@@ -724,7 +730,7 @@ impl Windows {
             rail::Phase::Down => {}
             rail::Phase::Moved => {
                 let was = pull.pulling();
-                match pull.moved(at, Size { width: room.width.0, height: room.height.0 }, icon, screen.reduced_motion) {
+                match pull.moved(at, Size { width: room.width.0, height: room.height.0 }, icon, screen.reducing_motion()) {
                     rail::Pulled::Kept(Some(moved)) => {
                         self.display.set_moved(&window.parts[0].native, moved);
                         if !was {
@@ -756,7 +762,7 @@ impl Windows {
         let mut back = false;
         for window in self.windows.values_mut() {
             let (room, icon) = (window.room(), window.icon);
-            let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
+            let reduced = window.screen.as_ref().is_ok_and(Screen::reducing_motion);
             let Some(pull) = window.pull.as_mut().filter(|pull| pull.springing()) else { continue };
             let (moved, still) = pull.step(Size { width: room.width.0, height: room.height.0 }, icon, reduced);
             match still {
@@ -1033,7 +1039,12 @@ impl Windows {
             if window.screen.as_ref().is_ok_and(Screen::held) {
                 window.timing.input("drag");
             }
-            if let Some(frames) = window.timing.drawn(painted - began, painted.elapsed(), moving, self.display.refresh()) {
+            let refresh = self.display.refresh();
+            let (interval, frames) = window.timing.drawn(painted - began, painted.elapsed(), moving, refresh);
+            if let Some(interval) = interval {
+                self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));
+            }
+            if let Some(frames) = frames {
                 (window.on_event)(Event::Frames(frames));
             }
             if std::mem::take(&mut window.placing) {
@@ -1047,11 +1058,29 @@ impl Windows {
                 (window.on_event)(Event::Shown(asked.elapsed()));
             }
         }
+        self.pressed();
         self.display.request_frame(self.framing());
         self.display.flush();
         if let Some(check) = self.check.take_if(|check| check.over()) {
             let said = check.said(&self.record, self.display.paced());
             (check.reply)(crate::inspect::answer(&check.id, Ok(said)));
+        }
+    }
+
+    /// How pressed the device is, the worse of what its system and its frames say, given to each window's screen as
+    /// it changes, which draws as it says (`Screen::pressure`).
+    fn pressed(&mut self) {
+        let pressure = self.display.pressure().max(self.deadlines.pressure());
+        if pressure == self.pressure {
+            return;
+        }
+        log::info!("pressure is {} now, where it was {}", pressure.name(), self.pressure.name());
+        self.pressure = pressure;
+        for window in self.windows.values_mut() {
+            if let Ok(screen) = &mut window.screen {
+                screen.pressure = pressure;
+                window.dirty = true;
+            }
         }
     }
 

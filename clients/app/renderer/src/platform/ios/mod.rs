@@ -509,6 +509,11 @@ impl Display {
         });
     }
 
+    /// How pressed the device is, as its system says (`pressure`).
+    pub fn pressure(&self) -> crate::platform::Pressure {
+        crate::platform::pressure::apple()
+    }
+
     /// The display's refresh interval, as its link last said.
     pub fn refresh(&self) -> Option<Duration> {
         REFRESH.get()

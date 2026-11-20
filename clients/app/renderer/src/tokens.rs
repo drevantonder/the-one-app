@@ -55,6 +55,9 @@ pub struct Conditions {
     pub touch: bool,
     pub phone: bool,
     pub reduced_motion: bool,
+    /// Glass is drawn plain, as CSS's `prefers-reduced-transparency` and Apple's Reduce Transparency have it: its tint,
+    /// with nothing behind it blurred.
+    pub reduced_transparency: bool,
     /// What the window keeps for itself at its top, right, bottom and left, in whole pixels (`Screen::insets`, which
     /// its page is told as `safeAreaInsets`): the UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left`
     /// lengths are these, as its tokens say the host sets them.
@@ -72,7 +75,7 @@ pub struct Conditions {
 
 impl Default for Conditions {
     fn default() -> Conditions {
-        Conditions { dark: false, touch: false, phone: false, reduced_motion: false, insets: [0; 4], page: 0, title_bar: [0; 2], rem: REM }
+        Conditions { dark: false, touch: false, phone: false, reduced_motion: false, reduced_transparency: false, insets: [0; 4], page: 0, title_bar: [0; 2], rem: REM }
     }
 }
 
@@ -83,6 +86,7 @@ impl Conditions {
             "touch" => self.touch,
             "phone" => self.phone,
             "reducedMotion" => self.reduced_motion,
+            "reducedTransparency" => self.reduced_transparency,
             _ => false,
         }
     }

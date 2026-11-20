@@ -227,6 +227,9 @@ pub struct Screen {
     pub appearance: Appearance,
     /// The person asked for less motion, as the device says.
     pub reduced_motion: bool,
+    /// How pressed the device is (`platform::Pressure`): serious or worse, what moves goes as reduced motion has it,
+    /// and glass as reduced transparency has it, until it eases. The page hears it as `hostContext.pressure`.
+    pub pressure: crate::platform::Pressure,
     /// The device's own text size, which a phone has, in pixels: 1rem is it, and the `phone` tokens hold.
     pub text_size: Option<f32>,
     /// Whose own tokens it draws with, as its page's styles gave them (`tokens::load_page`).
@@ -257,7 +260,7 @@ pub struct Screen {
     /// The room its page has, and whether it asked for less motion, as the page was last told them with its insets
     /// (its host context's `containerDimensions` and `reducedMotion`).
     room: Size<f32>,
-    told: Option<(Size<f32>, bool, Edges<f32>)>,
+    told: Option<(Size<f32>, bool, Edges<f32>, crate::platform::Pressure)>,
     /// When what it draws first changed since the frame drawn last, on its clock: what moves as that changed sets off
     /// then, as CSS's transitions do as a style changes, not when a frame next happens to be drawn, so a clock moved
     /// on before a frame is drawn (a paused one, stepped) finds it where it's got to.
@@ -384,6 +387,7 @@ impl Screen {
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
+            pressure: Default::default(),
             text_size: None,
             page: 0,
             breadcrumb: None,
@@ -608,10 +612,16 @@ impl Screen {
     /// answered at once (`Asked`) or later, as a browser's frame's client does.
     fn place(&mut self, answer: &mut Value) {
         answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
-        answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
+        answer["result"]["hostContext"]["reducedMotion"] = json!(self.reducing_motion());
+        answer["result"]["hostContext"]["pressure"] = json!(self.pressure.name());
         answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
         answer["result"]["hostContext"]["visible"] = json!(self.visible);
-        self.told = Some((self.room, self.reduced_motion, self.insets));
+        self.told = Some((self.room, self.reducing_motion(), self.insets, self.pressure));
+    }
+
+    /// Whether what moves goes as reduced motion has it: its person asked, or the device is pressed seriously.
+    pub fn reducing_motion(&self) -> bool {
+        self.reduced_motion || self.pressure >= crate::platform::Pressure::Serious
     }
 
     /// Logs what the app's JS threw, as a browser's console does, and carries on.
@@ -814,7 +824,7 @@ impl Screen {
             Some(size) => (true, (size * 100.0).round() as u16),
             None => (false, Conditions::default().rem),
         };
-        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reduced_motion, insets, title_bar, page: self.page, rem }
+        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reducing_motion(), reduced_transparency: self.pressure >= crate::platform::Pressure::Serious, insets, title_bar, page: self.page, rem }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).
@@ -880,14 +890,17 @@ impl Screen {
         self.cost.mutations = std::mem::take(&mut self.cost.applied);
     }
 
-    /// The page is told when its room, its motion or its insets change, as a frame's host tells an MCP App.
+    /// The page is told when its room, its motion, its insets or the device's pressure change, as a frame's host tells
+    /// an MCP App.
     fn tell_room(&mut self, size: Size<Pixels>) {
         self.room = Size { width: size.width.0, height: size.height.0 };
-        if self.told.is_some_and(|told| told != (self.room, self.reduced_motion, self.insets)) {
-            self.told = Some((self.room, self.reduced_motion, self.insets));
+        let now = (self.room, self.reducing_motion(), self.insets, self.pressure);
+        if self.told.is_some_and(|told| told != now) {
+            self.told = Some(now);
             let context = json!({
                 "containerDimensions": {"width": self.room.width, "height": self.room.height},
-                "reducedMotion": self.reduced_motion,
+                "reducedMotion": self.reducing_motion(),
+                "pressure": self.pressure.name(),
                 "safeAreaInsets": self.safe_area(),
             });
             self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": context}));
