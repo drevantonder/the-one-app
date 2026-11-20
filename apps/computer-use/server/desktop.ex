@@ -73,7 +73,19 @@ defmodule ComputerUse.Desktop do
   Does a Computer Use action on `desktop`'s screen: a screenshot as a blob, `windows` and `elements` as Cua Driver
   answers them, anything else answered with what it did.
   """
-  def use(_call, _desktop, "stream", _inputs), do: raise("A computer's own screen has no live video yet: it's shown a picture at a time.")
+  def use(call, desktop, "stream", inputs) do
+    if not may?(call, desktop), do: raise("You may not use that computer's screen: only its person and the network's owner may.")
+    ice_servers = OneCore.Call.tool(call, "webrtc", "ice_servers", %{})
+
+    case inputs["offer"] do
+      nil ->
+        ice_servers
+
+      offer ->
+        request = Map.merge(ice_servers, %{"offer" => offer, "sender" => OneCore.Call.tool(call, "webrtc", "sender", %{})})
+        %{"answer" => OneCore.Service.call(call, __MODULE__, :stream, [JSON.encode!(request)], desktop)}
+    end
+  end
 
   def use(call, desktop, action, inputs) do
     if not may?(call, desktop), do: raise("You may not use that computer's screen: only its person and the network's owner may.")
@@ -129,6 +141,51 @@ defmodule ComputerUse.Desktop do
       "mouse and keyboard. On a Mac it runs inside Computer Use for the One App, which the Mac's person allows in System Settings → " <>
       "Privacy & Security, under Screen & System Audio Recording and under Accessibility; macOS asks them on its screen the first " <>
       "time it's used."
+  end
+
+  @doc """
+  Streams the screen as WebRTC video to the app whose SDP offer `request` has, as JSON, with the ICE servers to use
+  and WebRTC's sender for each kind of machine (`webrtc`'s `sender`): this computer's, on its person's screen, answers
+  it and carries on by itself until the app goes. On Linux it's given the graphical session's display (X11's). Gives
+  the SDP answer.
+  """
+  def stream(service, request) do
+    if not match?({:unix, :linux}, :os.type()), do: raise("A Mac's and a Windows PC's own screens have no live video yet: they're shown a picture at a time.")
+    request = JSON.decode!(request)
+    folder = OneCore.Service.folder(service)
+    sender = sender(folder, request["sender"])
+    file = Path.join(folder, "stream-#{System.unique_integer([:positive])}.json")
+
+    config = Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => Path.join(folder, "stream.log"), "source" => %{"kind" => "x11"}})
+    File.write!(file, JSON.encode!(config))
+
+    %{stdout: answer, stderr: why} = OneCore.Command.run([sender, file], 30, env: session())
+    if String.starts_with?(answer, "v=0"), do: answer, else: raise("Couldn't stream its screen: #{String.trim(why)}")
+  end
+
+  # The graphical session's display, as systemd keeps it for the person's programs: this server's own may have none.
+  defp session do
+    {said, 0} = System.cmd("systemctl", ["--user", "show-environment"])
+    display = for line <- String.split(said, "\n"), [name, value] <- [String.split(line, "=", parts: 2)], name in ~w(DISPLAY XAUTHORITY), do: {name, value}
+    if List.keymember?(display, "DISPLAY", 0), do: display, else: raise("This computer's person has no X display signed in")
+  end
+
+  # WebRTC's sender for this kind of machine, downloaded the first time, and checked.
+  defp sender(folder, senders) do
+    arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
+
+    %{"url" => url, "sha256" => sha256} = senders["linux-#{arch}"] || raise "WebRTC has no sender for linux-#{arch}"
+    file = Path.join(folder, "stream-#{sha256}")
+
+    if not File.exists?(file) do
+      %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false, receive_timeout: 300_000)
+      if Base.encode16(:crypto.hash(:sha256, body), case: :lower) != sha256, do: raise("#{url} isn't the file expected")
+      File.write!(file <> ".part", body)
+      File.chmod!(file <> ".part", 0o755)
+      File.rename!(file <> ".part", file)
+    end
+
+    file
   end
 
   @doc "The screen's picture's size, and which of macOS's permissions Cua Driver lacks on a Mac, asking macOS for none."

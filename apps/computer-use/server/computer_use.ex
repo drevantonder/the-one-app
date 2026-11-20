@@ -72,7 +72,7 @@ defmodule ComputerUse do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.32.111", "sign-in" => "to name a phone as its person knows it"}
+  def requires, do: %{"core" => ">= 0.32.111", "sign-in" => "to name a phone as its person knows it", "webrtc" => "to show a computer's screen live"}
 
   @impl true
   def offers do
@@ -301,9 +301,12 @@ defmodule ComputerUse do
   # Watching a screen is no use of it, so it isn't noted.
   def call("stream", inputs, call) do
     s = screen(call, inputs["screen"])
-    if s["desktop"], do: Desktop.use(call, s["desktop"], "stream", inputs)
-    if s["phone"], do: Phone.use(call, s["phone"], "stream", inputs)
-    Call.tool(call, s["app"], s["tool"], inputs |> Map.delete("screen") |> Map.merge(s["inputs"]) |> Map.put("action", "stream"))
+
+    cond do
+      s["desktop"] -> Desktop.use(call, s["desktop"], "stream", inputs)
+      s["phone"] -> Phone.use(call, s["phone"], "stream", inputs)
+      true -> Call.tool(call, s["app"], s["tool"], inputs |> Map.delete("screen") |> Map.merge(s["inputs"]) |> Map.put("action", "stream"))
+    end
   end
 
   def call(action, inputs, call) when action in @actions do

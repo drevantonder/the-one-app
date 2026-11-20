@@ -69,7 +69,8 @@ itself one window can't be aimed at.
 - On a Mac, `ctrl` with a letter, digit or punctuation is ⌘, as a shortcut means there (`ctrl+l`, `ctrl+c`,
   `ctrl+t`), and with anything else ⌃ (`ctrl+Tab`). `super`, `cmd` and `meta` are ⌘, `alt` is ⌥, and `control` is
   always ⌃ (`control+c` in Terminal).
-- It has no live video yet: `stream` refuses.
+- A Linux computer's own screen is live video too (`stream`, for a person's app); a Mac's and a Windows PC's aren't
+  yet: `stream` refuses there.
 - Windows and elements are a computer's own screen's only: another screen is used whole.
 
 Only the computer's person, the user its server is for, and the network's owner may use it. A computer gets it with
