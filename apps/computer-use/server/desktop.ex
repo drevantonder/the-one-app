@@ -58,27 +58,32 @@ defmodule ComputerUse.Desktop do
   """
   def screens(call) do
     listed =
-      for server <- OneCore.Service.servers(call, __MODULE__), not is_integer(OneCore.Service.seen(server)), may?(call, server) do
-        name = OneCore.Service.name(server) || server
-
+      for %{"name" => name, "desktop" => server} = screen <- named(call) do
         try do
           status = OneCore.Service.call(call, __MODULE__, :status, [], server)
 
-          %{
-            "name" => name,
+          Map.merge(screen, %{
             "description" =>
               "#{name}'s own screen, as its person sees it" <>
                 if(status["missing"] == [], do: "", else: "; macOS doesn't allow #{Enum.join(status["missing"], " or ")} for #{called()} yet"),
             "width" => status["width"],
-            "height" => status["height"],
-            "desktop" => server
-          }
+            "height" => status["height"]
+          })
         rescue
           problem -> {name, Exception.message(problem)}
         end
       end
 
     {Enum.filter(listed, &is_map/1), Map.new(Enum.reject(listed, &is_map/1))}
+  end
+
+  @doc """
+  The caller's computers that are on, each by its `name` with its server's key as `desktop`, asking none of them
+  anything: what an action finds its screen by, so it waits on no other computer.
+  """
+  def named(call) do
+    for server <- OneCore.Service.servers(call, __MODULE__), not is_integer(OneCore.Service.seen(server)), may?(call, server),
+        do: %{"name" => OneCore.Service.name(server) || server, "desktop" => server}
   end
 
   @doc """

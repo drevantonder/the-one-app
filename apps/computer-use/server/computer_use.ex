@@ -284,7 +284,7 @@ defmodule ComputerUse do
 
   @impl true
   def call("screens", _inputs, call) do
-    {screens, failed} = screens(call)
+    {screens, failed} = screens(call, &Desktop.screens/1)
     used = used(call, screens)
 
     %{
@@ -324,11 +324,12 @@ defmodule ComputerUse do
   end
 
   # Every screen the caller may use, each with the app it's from, its own computers' and phones' first, and why each
-  # app, or each of its own computers (`computer-use/<name>`), that couldn't say its own couldn't.
-  defp screens(call) do
+  # app, or each of its own computers (`computer-use/<name>`), that couldn't say its own couldn't. Its computers are
+  # `Desktop.screens/1`, or for an action, which needs only their names, `Desktop.named/1`.
+  defp screens(call, desktops) do
     {:ok, lists, failed} = Call.run_hook(call, "screens", %{})
     theirs = for {app, list} <- lists, s <- List.wrap(list), do: Map.put(s, "app", app)
-    {desktops, unanswered} = Desktop.screens(call)
+    {desktops, unanswered} = desktops.(call)
     failed = Map.merge(failed, Map.new(unanswered, fn {name, why} -> {"computer-use/#{name}", why} end))
 
     {phones, failed} =
@@ -343,7 +344,7 @@ defmodule ComputerUse do
 
   # A screen by its name, or by its app's name and its own (`containers/proof`) where two are called the same.
   defp screen(call, name) do
-    {screens, failed} = screens(call)
+    {screens, failed} = screens(call, &{Desktop.named(&1), %{}})
 
     case Enum.filter(screens, &(&1["name"] == name or "#{&1["app"]}/#{&1["name"]}" == name)) do
       [s] -> s
