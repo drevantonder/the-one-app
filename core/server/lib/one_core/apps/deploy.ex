@@ -51,6 +51,7 @@ defmodule OneCore.Apps.Deploy do
 
   @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
   def deploy(owner, name, files, from, trusted, install?) do
+    began = System.os_time(:millisecond)
     artifact = target(owner, name, from)
     trusted = if trusted == :stored, do: Store.trusted?(artifact), else: trusted != false
     # What it commits against, read before it writes anything (`OneCore.Apps.Store.keep/8`).
@@ -80,7 +81,7 @@ defmodule OneCore.Apps.Deploy do
              # names them.
              :ok <- step("listed", fn -> listed(artifact) end),
              {:ok, number} <- step("keep", fn -> Store.keep(artifact, name, version, built, files, from, trusted, was) end),
-             :ok <- committed(owner, name, number, version, install) do
+             :ok <- committed(owner, name, number, version, install, began) do
           warnings = Enum.join(Enum.reject([warnings, styling | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}
         end
@@ -116,7 +117,7 @@ defmodule OneCore.Apps.Deploy do
   # After `latest`: its author has it installed by the installation machine's own move for an app they deployed, and
   # the servers of whoever has it take it, this one at once, with the version the deploy loaded. It supersedes the
   # narrower copies of itself, once it's answered.
-  defp committed(owner, name, number, %Version{artifact: artifact} = version, install) do
+  defp committed(owner, name, number, %Version{artifact: artifact} = version, install, began) do
     forget()
     moved = step("installed", fn -> if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{} end)
     # The other servers load it while this one takes it over.
@@ -126,10 +127,12 @@ defmodule OneCore.Apps.Deploy do
     notified =
       Task.async(fn ->
         OpenTelemetry.Ctx.attach(trace)
-        step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact]}) end)
+        step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact], deployed: %{name => began}}) end)
       end)
 
     step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}], [artifact]) end)
+    # This server's clients are told it moved, and when its deploy began, as the others tell theirs.
+    if install, do: Apps.changed([owner], nil, %{name => began})
     Task.await(notified, :infinity)
 
     case moved do

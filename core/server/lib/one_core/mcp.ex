@@ -214,7 +214,8 @@ defmodule OneCore.Mcp do
   # no owners, this server saying it can reach its network's address again.
   defp told("reload", %{"owners" => owners} = params) when owners != nil do
     only = if is_list(params["apps"]), do: Enum.filter(params["apps"], &is_binary/1), else: :all
-    for owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner, only)
+    deployed = for {name, at} <- params["deployed"] || %{}, is_binary(name) and is_integer(at), into: %{}, do: {name, at}
+    for owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner, only, if(deployed != %{}, do: deployed))
   end
 
   defp told("reload", _params), do: Apps.reconnected()

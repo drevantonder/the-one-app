@@ -180,9 +180,11 @@ defmodule OneCore.Apps do
   runs at (`apps`): an app's screen loaded against another of either is stale, and its client loads it again. With
   no server started, nobody is told. The versions are looked up apart from whoever says it, which may be what keeps
   them. Where it's an app's call that changed something, it says that app (`app`), so a client asks only what's that
-  app's again; left out, it may be anything.
+  app's again; left out, it may be anything. Where a deploy moved them, it says when each app's deploy began
+  (`deployed`, by the app's name, in milliseconds since the Unix epoch), from which a client measures how long its
+  window took to show it.
   """
-  def changed(owners \\ [], app \\ nil) do
+  def changed(owners \\ [], app \\ nil, deployed \\ nil) do
     Task.Supervisor.start_child(OneCore.Asks, fn ->
       apps =
         Map.new(owners, fn owner ->
@@ -191,6 +193,7 @@ defmodule OneCore.Apps do
 
       params = %{library: OneCore.Entrypoint.library().code, apps: apps}
       params = if app, do: Map.put(params, :app, app), else: params
+      params = if deployed, do: Map.put(params, :deployed, deployed), else: params
       Server.tell("changed", params)
     end)
 
@@ -200,16 +203,16 @@ defmodule OneCore.Apps do
   @doc """
   Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
   and the services it runs, and what's installed for them, running the latest version of each app, or with `only`,
-  of those apps. Its clients are told if an app changed.
+  of those apps. Its clients are told if an app changed, with when a deploy that moved it began (`deployed`).
 
   A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
   ago, and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody uses costs nothing.
   """
-  def reload(owner, only \\ :all) do
+  def reload(owner, only \\ :all, deployed \\ nil) do
     # Told only which apps changed, it's their versions that are new, not the servers.
     if only == :all, do: Servers.reload(owner)
     OneCore.Apps.Deploy.forget()
-    if sync(owner, [], only), do: changed([owner])
+    if sync(owner, [], only), do: changed([owner], nil, deployed)
     # An app updated by a server elsewhere may require what isn't installed for them yet.
     if Servers.here?(owner), do: Task.start(fn -> OneCore.Apps.Lifecycle.required(owner) end)
     :ok
