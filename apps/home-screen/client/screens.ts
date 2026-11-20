@@ -2,7 +2,7 @@ import { createEffect, createMemo, untrack } from "solid-js"
 import { link, safeArea, viewport } from "ui"
 import { launcherRoom, measure } from "./layout.ts"
 import { type Kind, pack, type Page, shown, spans } from "./machine.ts"
-import { home, state, seen, editing, editingOwner, launcher, room, setRoom, kept, setKept } from "./store.ts"
+import { home, state, seen, at, screensOf, lastOf, editingNow, editing, drafts, editingOwner, launcher, room, setRoom, kept, setKept } from "./store.ts"
 import { type Owner } from "./owners.ts"
 import { type Cell } from "./pages.tsx"
 import { lingering } from "./lingering.ts"
@@ -11,8 +11,8 @@ export function createScreens(props: { owners: Owner[] }) {
   // The owners as they are when a spring, a gesture or what the machine sends asks, outside anything that tracks them.
   const owned = () => untrack(() => props.owners)
   // + and Done, and the pages' overview, fade out as they go, at the settle pace.
-  const [editBar, editBarGoing] = lingering(() => state().matches("editing"), 200)
-  const [overview, overviewGoing] = lingering(() => state().matches({ editing: "overview" }) && editing(), 200)
+  const [editBar, editBarGoing] = lingering(editingNow, 200)
+  const [overview, overviewGoing] = lingering(() => editingNow() && state().matches({ editing: "overview" }) && editing(), 200)
   // The room the pages have: the window, or in the launcher, a page in its card.
   createEffect(
     () => ({ size: viewport(), safe: safeArea(), launcher: launcher() }),
@@ -23,7 +23,7 @@ export function createScreens(props: { owners: Owner[] }) {
   /// each placed on its grid. A page kept with more than fits goes on over the next ones.
   const pages = createMemo(() =>
     props.owners.map((owner, index) => {
-      const drafted = editingOwner(index) ? editing()!.pages : state().matches("editing") ? state().context.drafts.find((one) => one.owner === index)?.pages : undefined
+      const drafted = editingOwner(index) ? editing()!.pages : editingNow() ? drafts().find((one) => one.owner === index)?.pages : undefined
       const edited = drafted ?? kept().find((one) => one.owner === index)?.pages ?? owner.pages
       const showing: Page[] = shown(edited).map((at) => edited[at])
       const cells = showing.map((page): Cell[] => page.items.map((item, at) => ({ item, index: at })))
@@ -57,10 +57,10 @@ export function createScreens(props: { owners: Owner[] }) {
     },
   )
 
-  const library = () => kindOf(state().context.at.owner) === "library"
+  const library = () => kindOf(at().owner) === "library"
   /// The section of the screenful an owner is on: the one shown, for whoever's shown.
   const kindOf = (owner: number) => {
-    const { last, screens } = state().context
+    const [last, screens] = [lastOf(), screensOf()]
     return screens[owner]?.[owner === seen().owner ? seen().screen : (last[owner] ?? 0)] ?? "home"
   }
   return { owned, editBar, editBarGoing, overview, overviewGoing, pages, screens, homes, laid, library, kindOf }

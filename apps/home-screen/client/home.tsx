@@ -15,9 +15,10 @@
 import { createEffect, createMemo, createSignal, Errored, Loading, onCleanup, refresh, Show } from "solid-js"
 import { Button, connection, covers, haptic, keydown, Problem, render, Status, View, viewport } from "ui"
 import { looks } from "./looks.ts"
-import { home, state, editing, launcher, windowWidth } from "./store.ts"
+import { home, state, at, editing, launcher, windowWidth } from "./store.ts"
 import { type Owner, owners } from "./owners.ts"
 import { OpenCategory } from "./category.tsx"
+import { made } from "./library.tsx"
 import { Holding } from "./holding.tsx"
 import { Overview } from "./overview.tsx"
 import { Gallery, Asking, Refused, EditBar } from "./editing.tsx"
@@ -56,7 +57,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
   const opened = () => state().context.category
   const held = () => (state().matches("holding") ? state().context.held : undefined)
-  const owner = () => props.owners[state().context.at.owner]
+  const owner = () => props.owners[at().owner]
   return (
     <View
       style={[looks.root, looks.sized(windowWidth(), viewport().height)]}
@@ -71,8 +72,8 @@ function HomeScreen(props: { owners: Owner[] }) {
         <EditBar going={editBarGoing()} within={launcher() ? cardRect() : undefined} />
       </Show>
       <Show when={copy()}>{(now) => <Carried now={now} owner={owner()} />}</Show>
-      <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[0]} opened={opened()} within={launcher() ? cardRect() : undefined} />}</Show>
-      <Show when={held()}>{(held) => <Holding owner={owner()} index={state().context.at.owner} held={held()} />}</Show>
+      <Show when={made()}>{(made) => <OpenCategory owner={props.owners[0]} made={made()} open={made() === opened()} within={launcher() ? cardRect() : undefined} />}</Show>
+      <Show when={held()}>{(held) => <Holding owner={owner()} index={at().owner} held={held()} />}</Show>
       <Show when={overview()}>
         {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} going={overviewGoing()} />}
       </Show>

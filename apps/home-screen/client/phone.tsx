@@ -4,7 +4,7 @@ import { For, untrack } from "solid-js"
 import { reducedMotion, View } from "ui"
 import { lefts, TOP_ROW } from "./layout.ts"
 import { looks } from "./looks.ts"
-import { state, room, laidPage } from "./store.ts"
+import { state, at, editingNow, room, laidPage } from "./store.ts"
 import { type Owner } from "./owners.ts"
 import { HomePage } from "./pages.tsx"
 import { Library } from "./library.tsx"
@@ -16,7 +16,7 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
   const { homes, pages, laid, library } = props.layout
   const { downY, xOf, opacityOf, sectionsX, dragged, swipes, along, wheel } = props.paging
   // The owner shown, how far along their pages and the App Library are, and how wide their Home is.
-  const shown = () => state().context.at.owner
+  const shown = () => at().owner
   const across = () => xOf(shown())[0]()
   // How opaque the pages, the App Library and the owner pill over them are: for whoever asked for less motion, they fade
   // out, go there and fade in, as iOS's pages do (`glide`).
@@ -78,7 +78,7 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
         </View>
         {/* Whose pages they are, over Home's, which goes with them as they slide off to the App Library. */}
         <View inert={library() || undefined} style={[looks.topRow, ...withHome(), looks.top(room().safe.top), looks.tall(TOP_ROW)]}>
-          <View style={[looks.live, looks.opacity((state().matches("editing") ? 0.6 : 1) * opacity())]}>
+          <View style={[looks.live, looks.opacity((editingNow() ? 0.6 : 1) * opacity())]}>
             <OwnerPill owners={props.owners} />
           </View>
         </View>

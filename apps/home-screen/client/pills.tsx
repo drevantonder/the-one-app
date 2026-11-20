@@ -4,7 +4,7 @@ import { type Element, haptic, Icon, Menu, Pressable, type Pressed, Text, View }
 import { BAR, DOTS } from "./layout.ts"
 import { type Kind } from "./machine.ts"
 import { looks } from "./looks.ts"
-import { home, state, seen, along, rolled, editingOwner, launcher } from "./store.ts"
+import { home, state, seen, along, rolled, at, screensOf, lastOf, editingNow, editingOwner, launcher } from "./store.ts"
 import { type Owner } from "./owners.ts"
 
 /// A window onto a row for each owner, which rolls as the owners move up and down, `at` in owners, each row `height`
@@ -34,11 +34,11 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
 /// moves a screenful every 28 points, as an iPhone's do. While their pages are edited, a tap opens the page overview.
 /// Only the owner shown's take a finger.
 function Dots(props: { owner: Owner; index: number; count: number; size: number }) {
-  const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
+  const current = () => (seen().owner === props.index ? seen().screen : (lastOf()[props.index] ?? 0))
   // A dot a screenful, as many pages side by side as fit, the one shown lit; as the pages move, each is lit as much as
   // its screenful shows.
   // The App Library, after the last screenful of pages, lights the glyph and none of them.
-  const library = () => state().context.screens[props.index]?.indexOf("library") ?? -1
+  const library = () => screensOf()[props.index]?.indexOf("library") ?? -1
   const onLibrary = () => library() >= 0 && current() >= library()
   const lit = (screen: number) => !onLibrary() && screen === current()
   const shown = (screen: number) => {
@@ -91,7 +91,7 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number 
 /// opens the list of every owner, the current one ticked, in a pill of Liquid Glass as the dots have. Its name rolls as
 /// the owners move. While pages are edited, + and Done are either side of it, and it opens nothing.
 export function OwnerPill(props: { owners: Owner[] }) {
-  const at = () => state().context.at.owner
+  const shown = () => at().owner
   return (
     <Menu.Root
       open={state().matches("listing")}
@@ -99,7 +99,7 @@ export function OwnerPill(props: { owners: Owner[] }) {
       onSelect={(value) => home.send({ type: "pick", owner: Number(value) })}
     >
       <View style={[looks.pill, looks.glass, looks.ownerPill]}>
-        <Menu.Trigger variant="ghost" shape="capsule" aria-label={props.owners[at()]?.name}>
+        <Menu.Trigger variant="ghost" shape="capsule" aria-label={props.owners[shown()]?.name}>
           <View style={looks.ownerRow}>
             <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={looks.ownerName}>{props.owners[index]?.name}</Text>} />
             <View style={looks.caret}>
@@ -116,7 +116,7 @@ export function OwnerPill(props: { owners: Owner[] }) {
             {(owner, index) => (
               <Menu.Item value={String(index())}>
                 <View style={looks.ownerItem}>
-                  <View style={looks.opacity(index() === at() ? 1 : 0)}>
+                  <View style={looks.opacity(index() === shown() ? 1 : 0)}>
                     <Icon name="check" />
                   </View>
                   <Text>{owner().name}</Text>
@@ -150,9 +150,9 @@ export function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
         role="button"
         aria-label="App Library"
         aria-current={library() ? "true" : undefined}
-        aria-disabled={state().matches("editing") ? "true" : undefined}
+        aria-disabled={editingNow() ? "true" : undefined}
         onPress={go}
-        style={[looks.libraryGlyph, library() && looks.lit, looks.opacity(state().matches("editing") ? 0.35 : library() ? 1 : 0.4)]}
+        style={[looks.libraryGlyph, library() && looks.lit, looks.opacity(editingNow() ? 0.35 : library() ? 1 : 0.4)]}
       >
         <View style={looks.smaller}>
           <Icon name="squares-four" />

@@ -7,7 +7,7 @@ import { type Box as Place, cell as cellOf, type Page as Laid } from "./layout.t
 import { carries, type Held, type Placed } from "./machine.ts"
 import { type Entrypoint, type Item, type Widget as WidgetItem } from "./types.ts"
 import { looks } from "./looks.ts"
-import { home, state, editingOwner, launcher, selected, setSelected, landing } from "./store.ts"
+import { home, state, editingNow, editingOwner, launcher, selected, setSelected, landing } from "./store.ts"
 import { type Owner, badgeOf, launch, removal } from "./owners.ts"
 import { Card, Tile, Minus } from "./tiles.tsx"
 import { holds } from "./holds.ts"
@@ -24,7 +24,7 @@ const [shake, setShake] = createSignal(0)
 
 let shaking = 0
 createEffect(
-  () => state().matches("editing") && !reducedMotion(),
+  () => editingNow() && !reducedMotion(),
   (on) => {
     const from = untrack(shake)
     let begun = -1
@@ -133,7 +133,7 @@ function HomeCell(props: {
   let was: Place | undefined
   let wasEditing = false
   createEffect(
-    () => ({ ...box(), editing: state().matches("editing") }),
+    () => ({ ...box(), editing: editingNow() }),
     (now) => {
       if (was && now.editing && wasEditing && !props.small && (was.x !== now.x || was.y !== now.y)) {
         x.value += was.x - now.x

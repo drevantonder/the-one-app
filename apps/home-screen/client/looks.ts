@@ -129,8 +129,11 @@ export const looks = styles({
   heldLayer: { zIndex: 20 },
   // It grows out of its square and shrinks back into it, and the veil over what's behind blurs and dims with it, on
   // one spring, which a change on the way turns from where it is.
-  veils: { opacity: { default: 1, entering: 0, exiting: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.smooth },
-  grows: { position: "absolute", pointerEvents: "none", scale: { default: 1, entering: 0.3, exiting: 0.3 }, opacity: { default: 1, entering: 0, exiting: 0 }, transitionProperty: ["scale", "opacity"], transition: tokens.motion.smooth },
+  veils: { opacity: { default: 1, entering: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.smooth },
+  grows: { position: "absolute", pointerEvents: "none", scale: { default: 1, entering: 0.3 }, opacity: { default: 1, entering: 0 }, transitionProperty: ["scale", "opacity"], transition: tokens.motion.smooth },
+  // Closed, kept made in its square for the next time it opens.
+  unveiled: { opacity: 0 },
+  shrunk: { scale: 0.3, opacity: 0 },
   openedArea: { position: "absolute", overflow: "hidden", pointerEvents: "auto" },
   opened: { gap: tokens.grid[8] },
   categoryTitle: { font: tokens.type.largeTitle },

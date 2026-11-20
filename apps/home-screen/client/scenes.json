@@ -820,7 +820,11 @@
           "name": "Utilities"
         },
         "gesture": {
-          "moves": []
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
         },
         "keeps": "older iPhone"
       }
@@ -1312,7 +1316,11 @@
           "name": "Utilities"
         },
         "gesture": {
-          "moves": []
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
         },
         "keeps": "mid browser on WebGPU"
       }
@@ -1397,7 +1405,11 @@
           "y": 500
         },
         "gesture": {
-          "moves": []
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
         },
         "keeps": "mid browser on WebGPU"
       }
@@ -1418,7 +1430,11 @@
           "y": 700
         },
         "gesture": {
-          "moves": []
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
         },
         "keeps": "older iPhone"
       }

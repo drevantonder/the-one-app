@@ -49,6 +49,11 @@ export const openedCategory = (library: Category[], key: string) =>
 /// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into.
 export const places: Record<string, Rect> = {}
 
+/// The category made ahead: the one a finger or the pointer last went down on, or last opened, its contents made and
+/// kept, open or not, so opening it and closing it change how it's drawn, not what's made, and the frame a press lifts
+/// is a frame.
+export const [made, setMade] = createSignal<string>()
+
 /// The App Library's search, its categories and what it found, laid out for the room it's in: categories as many
 /// across as fit at an iPhone's size, two at a phone's least, as iOS's are, each its icons in a square, whose padding
 /// and gaps follow its width. The gap between them is points, not the text's size, which a phone's larger text would
@@ -86,8 +91,14 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
   const opening = (key: () => string) => (event: Located) => {
     // An app pressed in its square opens the app, not the category too.
     if (Date.now() - pressedApp < 100 || !state().matches("nothing")) return
-    places[key()] = event.currentTarget.getBoundingClientRect()
+    ahead(key)(event)
     home.send({ type: "open", category: key() })
+  }
+  // Made as a finger or the pointer goes down on it, before it's let go of.
+  const ahead = (key: () => string) => (event: Located) => {
+    if (!state().matches("nothing")) return
+    places[key()] = event.currentTarget.getBoundingClientRect()
+    setMade(key())
   }
   const found = (background: boolean) => findIn(props.owner.library, query(), background)
   const apps = () => sorted(props.owner.library, false)
@@ -105,6 +116,7 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
               <Pressable
                 role="group"
                 aria-label={category().category}
+                onPointerDown={ahead(key)}
                 onPress={opening(key)}
                 style={[looks.folder, looks.folderBox(laid().columnGap, laid().rowGap, laid().category, laid().padding.top, laid().padding.inline, laid().padding.bottom)]}
               >

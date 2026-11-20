@@ -24,9 +24,17 @@ export const [along, setAlong] = createSignal(0)
 /// with.
 export const [rolled, setRolled] = createSignal(0)
 
-export const editing = () => state().context.editing
+/// What of the snapshot the Home Screen draws from, each a memo of its own, so what changes elsewhere in it (a
+/// category opening or closing, a menu) redraws none of it: where it is, each owner's screenfuls and the one each was
+/// last on, and while editing, what's edited, drafted and held.
+export const at = createMemo(() => state().context.at)
+export const screensOf = createMemo(() => state().context.screens)
+export const lastOf = createMemo(() => state().context.last)
+export const editingNow = createMemo(() => state().matches("editing"))
+export const editing = createMemo(() => state().context.editing)
+export const drafts = createMemo(() => state().context.drafts)
 
-export const editingOwner = (owner: number) => state().matches("editing") && editing()?.owner === owner
+export const editingOwner = (owner: number) => editingNow() && editing()?.owner === owner
 
 /// Whether this device puts an app on its own home screen (`pinShortcut`): Android's app does.
 export const [pins, setPins] = createSignal(false)

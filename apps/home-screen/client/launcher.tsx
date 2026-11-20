@@ -5,7 +5,7 @@ import { along as alongOf, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SE
 import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
 import { looks } from "./looks.ts"
-import { home, state, launcher, query, setQuery, chosenResult, setChosenResult, type Selected, selected, setSelected, room, laidPage } from "./store.ts"
+import { home, state, at, screensOf, editingNow, launcher, query, setQuery, chosenResult, setChosenResult, type Selected, selected, setSelected, room, laidPage } from "./store.ts"
 import { type Owner, badgeOf, findAll, type From, launch, opens, press, opener } from "./owners.ts"
 import { Card, Tile } from "./tiles.tsx"
 import { type Cell, HomePage } from "./pages.tsx"
@@ -186,7 +186,7 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
   const choose = (cell: Selected | undefined) => setSelected(cell)
   // Whatever moves the pages, the highlight stays on the screenful shown: on what it was on, if that's there.
   createEffect(
-    () => launcher() && `${state().context.at.owner} ${state().context.at.screen} ${pages().length}`,
+    () => launcher() && `${at().owner} ${at().screen} ${pages().length}`,
     (on) => {
       if (!on) return
       const cells = ordered(home.getSnapshot().context.at)
@@ -218,8 +218,8 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
       return listed && { listed, item: opens(listed) }
     }
     const now = selected()
-    const { at, screens } = state().context
-    if (!launcher() || !now || now.owner !== at.owner || screens[at.owner]?.[at.screen] !== "home") return
+    const [where, screens] = [at(), screensOf()]
+    if (!launcher() || !now || now.owner !== where.owner || screens[where.owner]?.[where.screen] !== "home") return
     const cell = pages()[now.owner]?.[now.page]?.find(({ item }) => item.index === now.index)
     return cell && { item: cell.item.item, place: { page: now.page, index: now.index } }
   })
@@ -308,7 +308,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
   const { showing, words } = props.launching
   // The owner shown, how far along their pages and the App Library are drawn, and how opaque they are: for whoever
   // asked for less motion, they fade out, go there and fade in, as iOS's pages do (`glide`).
-  const shown = () => state().context.at.owner
+  const shown = () => at().owner
   const across = () => xOf(shown())[0]()
   const opacity = () => opacityOf(shown())[0]()
   // Home and the App Library are both there, side by side, but fade out while what was found shows.
@@ -340,7 +340,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           <View role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(browsing() ? 1 : 0, 1)]}>
             <For each={props.owners} keyed={(owner) => owner.key}>
               {(owner, index) => {
-                const shown = () => index() === state().context.at.owner
+                const shown = () => index() === at().owner
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
                   <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page), 0, PAGE, room().height)]}>
                     <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
@@ -373,7 +373,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           </View>
           </View>
           {/* Whose pages they are at the top, as a phone has it: over Home, sliding off with it to the App Library. */}
-          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.top(0), looks.tall(PILLS), ...withHome(), looks.opacity(!browsing() ? 0 : (state().matches("editing") ? 0.6 : 1) * opacity())]}>
+          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.top(0), looks.tall(PILLS), ...withHome(), looks.opacity(!browsing() ? 0 : (editingNow() ? 0.6 : 1) * opacity())]}>
             <OwnerPill owners={props.owners} />
           </View>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}

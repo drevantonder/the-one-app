@@ -1,9 +1,9 @@
-import { createEffect, createSignal, onSettled, untrack } from "solid-js"
+import { createMemo, createEffect, createSignal, onSettled, untrack } from "solid-js"
 import { createVelocityTracker, type Dragged, haptic, keydown, type Pressed, reducedMotion, viewport, type Wheeled } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop } from "./pager.ts"
 import { along as alongOf, card as cardOf, cell as cellOf, INSET, lefts, PILLS, CARD_TOP } from "./layout.ts"
 import { type At, carries } from "./machine.ts"
-import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state } from "./store.ts"
+import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state, at } from "./store.ts"
 import { type Owner, draft, keep } from "./owners.ts"
 import { type Screens } from "./screens.ts"
 
@@ -117,8 +117,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
 
   /// Whether the pages are dragged along by the host, as a finger, a trackpad's fingers or a mouse goes, where nothing's
   /// carried: the screen's own drag, with no turn of the page's JS a move.
-  const dragsAlong = () =>
-    !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" }))
+  const dragsAlong = createMemo(() => !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" })))
   /// The pages, along: the host drags them as the finger goes, giving past the first and the App Library as a rubber
   /// band, as an iPhone's do; let go, they go to the page the finger's motion would carry them nearest to (`settle`),
   /// springing there from where they are at the finger's speed.
@@ -127,7 +126,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       return dragsAlong() ? ("x" as const) : undefined
     },
     get dragConstraints() {
-      const owner = state().context.at.owner
+      const owner = at().owner
       const x = xOf(owner)[0]()
       return { left: Math.max(0, (stops(owner) - 1) * pitch() - x), right: x }
     },
