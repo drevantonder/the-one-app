@@ -422,6 +422,8 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
             // closes and its app is forgotten, so it opens afresh, and the client's own page says it stopped, with
             // Reload, as a browser's crashed tab does. So does the launcher's, in its place: a computer's panel, and a
             // phone's page. A page of the client's own in the launcher's place opens again.
+            // One still blank a while after it opened tells Telemetry, as nothing else would.
+            Event::Blank(why) => opening::blank(&opening_view, &app, &why),
             Event::Crashed(why) => {
                 eprintln!("{entrypoint} crashed: {why}");
                 if let Ok(views) = crate::views() {

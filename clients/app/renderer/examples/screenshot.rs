@@ -22,7 +22,7 @@
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
 //! for loops (at most 3 s), which is what's pictured. `changed` is a server saying something changed, as its client
 //! tells a page on screen, with what its tools answer from then on (`answers`, as `--answers` has them). A run whose
-//! page crashed fails, saying why, and so does one whose process grows past `HARNESS_MEMORY`, at once, wherever it is. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`),
+//! page crashed fails, saying why, as does one whose window was still blank 5 s after it opened (`Event::Blank`), and so does one whose process grows past `HARNESS_MEMORY`, at once, wherever it is. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`),
 //! and presses are a finger's, as the display's touches, which its window takes as every phone's host does
 //! (`view::touch`): its slop, pans, a sheet taking the finger, and the swipe back from the left edge.
 //! `--panel` opens it as a computer's panel is (a Mac's launcher, its corners `<corner>` round), summoned: what its page
@@ -248,11 +248,15 @@ fn main() -> anyhow::Result<()> {
     // Why its page crashed, if it did, which fails the run: a page never dies quietly.
     let crashed = std::rc::Rc::new(std::cell::RefCell::new(None));
     let crashing = crashed.clone();
+    // Why its window was blank a while after it opened, if it was (`Event::Blank`), which fails it too.
+    let blank = std::rc::Rc::new(std::cell::RefCell::new(None));
+    let blanking = blank.clone();
     let id = windows.open(options, Ok(screen), move |event| match event {
         // A window would open it in a web view instead.
         Event::Mismatched(why) => saying.borrow_mut().push(format!("it opens in a web view: {why}")),
         Event::Failed(why) => saying.borrow_mut().push(format!("its page didn't start: {why}")),
         Event::Crashed(why) => *crashing.borrow_mut() = Some(why),
+        Event::Blank(why) => *blanking.borrow_mut() = Some(why),
         _ => {}
     })?;
     {
@@ -481,6 +485,9 @@ fn main() -> anyhow::Result<()> {
     eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {w}x{h} px");
     if let Some(why) = crashed.borrow().as_ref() {
         anyhow::bail!("its page crashed: {why}");
+    }
+    if let Some(why) = blank.borrow().as_ref() {
+        anyhow::bail!("its window was blank: {why}");
     }
     // What the display showed that it mustn't have, last, as its failure.
     let mut wrong = windows.wrong();

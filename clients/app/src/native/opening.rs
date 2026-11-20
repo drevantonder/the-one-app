@@ -120,6 +120,23 @@ impl Opening {
     }
 }
 
+/// Tells Telemetry, as an error, that `app`'s window at `view` was still blank a while after it opened (`Event::Blank`):
+/// why, the last step its opening reached (`one.client.open.step`'s, `ready` where it finished), and the build of the
+/// server it asks (`one.server.version`, as `ping` says it, `unknown` where none answers), beside the client's own
+/// (`service.version`), so a blank that one pair of builds shows is told apart.
+pub(super) fn blank(view: &str, app: &str, why: &str) {
+    let step = OPENING.lock().expect("nothing panics holding it").get(view).map_or("ready".to_owned(), |opening| opening.steps.last().map_or("asked".to_owned(), |(step, ..)| step.split(',').next().unwrap_or_default().to_owned()));
+    eprintln!("{app}'s window is blank: {why}, its opening's last step {step}");
+    let Ok(views) = crate::views() else { return };
+    let (app, why) = (app.to_owned(), why.to_owned());
+    crate::spawn(async move {
+        let pinged = tokio::time::timeout(std::time::Duration::from_secs(5), views.client.request("ping", json!({}))).await;
+        let server = pinged.ok().and_then(Result::ok).and_then(|pong| pong["_meta"]["io.modelcontextprotocol/serverInfo"]["version"].as_str().map(str::to_owned));
+        let attributes = json!({"one.view": app, "one.step": step, "one.server.version": server.as_deref().unwrap_or("unknown")});
+        views.client.report(json!({"name": "one.client.native.blank", "error": why, "attributes": attributes}));
+    });
+}
+
 /// Tells Telemetry an app's window didn't open, and why, as it's said in the window, where it could open one.
 pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
     eprintln!("{entrypoint} didn't open: {why}");

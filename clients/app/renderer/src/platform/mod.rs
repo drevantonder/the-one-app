@@ -115,6 +115,9 @@ pub enum Event {
     Failed(String),
     /// Its page crashed after it started (`Screen::crashed`), so it shows nothing of it: why.
     Crashed(String),
+    /// It's shown nothing of its page `BLANK` after it opened, its page loaded again, or a panel put away was summoned:
+    /// why, as a browser's tab left blank. It's said once each time, and it may yet draw.
+    Blank(String),
     /// A panel was summoned and its frame is on screen: how long after it was asked to show (`summon`).
     Shown(std::time::Duration),
     /// Something on it moved and is still now: how smoothly its frames went.
@@ -391,6 +394,9 @@ const SHOWN_WITHIN: std::time::Duration = std::time::Duration::from_millis(1000)
 /// its own loading state, so a quick page shows no spinner (Andre, 20 Nov), and how long what covers a page takes to
 /// fade into it.
 const QUIET: std::time::Duration = std::time::Duration::from_millis(150);
+/// How long after it opens a window that shows nothing of its page is blank (`Event::Blank`): long past a slow page's
+/// start (the Surface's Settings, 2 to 3 s), where its person is looking at an empty window.
+const BLANK: std::time::Duration = std::time::Duration::from_secs(5);
 const FADES_IN: std::time::Duration = std::time::Duration::from_millis(200);
 
 /// What covers a window's page as it opens, as iOS shows an app's snapshot as it launches: its snapshot (`picture`),
@@ -488,6 +494,10 @@ struct Window {
     drawn: bool,
     /// Whether a frame of its page is drawn, not its snapshot (`Live`).
     live: bool,
+    /// Whether it's been looked at for being blank since it opened (`Blank`), and since when it's been looked at for
+    /// that: it opened, its page loaded again, or, for a panel put away, which nobody sees, now.
+    looked: bool,
+    looking: web_time::Instant,
     /// What it painted isn't on the screen yet: painted while it wasn't shown, or not drawn since.
     unshown: bool,
     /// Its page is loading again in its place (`reload`), until it's drawn.
@@ -696,6 +706,8 @@ impl Windows {
                 moving: false,
                 drawn: false,
                 live: false,
+                looked: false,
+                looking: opened,
                 reloading: false,
                 missed: 0,
                 unshown: false,
@@ -867,7 +879,8 @@ impl Windows {
         screen.reload(page);
         window.waiting.clear();
         window.opened = now();
-        (window.drawn, window.live, window.reloading, window.dirty) = (false, false, true, true);
+        (window.drawn, window.live, window.looked, window.reloading, window.dirty) = (false, false, false, true, true);
+        window.looking = window.opened;
         true
     }
 
@@ -1322,6 +1335,7 @@ impl Windows {
     pub fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
         let showing = self.windows.values().filter(|window| !window.shown || matches!(window.cover, Cover::Over(_)) || window.reloading).map(|window| (if window.picture.is_some() { SHOWN_WITHIN } else { QUIET }).saturating_sub(since(window.opened)));
+        let blank = self.windows.values().filter(|window| !window.looked && (!window.panel || window.visible)).map(|window| BLANK.saturating_sub(since(window.looking)));
         // Where the display says nothing of its frames, or hasn't yet since they were asked for, the next is a 60 Hz
         // display's.
         let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(since(self.framed)));
@@ -1329,7 +1343,7 @@ impl Windows {
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due).into_iter().chain(self.recording.as_ref().map(|recording| recording.until.saturating_duration_since(now()))).min();
         let idle = self.renderers().filter_map(Renderer::idle_in);
-        screens.chain(showing).chain(frame).chain(pulled).chain(check).chain(idle).min()
+        screens.chain(showing).chain(blank).chain(frame).chain(pulled).chain(check).chain(idle).min()
     }
 
     /// Whether its windows are a phone's: each the whole screen, an app's over the Home Screen, which it opens out of.
@@ -1476,6 +1490,22 @@ impl Windows {
                 window.screen = Err(format!("{} stopped working", window.title));
                 window.dirty = true;
                 (window.on_event)(Event::Crashed(why));
+            }
+            // One that's still blank a while after it opened says so, where nothing else said why.
+            if window.panel && !window.visible {
+                window.looking = now();
+            }
+            if !window.looked && since(window.looking) >= BLANK {
+                window.looked = true;
+                let why = match &window.screen {
+                    _ if window.pending => Some("its page hadn't started"),
+                    Ok(_) if !window.live => Some("it hadn't drawn its page"),
+                    Ok(screen) if screen.drew_nothing() => Some("its page had drawn nothing"),
+                    _ => None,
+                };
+                if let Some(why) = why {
+                    (window.on_event)(Event::Blank(format!("{why} {} s after it was on screen", BLANK.as_secs())));
+                }
             }
         }
         // The system's own parts of a window (a Mac's glass and title bar, Windows' frame, a Linux window manager's)

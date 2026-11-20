@@ -437,6 +437,11 @@ impl Screen {
         self.pictures.decoding() || self.frames.values().any(|child| child.screen.decoding())
     }
 
+    /// Whether its page has drawn nothing: its tree's root holds nothing.
+    pub fn drew_nothing(&self) -> bool {
+        self.tree.nodes.get(&0).is_none_or(|root| root.children.is_empty())
+    }
+
     /// Whether its app is starting: it hasn't heard back from what it asked (`waiting`), or what its JS made of the
     /// answers isn't applied yet (`editing.heard`, which comes with what it changed), so what it draws of them is on
     /// its way. Its thread having run them isn't enough: what that changed may not have reached the window yet.

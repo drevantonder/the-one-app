@@ -17,6 +17,8 @@
 #            what its client kept.
 #   restart  updates in a row (the program's file changes), each with a second start near the hand-over: one app,
 #            whose launcher answers, and one window of each app, at the end of each.
+#   blank    an app's window opened while the server holds every request, so its page can't be read: still blank
+#            5 s on, it says so, and Telemetry hears it once the server answers, with the step its opening reached.
 #   open     the app started as an update starts it, its windows to open again, on the Surface's costs
 #            (`measured.surface.open` in core/ui/devices.json): each window is made before the pipelines it draws with
 #            could have been compiled, so it waited for none being compiled, and none of its page's start.
@@ -27,19 +29,19 @@
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|open]…"
+usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|blank|open]…"
 folder= seed=1 checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
-    start | reopen | stale | cached | restart | open) checks+=("$1") ;;
+    start | reopen | stale | cached | restart | blank | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen stale cached restart open)
+((${#checks[@]})) || checks=(start reopen stale cached restart blank open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -252,6 +254,30 @@ restarted() {
   done
 }
 
+# An app's window opened while the server holds every request (stopped, as one is that's restarting), its page one
+# the client hasn't kept (Telemetry's, with what the client kept gone as the app starts), so it can't be read: still
+# blank 5 s after it opened, it says so (`Event::Blank`) where Andre's iPhone's blank windows said nothing (20 Nov), and
+# Telemetry hears it once the server answers, with the last step its opening reached and the server's build.
+blanked() {
+  stop_app
+  rm -rf "$ONE_HOME/cache"
+  start_app || return 1
+  local before
+  before=$(said "window is blank")
+  held=$(server)
+  [[ -n $held ]] || { echo "        no server" && return 1; }
+  kill -STOP "$held"
+  "$folder/app/one" one:telemetry
+  within 20 '(($(said "window is blank") > before))'
+  local blank=$?
+  kill -CONT "$held"
+  held=
+  ((blank == 0)) || { echo "        Telemetry's window didn't say it was blank 20 s after it opened" && return 1; }
+  grep -o "telemetry's window is blank.*" "$log" | tail -1 | sed 's/^/        /'
+  within 120 'ONE_SUBJECT=network "$one" telemetry errors --hours 1 | jq -e "any(.errors[]; .message | test(\"after it was on screen\"))" >/dev/null' ||
+    { echo "        Telemetry didn't hear of it within 2 minutes of the server answering" && return 1; }
+}
+
 # The app started as an update starts it, with Telemetry and Settings to open again beside the launcher, each made as
 # the Surface makes one (its system's window and renderer, and the pipelines a kind of window draws with, which the
 # first window after a start waits for): each window is made before those pipelines could have been compiled. One
@@ -282,6 +308,7 @@ for name in "${checks[@]}"; do
     stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;
+    blank) check "blank: a window still blank 5 s after it opened says so, and Telemetry hears it" blanked ;;
     open) check "open: on the Surface's costs, each window opened again is made before its pipelines could compile" opened ;;
   esac
 done
