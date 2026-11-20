@@ -15,6 +15,8 @@ use crate::tree::Mutation;
 mod quickjs;
 #[cfg(not(target_arch = "wasm32"))]
 pub use quickjs::{Thread, memory_limit};
+#[cfg(all(feature = "fake", not(target_arch = "wasm32")))]
+pub use quickjs::device_memory_is;
 /// Which QuickJS runs a page, which the bytecode it compiled is kept for (`Thread::start`'s `cache`): another build of
 /// this program on the same QuickJS loads it, and one on another compiles its pages again (renderer's build.rs).
 pub const QUICKJS: &str = env!("QUICKJS");

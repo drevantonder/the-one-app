@@ -3,7 +3,7 @@
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--measure] [--seed <n>]
-//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--time-zone <IANA name>]
+//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--memory <GB>] [--time-zone <IANA name>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -42,6 +42,8 @@
 //! `--slower` has each picture take that many times as long to decode as on this machine, as on a device with a slower
 //! CPU, where they come later after the page asks for them: the inspector's `window` says the longest one took
 //! (`picture_ms`).
+//! `--memory` gives its page the memory it would have on a device with that many GB, as a phone of 4 has 256 MB
+//! (`renderer::js::memory_limit`), so one that runs away runs out as soon as it would there.
 //! `--time-zone` has the page's clock show times in that time zone, as a device in it does: the clock is `UTC` otherwise.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
@@ -117,6 +119,9 @@ fn main() -> anyhow::Result<()> {
     let latency: f64 = flag("--latency").and_then(|ms| ms.parse().ok()).unwrap_or(0.0);
     if let Some(times) = flag("--slower").and_then(|times| times.parse().ok()) {
         renderer::decoding_takes(times);
+    }
+    if let Some(gb) = flag("--memory").and_then(|gb| gb.parse::<f64>().ok()) {
+        renderer::js::device_memory_is((gb * f64::from(1u32 << 30)) as usize);
     }
     let cached: Vec<String> = flag("--cached").map(|tools| tools.split(',').map(str::to_owned).collect()).unwrap_or_default();
     // The answers on their way, each with when it comes on the page's clock (`--latency`).

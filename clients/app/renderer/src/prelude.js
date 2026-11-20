@@ -1,7 +1,9 @@
 // The sandbox's own globals, run after LLRT's Web APIs and before the app's code. `__post`, `__now`, `__log`, `FIXED`
-// (ms since 1970 for a fixed clock, or null), `LOCALE`, `TOUCH_POINTS` and `shim` (event-target-shim.js) are the
-// host's (js.rs), and so is `mutations`, what the renderer draws with. It evaluates to what the host itself calls: its timers, and what it tells of promises nothing
-// handled. What throws in a timer or a listener is reported (`reportError`), as a browser does, and runs nothing less.
+// (ms since 1970 for a fixed clock, or null), `LOCALE`, `TOUCH_POINTS`, `__threw` and `shim` (event-target-shim.js) are
+// the host's (js.rs), and so is `mutations`, what the renderer draws with. It evaluates to what the host itself calls:
+// its timers, and what it tells of promises nothing handled. What throws in a timer, a frame or a listener, or a promise
+// nothing handled, is reported (`reportError`), as a browser does, and runs nothing less; it's told to the host too
+// (`__threw`), where a page whose every turn throws has crashed, as one out of memory has (quickjs.rs's `crashed`).
 const timers = new Map()
 let nextTimer = 1
 // How deep the timer running now, and what its promises run after it, is nested in timers that set each other, as
@@ -49,7 +51,7 @@ Object.defineProperty(File.prototype, "stream", { configurable: true, writable: 
 const { Event, EventTarget, defineEventAttribute, setErrorHandler } = shim
 globalThis.Event = Event
 globalThis.EventTarget = EventTarget
-setErrorHandler((error) => reportError(error))
+setErrorHandler((error) => uncaught(error))
 globalThis.CustomEvent = class CustomEvent extends Event {
   #detail
   constructor(type, init = {}) {
@@ -155,6 +157,11 @@ globalThis.reportError = (error) => {
   const event = new ErrorEvent("error", { cancelable: true, error, message: String(error?.message ?? error) })
   if (told(event)) console.error("Uncaught", error)
 }
+// What threw past the page's own code, told to the host first, so it's counted even where reporting it runs out of memory.
+const uncaught = (error) => {
+  __threw(error)
+  reportError(error)
+}
 
 if (FIXED !== null) {
   const RealDate = Date
@@ -199,7 +206,7 @@ if (FIXED !== null) {
       try {
         timer.run()
       } catch (error) {
-        reportError(error)
+        uncaught(error)
       }
     }
   },
@@ -214,13 +221,14 @@ if (FIXED !== null) {
       try {
         callback(time)
       } catch (error) {
-        reportError(error)
+        uncaught(error)
       }
     }
   },
   // Promises rejected with nothing to handle them once its jobs ran, each `[promise, reason]`.
   unhandled: (rejected) => {
     for (const [promise, reason] of rejected) {
+      __threw(reason)
       const event = new PromiseRejectionEvent("unhandledrejection", { cancelable: true, promise, reason })
       if (told(event, globalThis.onunhandledrejection)) console.error("Uncaught (in promise)", reason)
     }

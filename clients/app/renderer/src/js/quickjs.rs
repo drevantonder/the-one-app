@@ -55,8 +55,22 @@ fn web(ctx: &Ctx) -> rquickjs::Result<()> {
 /// device's memory). A quarter of it is told to Telemetry (the client's `memory`), and at three quarters its page is
 /// warned (`notifications/one/memory_warning`), as iOS's `didReceiveMemoryWarning` warns an app.
 pub fn memory_limit() -> usize {
-    static LIMIT: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| (device_memory() / 16).clamp(256 << 20, 2 << 30));
-    *LIMIT
+    static MEMORY: std::sync::LazyLock<usize> = std::sync::LazyLock::new(device_memory);
+    let memory = match DEVICE.load(Ordering::Relaxed) {
+        0 => *MEMORY,
+        bytes => bytes,
+    };
+    (memory / 16).clamp(256 << 20, 2 << 30)
+}
+
+/// The memory of the device a harness stands for, where it isn't this machine's (`device_memory_is`).
+static DEVICE: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+/// Pages have the memory they'd have on a device with `bytes` of it, as a phone of 4 GB: for a harness, so a page that
+/// runs away runs out as soon as it would there.
+#[cfg(feature = "fake")]
+pub fn device_memory_is(bytes: usize) {
+    DEVICE.store(bytes, Ordering::Relaxed);
 }
 
 /// The device's memory, in bytes, as its system says it; 0 where it doesn't.
@@ -83,6 +97,10 @@ fn device_memory() -> usize {
 /// How much stack an app's JS may have.
 const STACK: usize = 1 << 20;
 
+/// What a node of a page's tree costs its window, in bytes: the node, its layout, styles and text as drawn. 20 Nov:
+/// 100,000 nodes (a box holding a line of text, each) took the headless harness's window 323 MB more.
+const NODE: usize = 3 << 10;
+
 /// One app's JS, running.
 /// Its fields drop in order: what's held in the runtime before the runtime.
 struct Sandbox {
@@ -96,6 +114,13 @@ struct Sandbox {
     clock: Clock,
     /// Whether it's been warned it holds near all the memory it may have (`collect`).
     warned: std::cell::Cell<bool>,
+    /// What it threw since this was last taken (`threw`): what a call into it threw, and what threw past a timer, a
+    /// frame, a listener or a job, or a promise nothing handled, which it carried on from (`__threw`).
+    threw: Rc<RefCell<Vec<anyhow::Error>>>,
+    /// How many nodes of its tree it's made and not dropped (`mutations`), and how much memory its JS may have as they
+    /// were last counted (`hold`).
+    nodes: Rc<std::cell::Cell<usize>>,
+    limit: std::cell::Cell<usize>,
 }
 
 impl Sandbox {
@@ -130,10 +155,14 @@ impl Sandbox {
         });
         let context = block_on(AsyncContext::full(&runtime))?;
         let posted: Rc<RefCell<Vec<Posted>>> = Rc::default();
+        let threw: Rc<RefCell<Vec<anyhow::Error>>> = Rc::default();
+        let nodes: Rc<std::cell::Cell<usize>> = Rc::default();
         let app = page.to_string();
         let (host, started, said) = block_on(context.with(|ctx| -> anyhow::Result<_> {
             let globals = ctx.globals();
-            globals.set("mutations", mutations(&ctx, &posted)?)?;
+            globals.set("mutations", mutations(&ctx, &posted, &nodes)?)?;
+            let to = threw.clone();
+            globals.set("__threw", Function::new(ctx.clone(), move |error: Value| to.borrow_mut().push(uncaught(error)))?)?;
             let to = posted.clone();
             globals.set("__post", Function::new(ctx.clone(), move |json: String| to.borrow_mut().push(Posted::Message(json)))?)?;
             let now = clock.clone();
@@ -168,11 +197,11 @@ impl Sandbox {
             drop(loads);
             Ok((Persistent::save(&ctx, host), Persistent::save(&ctx, started), said))
         }))?;
-        let sandbox = Sandbox { host, context, runtime, posted, rejected, clock, warned: std::cell::Cell::new(false) };
+        let sandbox = Sandbox { host, context, runtime, posted, rejected, clock, warned: std::cell::Cell::new(false), threw, nodes, limit: std::cell::Cell::new(memory_limit()) };
         let running = Instant::now();
-        sandbox.settle()?;
+        sandbox.settle();
         eprintln!("{page}'s JS started in {} ms: {said}, then ran until it waited in {} ms", began.elapsed().as_millis(), running.elapsed().as_millis());
-        // What its module threw as it ran, which its promise holds.
+        // What its module threw as it ran, which its promise holds, and running out of memory as it did.
         block_on(sandbox.context.with(|ctx| {
             let started = run(&ctx, started.restore(&ctx))?;
             match started.result::<Value>() {
@@ -180,21 +209,24 @@ impl Sandbox {
                 _ => Ok(()),
             }
         }))?;
+        if let Some(error) = sandbox.threw.borrow_mut().extract_if(.., |error| error.is::<OutOfMemory>()).next() {
+            return Err(error);
+        }
         Ok(sandbox)
     }
 
     /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), as a
     /// plain object made directly, and runs it until it waits again.
-    fn send(&self, to: &str, message: &serde_json::Value) -> anyhow::Result<()> {
+    fn send(&self, to: &str, message: &serde_json::Value) {
         let called = block_on(self.context.with(|ctx| {
             let ui: rquickjs::Object = run(&ctx, ctx.globals().get("ui"))?;
             let function: Function = run(&ctx, ui.get(to))?;
             let message = run(&ctx, js(&ctx, message))?;
             run(&ctx, function.call::<_, ()>((rquickjs::function::This(ui), message)))
         }));
-        // What it threw is its error, as a browser reports an event handler's, once what it queued has run.
-        self.settle()?;
-        called
+        // What it threw is its error, as a browser reports an event handler's.
+        self.threw.borrow_mut().extend(called.err());
+        self.settle();
     }
 
     /// When its next timer is due, in ms from now on its clock, if it has one.
@@ -228,28 +260,34 @@ impl Sandbox {
     }
 
     /// Runs what asked for a frame, told `time`, on its clock, as the frame's shown.
-    fn frame(&self, time: f64) -> anyhow::Result<()> {
+    fn frame(&self, time: f64) {
         let ran = block_on(self.context.with(|ctx| {
             let host = run(&ctx, self.host.clone().restore(&ctx))?;
             run(&ctx, host.get::<_, Function>("frame").and_then(|frame| frame.call::<_, ()>((time,))))
         }));
-        self.settle()?;
-        ran
+        self.threw.borrow_mut().extend(ran.err());
+        self.settle();
     }
 
     /// Runs the timers that are due.
-    fn fire(&self) -> anyhow::Result<()> {
+    fn fire(&self) {
         let fired = block_on(self.context.with(|ctx| {
             let host = run(&ctx, self.host.clone().restore(&ctx))?;
             run(&ctx, host.get::<_, Function>("fire").and_then(|fire| fire.call::<_, ()>(())))
         }));
-        self.settle()?;
-        fired
+        self.threw.borrow_mut().extend(fired.err());
+        self.settle();
+    }
+
+    /// What it's thrown since this was last asked.
+    fn threw(&self) -> Vec<anyhow::Error> {
+        std::mem::take(&mut *self.threw.borrow_mut())
     }
 
     /// Runs its jobs, and what the Web APIs answer with a promise, until none is left, then tells it of each promise
-    /// rejected that nothing handled (`unhandledrejection`), as a browser does once its microtasks have run.
-    fn settle(&self) -> anyhow::Result<()> {
+    /// rejected that nothing handled (`unhandledrejection`), as a browser does once its microtasks have run. What a job
+    /// threw is what it threw (`threw`); out of memory, it runs none after.
+    fn settle(&self) {
         loop {
             loop {
                 match block_on(self.runtime.execute_pending_job()) {
@@ -257,18 +295,19 @@ impl Sandbox {
                     Ok(false) => break,
                     Err(error) => {
                         let caught = block_on(error.0.with(|ctx| caught(rquickjs::CaughtError::from_error(&ctx, rquickjs::Error::Exception))));
-                        if caught.is::<OutOfMemory>() {
-                            return Err(caught);
+                        let out = caught.is::<OutOfMemory>();
+                        self.threw.borrow_mut().push(caught);
+                        if out {
+                            return;
                         }
-                        eprintln!("a job threw: {caught:#}");
                     }
                 }
             }
             let rejected = std::mem::take(&mut *self.rejected.borrow_mut());
             if rejected.is_empty() {
-                return Ok(());
+                return;
             }
-            block_on(self.context.with(|ctx| {
+            let told = block_on(self.context.with(|ctx| {
                 let told = (|| {
                     let list = rquickjs::Array::new(ctx.clone())?;
                     for (at, (promise, reason)) in rejected.into_iter().enumerate() {
@@ -281,17 +320,20 @@ impl Sandbox {
                     host.get::<_, Function>("unhandled")?.call::<_, ()>((list,))
                 })();
                 run(&ctx, told)
-            }))?;
+            }));
+            if let Err(error) = told {
+                return self.threw.borrow_mut().push(error);
+            }
         }
     }
 
     /// Collects what its JS no longer holds, as a browser does while nothing's happening, and puts off its next
     /// collection until it holds twice as much and 8 MB more, within half its memory, so what it's sent doesn't wait on
     /// one: QuickJS's collector goes through all it holds at once, 15 to 25 ms for a long list's page. Holding three
-    /// quarters of its memory, it's warned once, until it holds less than half (`memory_limit`).
+    /// quarters of its memory, it's warned once, until it holds less than half (`memory_limit`, less its tree's: `hold`).
     /// → the bytes it holds once it's collected.
-    fn collect(&self) -> anyhow::Result<usize> {
-        let limit = memory_limit();
+    fn collect(&self) -> usize {
+        let limit = self.limit.get();
         let held = block_on(async {
             self.runtime.run_gc().await;
             let held = usize::try_from(self.runtime.memory_usage().await.malloc_size).unwrap_or(0);
@@ -299,12 +341,25 @@ impl Sandbox {
             held
         });
         if held > limit / 4 * 3 && !self.warned.replace(true) {
-            self.send("message", &serde_json::json!({"jsonrpc": "2.0", "method": "notifications/one/memory_warning"}))?;
+            self.send("message", &serde_json::json!({"jsonrpc": "2.0", "method": "notifications/one/memory_warning"}));
         }
         if held < limit / 2 {
             self.warned.set(false);
         }
-        Ok(held)
+        held
+    }
+
+    /// Its tree counts toward the memory it may have, as a browser tab's DOM is its renderer's memory: what its JS may
+    /// hold is what's left of `memory_limit` once its nodes are counted, so a page that makes nodes without end runs out
+    /// as one that keeps objects does. Its tree taking all of it, it has run out.
+    fn hold(&self) {
+        let limit = memory_limit().saturating_sub(self.nodes.get() * NODE);
+        if limit == 0 {
+            return self.threw.borrow_mut().push(anyhow::Error::new(OutOfMemory));
+        }
+        if self.limit.replace(limit) != limit {
+            block_on(self.runtime.set_memory_limit(limit));
+        }
     }
 
     /// What it has given its host since this was last asked.
@@ -356,16 +411,13 @@ impl Call {
         }
     }
 
-    fn run(self, sandbox: &Sandbox, threw: &mut Vec<anyhow::Error>, memory: &std::sync::atomic::AtomicUsize) {
+    fn run(self, sandbox: &Sandbox, memory: &std::sync::atomic::AtomicUsize) {
         match self {
-            Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
-            Call::Frame(time) => threw.extend(sandbox.frame(time).err()),
+            Call::Send(to, message) => sandbox.send(to, &message),
+            Call::Frame(time) => sandbox.frame(time),
             Call::Fire => {}
-            Call::Collect => match sandbox.collect() {
-                Ok(held) => memory.store(held, Ordering::Relaxed),
-                Err(error) => threw.push(error),
-            },
-            Call::Batch(calls) => calls.into_iter().for_each(|call| call.run(sandbox, threw, memory)),
+            Call::Collect => memory.store(sandbox.collect(), Ordering::Relaxed),
+            Call::Batch(calls) => calls.into_iter().for_each(|call| call.run(sandbox, memory)),
         }
     }
 }
@@ -452,16 +504,19 @@ impl Thread {
             loop {
                 // A timer due now runs now, its clock paused or not.
                 let firing = crate::platform::on_cpu();
-                // One that throws without running (it can't clear itself) runs again next turn, never in a loop here.
+                // One that throws runs again next turn, never in a loop here: one that can't clear itself spins nothing.
                 while sandbox.due().is_some_and(|due| due <= 0.0) {
                     (collect, worked) = (true, true);
-                    if let Err(error) = sandbox.fire() {
-                        threw.push(error);
+                    sandbox.fire();
+                    threw.extend(sandbox.threw());
+                    if !threw.is_empty() {
                         break;
                     }
                 }
                 spent += crate::platform::on_cpu().saturating_sub(firing);
                 // A page that's crashed stops, its runtime and all it held let go of, and its window says so.
+                sandbox.hold();
+                threw.extend(sandbox.threw());
                 if std::mem::take(&mut worked) {
                     failing = if threw.is_empty() { 0 } else { failing + 1 };
                 }
@@ -495,10 +550,7 @@ impl Thread {
                             if still.is_some_and(|still| still <= wait) {
                                 collect = false;
                                 let collecting = crate::platform::on_cpu();
-                                match sandbox.collect() {
-                                    Ok(held) => on.memory.store(held, Ordering::Relaxed),
-                                    Err(error) => threw.push(error),
-                                }
+                                on.memory.store(sandbox.collect(), Ordering::Relaxed);
                                 spent += crate::platform::on_cpu().saturating_sub(collecting);
                             }
                             None
@@ -519,8 +571,9 @@ impl Thread {
                 for call in first.into_iter().chain(std::iter::from_fn(|| (!apart()).then(|| queue.try_recv().ok()).flatten())) {
                     ran += call.len();
                     worked |= !matches!(call, Call::Fire | Call::Collect);
-                    call.run(&sandbox, &mut threw, &on.memory);
+                    call.run(&sandbox, &on.memory);
                 }
+                threw.extend(sandbox.threw());
                 spent += crate::platform::on_cpu().saturating_sub(running);
             }
         })?;
@@ -674,9 +727,14 @@ impl Thread {
     }
 
     /// When its next timer is due, in ms from now on its clock, if it has one, or what's held for it while it's busy
-    /// (`seed`), which it runs, with its timers, once it's free.
+    /// (`seed`), which it runs, with its timers, once it's free. A page whose thread has ended has none.
     pub fn due(&self) -> Option<f64> {
-        let due = self.shared.posts().due;
+        let posts = self.shared.posts();
+        if posts.ended {
+            return None;
+        }
+        let due = posts.due;
+        drop(posts);
         let due = if self.held.is_empty() { due? } else { due.unwrap_or(self.until).max(self.until) };
         Some(due - self.clock.now())
     }
@@ -684,6 +742,9 @@ impl Thread {
     /// Each of its timers: when it's due, in ms from now (`in`), and how often an interval runs (`every`).
     pub fn timers(&self) -> Vec<serde_json::Value> {
         let posts = self.shared.posts();
+        if posts.ended {
+            return Vec::new();
+        }
         let since = self.clock.now() - posts.turned;
         let mut timers = posts.timers.clone();
         for timer in &mut timers {
@@ -726,14 +787,15 @@ impl Shared {
 }
 
 /// The host's functions the renderer calls with each mutation (`Mutations` in core/ui/src/drawing-primitives/renderer.ts), each
-/// kept to be applied once the sandbox's turn has run.
-fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs::Result<Object<'js>> {
+/// kept to be applied once the sandbox's turn has run, and how many nodes it's made and not dropped, in `nodes`.
+fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>, nodes: &Rc<std::cell::Cell<usize>>) -> rquickjs::Result<Object<'js>> {
     let mutations = Object::new(ctx.clone())?;
-    let to = posted.clone();
+    let (to, made) = (posted.clone(), nodes.clone());
     let create = move |ctx: Ctx<'js>, id: Id, kind: String, value: Option<String>| -> rquickjs::Result<()> {
         let kind = Kind::deserialize(kind.as_str().into_deserializer())
             .map_err(|error: serde::de::value::Error| Exception::throw_type(&ctx, &error.to_string()))?;
         to.borrow_mut().push(Posted::Mutation(Mutation::Create { id, kind, value }));
+        made.set(made.get() + 1);
         Ok(())
     };
     mutations.set("create", Function::new(ctx.clone(), create)?)?;
@@ -752,7 +814,12 @@ fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs
     let to = posted.clone();
     mutations.set("remove", Function::new(ctx.clone(), move |parent: Id, id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Remove { parent, id })))?)?;
     let to = posted.clone();
-    mutations.set("drop", Function::new(ctx.clone(), move |id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Drop { id })))?)?;
+    let dropped = nodes.clone();
+    let drop = move |id: Id| {
+        to.borrow_mut().push(Posted::Mutation(Mutation::Drop { id }));
+        dropped.set(dropped.get().saturating_sub(1));
+    };
+    mutations.set("drop", Function::new(ctx.clone(), drop)?)?;
     // It draws a `video`, a screen's live video over WebRTC (`video`).
     mutations.set("video", true)?;
     // It draws a `frame`, another app's page in a sandbox of its own (`view::frames`).
@@ -850,6 +917,11 @@ fn caught(error: rquickjs::CaughtError) -> anyhow::Error {
         rquickjs::CaughtError::Value(value) if value.is_null() => anyhow::Error::new(OutOfMemory),
         _ => anyhow!("{error}"),
     }
+}
+
+/// What threw past a timer, a frame, a listener or a job, or a promise nothing handled, as `caught` has it.
+fn uncaught(error: Value) -> anyhow::Error {
+    caught(error.clone().into_object().and_then(Exception::from_object).map_or(rquickjs::CaughtError::Value(error), rquickjs::CaughtError::Exception))
 }
 
 /// QuickJS ran out of the memory a page may have (`memory_limit`).
