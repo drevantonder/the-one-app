@@ -127,7 +127,7 @@ impl Client {
         }
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
-        let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<opentelemetry_sdk::trace::Span>) =
+        let (message, lists, reads, span, said): (std::borrow::Cow<[u8]>, bool, bool, Option<opentelemetry_sdk::trace::Span>, Option<Value>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
                     if request.get("id").is_some() && request["params"]["_meta"]["progressToken"].is_null() {
@@ -138,9 +138,9 @@ impl Client {
                     let reads = self.reads(&request).await?;
                     let span = request.get("id").is_some().then(|| self.span(&mut request));
                     self.say(&mut request);
-                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", reads, span)
+                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", reads, span, Some(request))
                 }
-                _ => (message.into(), false, false, None),
+                _ => (message.into(), false, false, None, None),
             };
         let reached = std::sync::Mutex::new("none");
         // A server that went away after it was asked is asked again elsewhere only for what only reads: anything
@@ -150,7 +150,17 @@ impl Client {
             for _ in 0..2 {
                 let open = self.reached().await?;
                 *reached.lock().expect("no ask panics") = open.path();
-                match open.ask(&message, &notified).await {
+                // It says the attestation of the run the connection it goes over is of, which a run made again as it
+                // went (`relink`) changed: a server found the owner's phone nobody's as it started (20 Nov).
+                let sending: std::borrow::Cow<[u8]> = match &said {
+                    Some(request) if request["params"]["_meta"]["attestation"].is_string() && request["params"]["_meta"]["attestation"] != open.attestation.as_str() && !open.attestation.is_empty() => {
+                        let mut request = request.clone();
+                        request["params"]["_meta"]["attestation"] = json!(open.attestation);
+                        request.to_string().into_bytes().into()
+                    }
+                    _ => message.clone(),
+                };
+                match open.ask(&sending, &notified).await {
                     Ok(response) => return Ok(response),
                     Err(RequestError::Unreachable) => {}
                     Err(RequestError::Stopped) if reads => stopped = true,

@@ -126,6 +126,10 @@ pub enum RequestError {
 /// stopped answering, or refused what it was asked, so nothing more is asked over it.
 pub struct Reached {
     connection: iroh::endpoint::Connection,
+    /// The run's attestation for the endpoint it was made from (`Link`), which what's asked over it says: a run made
+    /// again (`relink`) has another, which a server checks against the connection's key, so one said over a connection
+    /// of the run before has the server find the device nobody's.
+    pub(crate) attestation: String,
     received: Arc<std::sync::Mutex<Instant>>,
     asking: Arc<AtomicUsize>,
     gone: AtomicBool,
@@ -202,7 +206,7 @@ impl Reached {
                 }
             }
         });
-        Ok(Self { connection, received, asking, gone: AtomicBool::new(false) })
+        Ok(Self { connection, received, asking, gone: AtomicBool::new(false), attestation: String::new() })
     }
 
     pub fn connection(&self) -> &iroh::endpoint::Connection {
@@ -437,7 +441,8 @@ impl Client {
     /// watching, says so first, with where a server reaches it and the device it runs for.
     async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
         let link = self.link();
-        let open = Reached::connect(&link.endpoint, server, CONNECT).await.ok()?;
+        let mut open = Reached::connect(&link.endpoint, server, CONNECT).await.ok()?;
+        open.attestation = link.attestation.clone();
         tokio::spawn(receive_notifications(open.connection().clone(), self.notifications.clone()));
         tokio::spawn(answer(self.me.clone(), open.connection().clone()));
         tokio::spawn(straight(self.me.clone(), open.connection().clone()));
