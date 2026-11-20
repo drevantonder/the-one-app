@@ -166,6 +166,74 @@ pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
     }
 }
 
+/// Tells Telemetry how smoothly something moved on `app`'s window, and says it in the app's log: how many frames, their
+/// intervals' median and 95th percentile, how many were long (shown twice or more), the display's refresh and the
+/// time this thread spent on a frame. Each is a histogram by the app, what moved it and the display's rate, so
+/// `metric` reads them over time.
+fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
+    let ms = |time: std::time::Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
+    let hz = (1.0 / frames.refresh.as_secs_f64()).round();
+    let load = Load::now();
+    eprintln!(
+        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz, work p95 {} ms, {load}",
+        frames.kind,
+        ms(frames.took),
+        frames.frames,
+        ms(frames.p50),
+        ms(frames.p95),
+        ms(frames.longest),
+        frames.long,
+        ms(frames.work)
+    );
+    let Ok(views) = crate::views() else { return };
+    let attributes = json!({"one.view": app, "one.motion": frames.kind, "one.display.hz": hz, "one.system.busy": load.busy()});
+    if let Some(average) = load.average {
+        views.client.report(json!({"name": "system.cpu.load_average.1m", "value": average, "attributes": attributes}));
+    }
+    for (name, value) in [
+        ("one.client.native.frames", f64::from(frames.frames)),
+        ("one.client.native.frames.long", f64::from(frames.long)),
+        ("one.client.native.frame.interval.p95", ms(frames.p95)),
+        ("one.client.native.frame.work.p95", ms(frames.work)),
+    ] {
+        views.client.report(json!({"name": name, "value": value, "attributes": attributes}));
+    }
+}
+
+/// How busy the device is as something's timed, so a machine others load isn't taken for slow drawing: its 1-minute
+/// load average, where its system says one (not Windows), and its logical cores.
+struct Load {
+    average: Option<f64>,
+    cores: usize,
+}
+
+impl Load {
+    fn now() -> Load {
+        #[cfg(any(target_os = "macos", target_os = "ios", target_os = "linux"))]
+        let average = {
+            let mut averages = [0.0f64; 3];
+            (unsafe { libc::getloadavg(averages.as_mut_ptr(), 3) } >= 1).then_some(averages[0])
+        };
+        #[cfg(not(any(target_os = "macos", target_os = "ios", target_os = "linux")))]
+        let average = None;
+        Load { average, cores: std::thread::available_parallelism().map_or(1, usize::from) }
+    }
+
+    /// More is waiting to run than it has cores.
+    fn busy(&self) -> bool {
+        self.average.is_some_and(|average| average > self.cores as f64)
+    }
+}
+
+impl std::fmt::Display for Load {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self.average {
+            Some(average) => write!(f, "load {average:.1} on {} cores", self.cores),
+            None => write!(f, "{} cores", self.cores),
+        }
+    }
+}
+
 /// Opens a window for `entrypoint`, at `link`, for `subject`, that says only why its page isn't there, as Telemetry
 /// hears (`open`): one this program can't draw, or that didn't open. It's the problem box DESIGN.md has, with Try
 /// Again, on the client's own page (`UNOPENED`); where that can't be drawn either, as with no UI library to draw it
@@ -597,9 +665,15 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 }
                 // How long the launcher took to show as it was summoned, to its first frame.
                 Event::Shown(took) => {
-                    eprintln!("the launcher showed {:.1} ms after it was summoned", took.as_secs_f64() * 1000.0);
+                    let ms = took.as_secs_f64() * 1000.0;
+                    let load = Load::now();
+                    eprintln!("the launcher showed {ms:.1} ms after it was summoned, {load}");
+                    if let Ok(views) = crate::views() {
+                        views.client.report(json!({"name": "one.client.native.summon.duration", "value": ms, "attributes": {"one.view": app, "one.system.busy": load.busy()}}));
+                    }
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
                 }
+                Event::Frames(frames) => frames_reported(&app, &frames),
                 Event::PutAway => {
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
                 }

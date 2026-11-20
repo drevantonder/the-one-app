@@ -390,6 +390,11 @@ impl Display {
 
     pub fn flush(&self) {}
 
+    /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
+    pub fn refresh(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     /// `requestAnimationFrame` says when each frame is shown.
     pub fn paced(&self) -> bool {
         true

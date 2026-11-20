@@ -157,6 +157,8 @@ thread_local! {
     /// The display link, once a frame's been wanted, and when the display showed the last frame it said.
     static LINK: RefCell<Option<Retained<CADisplayLink>>> = const { RefCell::new(None) };
     static FRAMED: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// The display's interval for the frame its link last said, which ProMotion changes (8.3 ms at 120 Hz).
+    static REFRESH: Cell<Option<Duration>> = const { Cell::new(None) };
 }
 
 /// One of tao's events, on the main thread: the jobs waiting run, and a native window hears what's said of it. →
@@ -507,6 +509,11 @@ impl Display {
         });
     }
 
+    /// The display's refresh interval, as its link last said.
+    pub fn refresh(&self) -> Option<Duration> {
+        REFRESH.get()
+    }
+
     /// When the display showed the frame asked for, once it has.
     pub fn frame(&self) -> Option<std::time::Instant> {
         FRAMED.take()
@@ -633,6 +640,10 @@ define_class!(
         fn framed(&self, link: &CADisplayLink) {
             let ago = (CACurrentMediaTime() - link.timestamp()).max(0.0);
             FRAMED.set(Some(Instant::now() - Duration::from_secs_f64(ago)));
+            let interval = link.targetTimestamp() - link.timestamp();
+            if interval > 0.0 {
+                REFRESH.set(Some(Duration::from_secs_f64(interval)));
+            }
             with_windows(|_| {});
         }
     }

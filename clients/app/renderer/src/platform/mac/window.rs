@@ -158,6 +158,8 @@ impl NativeWindow {
 /// When the display last showed a frame, and what wakes the native thread to it.
 struct Frames {
     shown: Mutex<Option<std::time::Instant>>,
+    /// The display's refresh interval, as its link last said.
+    refresh: Mutex<Option<std::time::Duration>>,
     ping: calloop::ping::Ping,
 }
 
@@ -172,13 +174,18 @@ impl DisplayLink {
         unsafe extern "C-unwind" fn shown(
             _: std::ptr::NonNull<CVDisplayLink>,
             _: std::ptr::NonNull<CVTimeStamp>,
-            _: std::ptr::NonNull<CVTimeStamp>,
+            output: std::ptr::NonNull<CVTimeStamp>,
             _: CVOptionFlags,
             _: std::ptr::NonNull<CVOptionFlags>,
             frames: *mut c_void,
         ) -> CVReturn {
             let frames = unsafe { &*frames.cast::<Frames>() };
             *frames.shown.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+            let output = unsafe { output.as_ref() };
+            if output.videoRefreshPeriod > 0 && output.videoTimeScale > 0 {
+                let refresh = std::time::Duration::from_secs_f64(output.videoRefreshPeriod as f64 / f64::from(output.videoTimeScale));
+                *frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(refresh);
+            }
             frames.ping.ping();
             kCVReturnSuccess
         }
@@ -206,7 +213,7 @@ impl Display {
         let (ping, source) = calloop::ping::make_ping()?;
         // The loop's turn reads what's queued (`events`).
         handle.insert_source(source, |_, _, _| {}).map_err(|error| anyhow::anyhow!("no queue for AppKit's events: {error}"))?;
-        let frames = Arc::new(Frames { shown: Mutex::new(None), ping: ping.clone() });
+        let frames = Arc::new(Frames { shown: Mutex::new(None), refresh: Mutex::new(None), ping: ping.clone() });
         let link = DisplayLink::new(&frames);
         Ok(Display { queue: Queue { inputs: Arc::default(), ping }, apps: Default::default(), link, frames })
     }
@@ -560,6 +567,11 @@ impl Display {
         if let Some(link) = &self.link {
             link.set_running(wanted);
         }
+    }
+
+    /// The display's refresh interval, as its link says.
+    pub fn refresh(&self) -> Option<std::time::Duration> {
+        *self.frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 
     /// When the display last showed a frame, once it has since this was last asked.

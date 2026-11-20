@@ -1399,6 +1399,11 @@ impl Screen {
 
     /// The pointer moved to `at`: what it's over is hovered, told as it comes and goes, and a press it holds is told
     /// it moved.
+    /// Whether a pointer's press, or a finger, is held on it, so what moves follows the person.
+    pub fn held(&self) -> bool {
+        self.captured.is_some()
+    }
+
     pub fn pointer_moved(&mut self, at: Point<f32>) {
         self.frame_moved(at);
         self.pointer = Some(at);

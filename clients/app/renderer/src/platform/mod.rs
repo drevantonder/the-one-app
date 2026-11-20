@@ -34,6 +34,8 @@ pub(crate) mod a11y;
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) mod rail;
 mod snapshot;
+mod frame_timing;
+pub use frame_timing::Frames;
 #[cfg(target_os = "android")]
 use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion, text_size};
 #[cfg(target_os = "ios")]
@@ -81,6 +83,8 @@ pub enum Event {
     Failed(String),
     /// A panel was summoned and its frame is on screen: how long after it was asked to show (`summon`).
     Shown(std::time::Duration),
+    /// Something on it moved and is still now: how smoothly its frames went.
+    Frames(Frames),
     /// A panel put itself away, as something else was clicked or came in front.
     PutAway,
     /// A window that isn't a panel lost the keyboard: its person is using something else.
@@ -358,6 +362,8 @@ struct Window {
     snapshot: Option<std::path::PathBuf>,
     picture: Option<Vec<u8>>,
     pictured: bool,
+    /// Its frames while something on it moves.
+    timing: frame_timing::Timing,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -476,6 +482,7 @@ impl Windows {
                 snapshot: options.snapshot,
                 picture,
                 pictured: false,
+                timing: Default::default(),
             },
         );
         Ok(id)
@@ -608,7 +615,11 @@ impl Windows {
             screen.shown(true);
             screen.summoned(key);
         }
+        let queued = asked.elapsed();
         self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
+        // Where the time to show it goes: waiting for this thread, then for the system's to place it, then drawing.
+        let ms = |time: std::time::Duration| time.as_secs_f64() * 1000.0;
+        eprintln!("the launcher's summon waited {:.1} ms for its thread and {:.1} ms to be placed", ms(queued), ms(asked.elapsed() - queued));
         // Drawn now, not on the loop's next turn, so its first frame is the one it shows with.
         self.turn();
     }
@@ -621,6 +632,9 @@ impl Windows {
         }
         window.visible = false;
         window.summoned = None;
+        if let Some(frames) = window.timing.end(self.display.refresh()) {
+            (window.on_event)(Event::Frames(frames));
+        }
         if let Ok(screen) = &mut window.screen {
             screen.shown(false);
         }
@@ -925,9 +939,15 @@ impl Windows {
                 window.dirty = true;
             }
             if !window.dirty || window.parts[0].renderer.is_none() {
+                if window.timing.idle()
+                    && let Some(frames) = window.timing.end(self.display.refresh())
+                {
+                    (window.on_event)(Event::Frames(frames));
+                }
                 continue;
             }
             window.dirty = false;
+            let began = web_time::Instant::now();
             let (room, scale) = (window.room(), window.parts[0].native.scale());
             if let Some(picture) = &window.picture {
                 if !std::mem::replace(&mut window.pictured, true)
@@ -960,6 +980,13 @@ impl Windows {
                 continue;
             }
             window.missed = 0;
+            let moving = window.moving || window.screen.as_ref().is_ok_and(Screen::framing);
+            if window.screen.as_ref().is_ok_and(Screen::held) {
+                window.timing.input("drag");
+            }
+            if let Some(frames) = window.timing.drawn(began.elapsed(), moving, self.display.refresh()) {
+                (window.on_event)(Event::Frames(frames));
+            }
             if std::mem::take(&mut window.placing) {
                 self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
             }
@@ -1097,7 +1124,10 @@ impl Windows {
                     None => {}
                 }
             }
-            Input::Wheel(at, delta, phase) => drop(screen.scroll(at, delta, phase)),
+            Input::Wheel(at, delta, phase) => {
+                window.timing.input("scroll");
+                screen.scroll(at, delta, phase);
+            }
             Input::Key(key) => drop(screen.key(&key)),
             Input::Ime(ime) => screen.ime(ime),
             Input::TextInputClient(said) => screen.text_input_client(&mut window.text_input, said),

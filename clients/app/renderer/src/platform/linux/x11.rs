@@ -748,6 +748,11 @@ impl Display {
         let _ = self.xcb.flush();
     }
 
+    /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
+    pub fn refresh(&self) -> Option<std::time::Duration> {
+        None
+    }
+
     /// Whether it says when it shows each frame (Present), so frames come as the display shows them.
     pub fn paced(&self) -> bool {
         self.present.is_some()
