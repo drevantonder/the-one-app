@@ -45,7 +45,7 @@ defmodule SoftDelete do
   def icon, do: "client/icon.svg"
 
   require Logger
-  alias OneCore.{Artifact, Bucket, Call, Hooks, Apps, Servers, User}
+  alias OneCore.{Artifact, Bucket, Call, Hooks, Apps, User}
   alias OneCore.Apps.Lifecycle
 
   # How long a deleted item can be restored, after which it's purged.
@@ -249,8 +249,6 @@ defmodule SoftDelete do
   # The apps that required it went with it (`with`), and are one item with it: Restore brings them all back. What they
   # kept and made that goes with them, One Core says (`artifacts`).
   def hook("uninstalled", %{"for" => owner, "name" => name, "app" => app} = about, call) do
-    # It's heard where the app was uninstalled, and its items are kept by a server acting for the network.
-    if not Servers.here?(call.installed), do: Call.forward(call, call.installed)
     went = for %{"name" => other, "app" => artifact} <- List.wrap(about["with"]), do: %{"name" => other, "artifact" => artifact}
 
     record = %{
@@ -274,8 +272,6 @@ defmodule SoftDelete do
   # goes as one deleted does, so it comes back as it was if it's restored. One that went already, as when two servers
   # superseded it at once, has nothing left to delete.
   def hook("superseded", %{"app" => app}, call) do
-    if not Servers.here?(call.installed), do: Call.forward(call, call.installed)
-
     if app =~ @app and Bucket.list(app <> "/latest") != [] do
       unused!(app)
       deleted(call, app)

@@ -34,6 +34,11 @@ defmodule GitRepos do
   @impl true
   def requires, do: %{"core" => ">= 0.32.167"}
 
+  # Every repo is listed in one index, the network's, which a call reads and writes whoever it's for, so what it
+  # keeps is whoever Git Repos is installed for's, and it runs on their servers.
+  @impl true
+  def own, do: :installed
+
   @impl true
   def hooks, do: ["soft-delete.moved"]
 
@@ -319,9 +324,7 @@ defmodule GitRepos do
   end
 
   @impl true
-  def hook("soft-delete.moved", %{"artifact" => name, "to" => to} = about, call) do
-    # It's heard where the repo was removed, and its list is kept by a server acting for whoever Git Repos is installed for.
-    if not OneCore.Servers.here?(call.installed), do: Call.forward(call, call.installed)
+  def hook("soft-delete.moved", %{"artifact" => name, "to" => to} = about, _call) do
     if name =~ @repo, do: indexed(name, to, about["as"] || name)
     nil
   end
