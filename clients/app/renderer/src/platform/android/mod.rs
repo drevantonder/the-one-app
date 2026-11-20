@@ -644,6 +644,10 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                             screen.dragged();
                         }
                     }
+                    // Scrolled to its top and pulled on, what it's in that drags that way (a sheet) takes the finger.
+                    if touch.panning && !touch.on_input && screen.hand_over(touch.start, point(touch.last.x - at.x, touch.last.y - at.y), at) {
+                        touch.panning = false;
+                    }
                     if touch.panning {
                         screen.pan(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
                     } else if !touch.on_input && !touch.stopped {

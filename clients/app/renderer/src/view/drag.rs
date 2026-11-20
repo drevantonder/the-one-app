@@ -61,6 +61,38 @@ impl Screen {
         });
     }
 
+    /// A finger scrolling what's at `at` by `by` (as `drag_scroll` takes it), now at `finger`: where what it scrolls is
+    /// at its start and the finger pulls on past it the way something it's in drags (a sheet pulled down), that takes
+    /// the finger from here, as an iPhone's sheet takes the pull of its content scrolled to its top. → whether it did.
+    pub fn hand_over(&mut self, at: Point<f32>, by: Point<f32>, finger: Point<f32>) -> bool {
+        let along = by.x.abs() > by.y.abs();
+        let pulled = if along { by.x } else { by.y };
+        if pulled >= 0.0 {
+            return false;
+        }
+        let chain = self.under(at);
+        let Some(at_start) = chain.iter().position(|id| {
+            self.placed(*id).and_then(|placed| placed.scroll).is_some_and(|(_, _, its_along)| its_along == along)
+        }) else {
+            return false;
+        };
+        let scroller = chain[at_start];
+        let now = self.scrolled.get(&scroller).copied().unwrap_or(point(0.0, 0.0));
+        if (if along { now.x } else { now.y }) > 0.0 {
+            return false;
+        }
+        let Some(id) = chain[at_start + 1..].iter().copied().find(|id| self.drags(*id, by) == Some(true)) else { return false };
+        let Some((along, down)) = self.tree.nodes.get(&id).and_then(|node| node.prop("drag")).map(ways) else { return false };
+        self.coasts.remove(&scroller);
+        let mut velocity = Velocity::default();
+        velocity.add(finger, self.js.clock().now());
+        self.drag = Some(Drag { id, along, down, start: finger, began: true, velocity });
+        if self.tree.nodes.get(&id).is_some_and(|node| node.listens("dragstart")) {
+            self.tell(id, "dragstart", json!({"clientX": finger.x, "clientY": finger.y}));
+        }
+        true
+    }
+
     /// The press moved to `at`: past a few points, its node follows it, the way it drags, and gives past its
     /// constraints.
     pub(super) fn drag_moved(&mut self, at: Point<f32>) {

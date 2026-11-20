@@ -854,6 +854,10 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                         screen.dragged();
                     }
                 }
+                // Scrolled to its top and pulled on, what it's in that drags that way (a sheet) takes the finger.
+                if touch.panning && !touch.on_input && screen.hand_over(touch.start, point(touch.last.x - at.x, touch.last.y - at.y), at) {
+                    touch.panning = false;
+                }
                 if touch.panning {
                     screen.drag_scroll(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
                 } else if !touch.on_input && !touch.stopped {
