@@ -268,6 +268,12 @@ pub fn run() {
     if !restarted && !claim(&home, link.as_deref()) {
         return;
     }
+    // The app outlives the terminal it was started from, as an app started from one does (`start notepad`): Windows
+    // ends what's attached to a console as it closes, and `one.exe` is a console program, so the app leaves the one it
+    // has, its log taking what it says (`keep_log`). The Surface's app quit as a terminal closed, attached to it through
+    // ten updates (21 Nov).
+    #[cfg(windows)]
+    let _ = unsafe { windows::Win32::System::Console::FreeConsole() };
     if let Err(error) = launcher(home, restarted, link.and_then(|link| crate::link(&link)), started) {
         eprintln!("{error:#}");
     }
@@ -694,6 +700,17 @@ fn restart(shown: bool) {
         }
     };
     command.env("ONE_RESTARTED", "1").env("ONE_REOPEN", reopen).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped());
+    // Of nothing this one was started from: no console on Windows, a session of its own elsewhere, so no terminal ends
+    // it as it closes.
+    #[cfg(windows)]
+    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0000_0008 | 0x0000_0200); // DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
+    #[cfg(unix)]
+    unsafe {
+        std::os::unix::process::CommandExt::pre_exec(&mut command, || {
+            libc::setsid();
+            Ok(())
+        });
+    }
     if shown {
         command.env_remove("ONE_HIDDEN");
     } else {
