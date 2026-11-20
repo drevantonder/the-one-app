@@ -13,11 +13,11 @@
 # ports. Its PID is in the folder's `pid`, and `kill $(cat <folder>/pid)` (or Ctrl-C) stops all of it. Each server's
 # is in `<folder>/<server>.pid`.
 #
-# It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
-# command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
-# Its first owner is the user `owner`, and `owner`, `alice` and `bob` have their encryption set up on the client's
-# device. Another device signs in at its address by the code it shows, which `one sign-in approve` approves as whoever
-# ONE_AS names.
+# It's a network being built, so a client says which user it acts as: ONE_AS=<name> before a command acts as that
+# user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network. Its first owner is
+# the user `owner`, whose device its client is, and `owner`, `alice` and `bob` have their encryption set up on it.
+# Another device signs in at its address by the code it shows, which `one sign-in approve` approves as whoever ONE_AS
+# names.
 #
 # Its edge runs here too (`core/edge/`), as every network has one: its Workers in `wrangler dev`, with a local S3
 # store as the bucket. Servers keep their blobs through the presigner there, people sign in at its address, and
@@ -145,6 +145,20 @@ start() {
   fi
 }
 start server
+
+# Its client is its first owner's device, signed in at its address by a code as any device is, so it's someone's
+# however it reaches the network: `ONE_AS` says who it acts as to a server alone, and a device whose servers don't
+# answer asks the address for its token. It's approved from a client that asks the server alone, which needs none.
+if [[ -z $owner && $(jq -r .who "$folder/client/network") == null ]]; then
+  jq '{address}' "$folder/client/network" >"$folder/client/network.new" && mv "$folder/client/network.new" "$folder/client/network"
+  ONE_HOME=$folder/client "$one" sign-in devices >"$folder/client.log" 2>&1 &
+  signing=$!
+  code='[0-9A-Z]{4}-[0-9A-Z]{4}'
+  if grep -q -m1 -E "$code" <("$tail" -F --pid=$signing -n +1 "$folder/client.log"); then
+    ONE_AS=owner ONE_HOME=$folder/only-server "$one" sign-in approve --code "$(grep -o -m1 -E "$code" "$folder/client.log")" >/dev/null
+  fi
+  wait $signing || { cat "$folder/client.log" >&2 && exit 1; }
+fi
 [[ -z $standby ]] || start standby
 
 # In a network being built, its people's encryption is set up as each one's first device sets it up: their key is

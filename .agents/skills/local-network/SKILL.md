@@ -31,8 +31,9 @@ Run it in the background and let your harness tell you when it ends; put the fol
     ONE_SUBJECT=network target/debug/one deploy --name <app> --files-from apps/<app>
 
 Always set `ONE_HOME`: without it, the installed `one` is the owner's live client on the live network, and a debug
-build (yours) is a client of its own that's on no network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
-`ONE_SUBJECT=network` runs a call for a group or the network.
+build (yours) is a client of its own that's on no network. `<folder>/client` is `owner`'s device, signed in at the
+network's address as any device is; `ONE_AS` picks the user it acts as, which a server of a network being built
+believes; `ONE_SUBJECT=groups/<name>` or `ONE_SUBJECT=network` runs a call for a group or the network.
 
 `owner`, `alice` and `bob` start with their encryption set up, their keys on `<folder>/client`'s device, so the
 Vault opens at once in `one` and in the app run with that home. Anyone else is set up with `one encryption approve`
@@ -101,11 +102,6 @@ so a server installed with `one serve on` there reconnects by itself.
 
 ## Mistakes already made
 
-- Copying `<folder>/client`'s `key` and `network` onto a phone: that client acts as whoever `ONE_AS` says and is
-  nobody's at the address, so the phone says it was removed once its token ends. Approve the phone by its code.
-- Running `one` with `ONE_HOME` set and no `ONE_AS`: no one is signed in there, so it signs
-  `<folder>/client` out and deletes its `servers` file. Set `ONE_AS=owner` (or the user) with `ONE_HOME`, as the
-  network prints.
 - Starting a network with `--owner` and joining it with a virtual passkey just to approve a phone.
 - Running `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
   (`tooling/network` does it itself).

@@ -59,7 +59,7 @@ defmodule Mix.Tasks.Network do
   """
   use Mix.Task
   require Logger
-  alias OneCore.{Edge, Folder, Iroh, Server, Servers, User}
+  alias OneCore.{Folder, Server, Servers, User}
   alias OneCore.Apps.Deploy
 
   @root Path.expand("..", __DIR__)
@@ -148,20 +148,15 @@ defmodule Mix.Tasks.Network do
       end
     end
 
-    # A client of a network with an address asks there which servers to reach, and gets its token by signing in:
-    # one of a network being built is given its token here, since nobody signs in to that. A server's token for a
-    # client says the server's list, so the one a network's own server gives lets a client in whoever its user
-    # is. Without an address, a client is told here where the servers acting for the network are.
+    # A client of a network with an address asks there which servers to reach, and gets its token by signing in
+    # (`tooling/network` signs a network being built's in as its first owner). Without an address, a client is told
+    # here where the servers acting for the network are.
     client = Path.join(folder, "client")
     File.mkdir_p!(client)
 
     cond do
       not Servers.here?("network") ->
         :ok
-
-      address && options[:development] ->
-        {:ok, key} = Iroh.key(Path.join(client, "key"))
-        File.write!(Path.join(client, "network"), JSON.encode!(%{address: address, token: Edge.token(key)}))
 
       address ->
         File.write(Path.join(client, "network"), JSON.encode!(%{address: address}), [:exclusive])
