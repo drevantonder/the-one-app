@@ -1442,7 +1442,9 @@ impl Screen {
             Some(captured) => self.chain_from(captured),
             None => chain,
         };
-        self.drag_moved(at);
+        if !self.swiping() {
+            self.drag_moved(at);
+        }
         self.pointer_event(&target, "pointermove", at, 0, None);
         self.select_moved(at);
         // A press held in an input selects as it's dragged.
@@ -1524,7 +1526,7 @@ impl Screen {
         }
         let chain = self.under(at);
         self.captured = chain.first().copied();
-        if button == 0 {
+        if button == 0 && !self.swiping() {
             self.drag_down(&chain, at);
         }
         self.pointer_event(&chain, "pointerdown", at, button, None);
@@ -1620,7 +1622,9 @@ impl Screen {
             Some(captured) => self.chain_from(captured),
             None => self.under(at),
         };
-        self.drag_up(at, false);
+        if !self.swiping() {
+            self.drag_up(at, false);
+        }
         self.pointer_event(&target, "pointerup", at, button, None);
         self.select_up();
         // What the pointer selected goes on the primary selection, as Linux's fields put it, never a password.

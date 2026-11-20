@@ -55,6 +55,12 @@ fn ways(drag: &Value) -> (bool, bool) {
 }
 
 impl Screen {
+    /// Whether a trackpad's fingers hold what's dragged: then it's theirs, and the pointer, which doesn't move as they
+    /// swipe, neither moves it nor lets it go, as AppKit keeps a swipe's scroll apart from the mouse's moves.
+    pub(super) fn swiping(&self) -> bool {
+        matches!(self.trackpad, Trackpad::On(_))
+    }
+
     /// Whether the innermost node at `at` that drags, drags the way a finger moved `by`.
     pub(super) fn drags(&self, id: Id, by: Point<f32>) -> Option<bool> {
         let (along, down) = ways(self.tree.nodes.get(&id)?.prop("drag")?);
