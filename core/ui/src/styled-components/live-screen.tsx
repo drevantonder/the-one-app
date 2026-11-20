@@ -438,7 +438,13 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       </Show>
       <View style={look.bar}>
         <Show when={state().matches("pictures")}>
-          <Text style={look.note}>Live video didn't connect, so this updates each second: {said(state().context.why)}</Text>
+          {/* Why it fell back and what it shows are two things, said as two lines. */}
+          <View style={look.note}>
+            <Text>Live video didn't connect, so this updates each second.</Text>
+            <Show when={said(state().context.why)}>
+              <Text>{said(state().context.why)}</Text>
+            </Show>
+          </View>
         </Show>
         <BarEnd value={true}>
           <Button variant="ghost" size="icon" aria-label={messages.fullScreen} onPress={toggle}>
