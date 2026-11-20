@@ -10,6 +10,7 @@ import fields from "./fields.scenes.tsx"
 import images from "./images.scenes.tsx"
 import lists from "./lists.scenes.tsx"
 import live from "./live.scenes.tsx"
+import motion from "./motion.scenes.tsx"
 import over from "./over.scenes.tsx"
 import screens from "./screens.scenes.tsx"
 import states from "./states.scenes.tsx"
@@ -26,7 +27,7 @@ const look = styles({
   alone: { padding: tokens.grid[4], gap: tokens.grid[4] },
 })
 
-const scenes: Scenes = { ...text, ...images, ...buttons, ...lists, ...fields, ...states, ...tabs, ...widgets, ...over, ...actions, ...live, ...styling, ...screens }
+const scenes: Scenes = { ...text, ...images, ...buttons, ...lists, ...fields, ...states, ...tabs, ...widgets, ...over, ...actions, ...live, ...motion, ...styling, ...screens }
 const draw = (scene: Scene) => (typeof scene === "function" ? scene() : scene.render())
 const named = () => {
   const to = link()
@@ -34,8 +35,10 @@ const named = () => {
 }
 const families = [...new Set(Object.keys(scenes).map((name) => name.split("/")[0]))]
 
-/** Every scene by name, with what's pressed first, which the scenes' runner reads (`#scenes`). */
-const listed = () => JSON.stringify(Object.entries(scenes).map(([name, scene]) => (typeof scene === "function" ? { name, taps: [] } : { name, taps: scene.taps ?? [], size: scene.size, touch: scene.touch })))
+/** Every scene by name, with what's pressed first and the gestures played on it, which the scenes' runners read
+ * (`#scenes`). */
+const listed = () =>
+  JSON.stringify(Object.entries(scenes).map(([name, scene]) => (typeof scene === "function" ? { name, taps: [] } : { name, taps: scene.taps ?? [], size: scene.size, touch: scene.touch, motions: scene.motions })))
 
 render(() => (
   <Show when={named() !== "scenes"} fallback={<Text>{listed()}</Text>}>

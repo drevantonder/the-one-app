@@ -30,8 +30,8 @@ shrunk sequence is what the commit says.
 ## Screens
 
 UI work is shown with real pictures of the real app, never described. Pictures are for checking your own change:
-take the few that check it, not every size and theme, a before only where judging it needs one, and a recording
-only where motion is what changed. A change that goes live in seconds, as an app deploy does, is seen live.
+take the few that check it, not every size and theme, a before only where judging it needs one, and where motion
+is what changed, its filmstrip and curve (Motion, below). A change that goes live in seconds, as an app deploy does, is seen live.
 A phone-sized desktop window (390×844) shows most screen changes; build for a phone or simulator only when the change
 is about that platform. Save pictures in your harness's scratch folder, never in the repo, and look at each before
 you show it. Screen wording and look follow `DESIGN.md`: read the section of the screen you change first.
@@ -57,7 +57,21 @@ the browser: it will draw the web too. Until it does, browsers, MCP hosts and ol
 large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but matching the DOM
 isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
 
-### Which to use
+### Motion: every change to how something moves
+
+What moves under a finger or a pointer (a drag, a swipe, a sheet pulled, a list flung or pulled past its end) and how
+it springs is played headless, through the real gesture and spring code, on a paused clock, at 60 and 120 Hz, in a
+few seconds: give the scene that shows it `motions` (the `Motion` type in `core/ui/src/types/ui.d.ts`), then, in
+core/ui, after `bun build.js`:
+
+    bun motion.js --out <scratch>/before [<folder>…]          # on main, before the change
+    bun motion.js --out <scratch>/after --against <scratch>/before [<folder>…] [--watch]
+
+Each motion gets a filmstrip, a position-over-time curve beside the finger's and before's, and the frames that went
+over their budget; `index.html` there is the contact sheet. `--watch` plays them again as you edit. A live window
+takes the same `replay` through the inspector.
+
+
 
 On a computer every app's page opens as a native window: drive it with the inspector (Native windows, below). A
 screen's states with no network → `bun scenes.js` (above): before against after.

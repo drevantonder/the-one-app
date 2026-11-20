@@ -449,8 +449,23 @@ export declare function Widget(props: {
 // (core/ui/gallery) and for comparing what the DOM and a native host draw (core/ui/scenes.js). A scene is what to
 // draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
 // (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
-// finger points at it (`touch`). Its name is its family's and its own: "Buttons/Variants".
-export type Scene = (() => Element) | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean }
+// finger points at it (`touch`), and the gestures played on it, frame by frame (`motions`, core/ui/motion.js). Its
+// name is its family's and its own: "Buttons/Variants".
+export type Scene =
+  | (() => Element)
+  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion> }
+/** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, with what's watched move
+ * (`follow`, named as a tap is; what scrolls under it is always watched). */
+export type Motion = { from: Tap; gesture: Gesture; follow?: Tap }
+/** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
+ * a short quick flick; dragged with `pauses` of a fifth of a second along the way; a sheet pulled down and let go; or
+ * each stretch it moves (`moves`, a stretch with neither `dx` nor `dy` holding still), held at the end unless `lift`. */
+export type Gesture =
+  | { swipe: [number, number]; speed?: number }
+  | { fling: [number, number] }
+  | { drag: [number, number]; pauses?: number; speed?: number }
+  | { pull: number }
+  | { moves: { dx?: number; dy?: number; ms: number }[]; lift?: boolean }
 /** What's done, in order (core/ui/scenes.js runs them): pressed by what it's named or says, or that and its role
  * where a name alone is two things (a field's label and its select); a point pressed; a key as the DOM names it, with
  * any of `ctrl`, `shift`, `alt` or `meta` held; or text typed where the keyboard is. */
