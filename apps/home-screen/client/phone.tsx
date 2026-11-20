@@ -14,7 +14,7 @@ import { type Paging } from "./paging.ts"
 
 export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging }) {
   const { homes, pages, laid, library } = props.layout
-  const { downY, xOf, opacityOf, sectionsX, dragged, wheeling, swipes, along, wheel } = props.paging
+  const { downY, xOf, opacityOf, sectionsX, dragged, swipes, along, wheel } = props.paging
   // The owner shown, how far along their pages and the App Library are, and how wide their Home is.
   const shown = () => state().context.at.owner
   const across = () => xOf(shown())[0]()
@@ -22,8 +22,8 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
   // out, go there and fade in, as iOS's pages do (`glide`).
   const opacity = () => opacityOf(shown())[0]()
   // What's over Home but not its pages, the owner pill and the dots, goes with its last page to the App Library, one to
-  // one as the pages are dragged or a wheel moves them, and by their spring otherwise.
-  const withHome = () => [!wheeling() && dragged() === undefined && !reducedMotion() && looks.paging, looks.shifted(-sectionsX())]
+  // one as the pages are dragged, and by their spring otherwise.
+  const withHome = () => [dragged() === undefined && !reducedMotion() && looks.paging, looks.shifted(-sectionsX())]
   const homeWidth = (owner: number) => Math.max(1, homes(owner).length) * room().width
   // Each other owner's pages are moved so the page they were last on is where the shown owner's is, ready for a swipe
   // up or down to them.

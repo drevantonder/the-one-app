@@ -4,14 +4,11 @@
   "workspaces": {
     "": {
       "dependencies": {
-        "wheel-gestures": "2.3.0",
         "xstate": "5.33.3",
       },
     },
   },
   "packages": {
-    "wheel-gestures": ["wheel-gestures@2.3.0", "", {}, "sha512-6b+PIXuKIy0ibVnF04GoijGKGIDwjlYSK7bCgicuQwPLivfjoLeCCK0bwbjyOdrStDTNPlyGFixIj0d0kZzwiQ=="],
-
     "xstate": ["xstate@5.33.3", "", {}, "sha512-AnDRjS/GyKHmbA1PyhVCYBqYsA7EGe3KGgeD0ht3NFsXzoz7leX/HQDFX9QlHFJ/ltLHPsgChJYwPzRvB/0b4g=="],
   }
 }

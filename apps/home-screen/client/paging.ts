@@ -1,5 +1,4 @@
 import { createEffect, createSignal, onSettled, untrack } from "solid-js"
-import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createVelocityTracker, type Dragged, haptic, keydown, type Pressed, reducedMotion, viewport, type Wheeled } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop } from "./pager.ts"
 import { along as alongOf, card as cardOf, cell as cellOf, INSET, lefts, PILLS, CARD_TOP } from "./layout.ts"
@@ -71,9 +70,6 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
 
   const card = () => cardOf(room())
   const cardLeft = () => (viewport().width - card().width) / 2
-  /// Whether a wheel's turns are moving the pages one to one, as a trackpad's fingers do where the system says nothing
-  /// of when they lift, which their spring doesn't follow.
-  const [wheeling, setWheeling] = createSignal(false)
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
     if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + alongOf(untrack(room), page) - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
@@ -254,52 +250,27 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     if ((home.getSnapshot().context.held?.stack?.length ?? 0) > before) haptic("selection")
   }
 
-  // A trackpad's two fingers along the pages move them one to one, as a finger does, giving at the ends, and as they
-  // lift the pages settle as a finger's do, at the speed they were going, and the momentum that follows is let be.
-  // Where the system says when they lift (a Mac's, as the wheel event's `phase`), that's when; elsewhere, as on the
-  // DOM, wheel-gestures tells, by where the momentum begins, or the events stop. Up and down, or a wheel, is one owner
-  // a gesture at most, however hard it's flicked, as macOS's Launchpad and an iPad with a trackpad page, once its
-  // pushes add up to 30 points. Up and down over the App Library, which scrolls itself, is its own.
-  const trackpad = WheelGestures({ preventWheelAction: false, reverseSign: false })
-  let gesture: { axis?: "x" | "y"; owner: number; from: number; base: number; done: boolean } | undefined
-  trackpad.on("wheel", ({ isStart, isEnding, isMomentum, axisMovement: [x, y], axisVelocity, event }) => {
-    if (isStart) {
-      gesture = undefined
-      if (!home.getSnapshot().matches("nothing")) return
-      gesture = { owner: home.getSnapshot().context.at.owner, base: 0, from: 0, done: false }
-    }
-    if (!gesture || gesture.done) return
-    // Which way it goes is the first way it moves: fingers set down (`mayBegin`) don't move. Along, they catch the
-    // pages where they are, as a finger does.
-    if (!gesture.axis) {
-      if (!event.deltaX && !event.deltaY) return
-      gesture.axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
-      const moving = sideways(gesture.owner)
-      if (gesture.axis === "x") stop(moving)
-      Object.assign(gesture, { base: moving.value - x + event.deltaX, from: Math.round(moving.value / pitch()) })
-    }
-    if (gesture.axis === "y") {
-      if (Math.abs(y) < 30) return
-      gesture.done = true
-      return home.send({ type: "step", owner: Math.sign(y) as 1 | -1 })
-    }
-    const moving = sideways(gesture.owner)
-    const end = (stops(gesture.owner) - 1) * pitch()
-    const lifted = isMomentum || isEnding || (event as Wheeled).phase === "ended" || (event as Wheeled).phase === "cancelled"
-    if (!lifted) {
-      const value = gesture.base + x
-      setWheeling(true)
-      return jump(moving, value < 0 ? give(value, pitch()) : value > end ? end + give(value - end, pitch()) : value)
-    }
+  // A wheel's turns, and a trackpad's fingers where the host doesn't drag the pages along with them (up and down, and
+  // wherever it says nothing of them), page as macOS's Launchpad and an iPad with a trackpad do: one screenful along or
+  // one owner up and down a gesture, however hard it's flicked, once its pushes add up to 30 points one way. A gesture
+  // starts as the fingers touch (`began`) or the wheel turns after a quiet moment, as a wheel has no phases, and what
+  // the system scrolls on with once the fingers have lifted (`momentum`) is the gesture's, which moves nothing, as a
+  // Mac's paging scroll view and Safari's swipe between pages let it be. Up and down over the App Library, which
+  // scrolls itself, is its own.
+  let gesture: { at: number; x: number; y: number; done: boolean } | undefined
+  const wheel = (event: Wheeled) => {
+    if (event.momentum) return
+    const quiet = !gesture || event.timeStamp - gesture.at > 250
+    if (event.phase === "began" || (quiet && event.phase !== "ended" && event.phase !== "cancelled")) gesture = { at: event.timeStamp, x: 0, y: 0, done: false }
+    if (!gesture) return
+    Object.assign(gesture, { at: event.timeStamp, x: gesture.x + event.deltaX, y: gesture.y + event.deltaY })
+    if (gesture.done || !home.getSnapshot().matches("nothing")) return
+    const [x, y] = [Math.abs(gesture.x), Math.abs(gesture.y)]
+    if (Math.max(x, y) < 30) return
     gesture.done = true
-    setWheeling(false)
-    const velocity = isEnding ? 0 : axisVelocity[0] * 1000
-    const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner), pitch())
-    if (untrack(reducedMotion)) glide(moving, screen * pitch(), velocity)
-    else jump(moving, screen * pitch())
-    home.send({ type: "settled", at: { owner: gesture.owner, screen } })
-  })
-  const wheel = (event: Wheeled) => trackpad.feedWheel({ deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: 0, timeStamp: event.timeStamp, momentum: event.momentum, phase: event.phase } as WheelEventData)
+    if (x > y) home.send({ type: "step", screen: Math.sign(gesture.x) as 1 | -1 })
+    else home.send({ type: "step", owner: Math.sign(gesture.y) as 1 | -1 })
+  }
 
   onSettled(() => {
     const sliding = home.on("slide", ({ at, smooth }) => slide(at, smooth))
@@ -335,7 +306,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       slide(home.getSnapshot().context.at, true)
     }
   }
-  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, dragged, card, cardLeft, wheeling, pageAt, pageUnder, swiping, swipes, along, wheel, release }
+  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, dragged, card, cardLeft, pageAt, pageUnder, swiping, swipes, along, wheel, release }
 }
 
 export type Paging = ReturnType<typeof createPaging>
