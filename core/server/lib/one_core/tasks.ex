@@ -28,9 +28,11 @@ defmodule OneCore.Tasks do
   @extension "io.modelcontextprotocol/tasks"
   @capabilities "io.modelcontextprotocol/clientCapabilities"
 
-  # How long a task is kept once it ends, and how often a client is asked to check on one, in milliseconds.
+  # How long a task is kept once it ends, and how often a client is asked to check on one at most and at least, in
+  # milliseconds: a quarter of its age between them, so a task that ends in a moment is seen to have ended in one.
   @kept :timer.hours(1)
   @poll 1_000
+  @poll_first 100
 
   @doc "What a server says it has of tasks, among its capabilities' extensions."
   def extension, do: %{@extension => %{}}
@@ -126,17 +128,8 @@ defmodule OneCore.Tasks do
   """
   def made(%{principal: {actor, subject}, tool: tool, created: created}) do
     name = "#{created}-#{Base.url_encode64(:crypto.strong_rand_bytes(18), padding: false)}"
-
-    task = %{
-      "taskId" => "#{subject}/tasks/#{name}",
-      "status" => "working",
-      "createdAt" => at(created),
-      "lastUpdatedAt" => at(created),
-      "ttlMs" => nil,
-      "pollIntervalMs" => @poll
-    }
-
-    record = Map.merge(task, %{"actor" => actor, "server" => Server.key(), "tool" => tool})
+    record = record("#{subject}/tasks/#{name}", actor, tool, created)
+    task = shown(record)
     :ok = Artifact.write(artifact(subject), name, JSON.encode!(record))
     Task.Supervisor.start_child(OneCore.Asks, fn -> swept(subject) end)
     task
@@ -213,7 +206,7 @@ defmodule OneCore.Tasks do
   def handle(method, %{"taskId" => id} = params, {actor, _subject} = principal, forwarded) when is_binary(id) do
     with {:ok, subject, name} <- named(id),
          :here <- here(method, params, principal, forwarded, User.owner(subject)),
-         {:ok, record} <- record(subject, name, actor) do
+         {:ok, record} <- runs_here(id, actor) || record(subject, name, actor) do
       handled(method, params, record, subject, name, principal, forwarded)
     end
   end
@@ -317,6 +310,34 @@ defmodule OneCore.Tasks do
 
   defp not_found, do: {:error, -32602, "Failed to retrieve task: Task not found"}
 
+  # What's kept of a task as it's made: MCP's task, with who started it, the server running it and its tool.
+  defp record(id, actor, tool, created) do
+    %{
+      "taskId" => id,
+      "status" => "working",
+      "createdAt" => at(created),
+      "lastUpdatedAt" => at(created),
+      "ttlMs" => nil,
+      "pollIntervalMs" => @poll_first,
+      "actor" => actor,
+      "server" => Server.key(),
+      "tool" => tool
+    }
+  end
+
+  # A task this server is running, for `actor`, who started it, as it was kept, without reading the bucket:
+  # `{:ok, record}`, or `nil` for one it isn't, as one that has just ended, whose end is in the bucket.
+  defp runs_here(id, actor) do
+    case State.task(id) do
+      {_call, %{principal: {^actor, _subject}, tool: tool, created: created, state: state}}
+      when state in [:routing, :waiting, :running, :input_required] ->
+        {:ok, record(id, actor, tool, created)}
+
+      _ ->
+        nil
+    end
+  end
+
   @doc false
   # Keeps how the call that's a task ended, from the process that ran it: what it answered, or the JSON-RPC error
   # it ended with. One cancelled meanwhile was kept so by whoever cancelled it.
@@ -367,7 +388,8 @@ defmodule OneCore.Tasks do
         _working -> "working"
       end
 
-    shown = Map.merge(shown(record), %{"status" => status, "lastUpdatedAt" => at(row.updated)})
+    polled = (System.system_time(:millisecond) - row.created) |> div(4) |> max(@poll_first) |> min(@poll)
+    shown = Map.merge(shown(record), %{"status" => status, "lastUpdatedAt" => at(row.updated), "pollIntervalMs" => polled})
     shown = if message = State.message(row), do: Map.put(shown, "statusMessage", message), else: shown
 
     if status == "input_required",
