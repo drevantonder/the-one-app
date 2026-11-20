@@ -825,6 +825,26 @@
             "text": "Utilities"
           }
         }
+      ],
+      "An app in a category opens the app, not the category": [
+        {
+          "press": {
+            "role": "button",
+            "name": "Weather",
+            "nth": 3
+          }
+        },
+        {
+          "wait": 600
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "heading",
+              "name": "Utilities"
+            }
+          }
+        }
       ]
     },
     "motions": {
@@ -1500,6 +1520,32 @@
       "one/client": {
         "login": false
       }
+    }
+  },
+  "App Library, by a finger": {
+    "like": "App Library",
+    "touch": true,
+    "checks": {
+      "An app in a category opens the app, not the category": [
+        {
+          "press": {
+            "role": "button",
+            "name": "Weather",
+            "nth": 3
+          }
+        },
+        {
+          "wait": 600
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "heading",
+              "name": "Utilities"
+            }
+          }
+        }
+      ]
     }
   }
 }

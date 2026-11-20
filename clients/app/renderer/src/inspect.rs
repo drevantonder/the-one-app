@@ -53,11 +53,12 @@
 //! - `hover` (a selector, or a point) → `{hovered}`: the pointer moves to the point, or the node's middle, pressing
 //!   nothing, as Playwright's `hover`: what's under it is hovered and told the pointer moved.
 //! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
-//!   presses there as a mouse does, so what takes it is what a person's press reaches, as the window drew it (what
+//!   presses there as a mouse does, or on a window for a finger, a finger does, through what every phone's host takes
+//!   one by (`view::touch`), so what takes it is what a person's press reaches, as the window drew it (what
 //!   doesn't take the pointer, `pointerEvents: "none"`, and what's clipped away are passed over): an input takes the
-//!   keyboard, its caret there, and what listens for `click` gets one. A node whose middle doesn't reach it, scrolled
-//!   out of sight or under something, is pressed itself. `clicks` 2 selects the word there and 3 its line, and `shift`
-//!   extends the selection.
+//!   keyboard, its caret there, and the innermost that listens for `click` gets one. A node out of sight (scrolled
+//!   away, or clipped) is pressed itself; one under something in sight is refused, saying what a press there reaches.
+//!   `clicks` 2 selects the word there and 3 its line, and `shift` extends the selection.
 //! - `type` (`text`, and a selector but for `text`, or the input with the keyboard) → `{typed, value, editing}`: the
 //!   text typed into it, a character at a time, each an `input` event.
 //! - `ime` (`select`, a `[start, end]` in UTF-16 units, then `preedit`, with its `cursor` in UTF-16 units, or

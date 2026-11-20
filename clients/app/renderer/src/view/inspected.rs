@@ -85,15 +85,23 @@ impl Screen {
             }
             "tap" => {
                 // As a test clicks: the point, or a node's middle where that reaches it as the pointer finds it
-                // there; the pointer moves there, goes down and comes up, as a mouse's does, so what takes it is what
-                // a person's press would reach. A node whose middle doesn't reach it (scrolled out of sight, or under
-                // something) is pressed itself, as it was asked for by name.
+                // there; the pointer moves there, goes down and comes up, as a mouse's does, or a finger on a window for
+                // one, through what every phone's host takes a finger by (`touch`), so what takes it is what a person's
+                // press would reach. A node out of sight (scrolled away, or clipped) is pressed itself, as it was asked
+                // for by name; one under something in sight isn't, as a person's press there reaches what's over it,
+                // which it says.
                 let at = match request.selects() {
                     true => {
                         let node = inspect::one(&self.tree, request)?;
                         let at = self.rects.get(&node).map(|rect| rect.centre()).map(|(x, y)| crate::geometry::point(x, y));
                         let reached = at.map(|at| self.under(at)).unwrap_or_default();
-                        if !reached.contains(&node) && (reached.is_empty() || self.pressed_in(&reached) != self.pressed_in(&self.chain_from(node))) {
+                        let seen = at.zip(self.placed(node)).is_some_and(|(at, placed)| placed.shown.contains(&at));
+                        let other = self.pressed_in(&reached) != self.pressed_in(&self.chain_from(node));
+                        if !reached.contains(&node) && (reached.is_empty() || other) {
+                            if seen && !reached.is_empty() {
+                                let over = reached.first().and_then(|id| self.tree.nodes.get(id)).and_then(|over| over.str("aria-label").or(over.str("role")).map(str::to_owned));
+                                bail!("its middle is under something else{}, and a press there reaches {}", over.map_or(String::new(), |over| format!(" ({over})")), self.pressed_in(&reached).map_or("nothing".into(), |id| format!("node {id}")));
+                            }
                             let tapped = self.press(node)?;
                             return Ok(json!({"tapped": tapped, "editing": self.editing.fields.get(&tapped).map(editing::Field::value)}));
                         }
@@ -110,9 +118,15 @@ impl Screen {
                     Some((frame, _)) => Some(frame),
                     None => self.pressed_in(&self.under(at)),
                 };
-                self.pointer_moved(at);
-                self.pointer_down(at, 0, request.bool("shift"));
-                self.pointer_up(at, 0);
+                if self.touch {
+                    let time = self.js.clock().now();
+                    self.touch(&super::touch::Fingers::PHONE, 0, at, super::touch::Phase::Down, time);
+                    self.touch(&super::touch::Fingers::PHONE, 0, at, super::touch::Phase::Up, time + 80.0);
+                } else {
+                    self.pointer_moved(at);
+                    self.pointer_down(at, 0, request.bool("shift"));
+                    self.pointer_up(at, 0);
+                }
                 // A point in an input: `clicks` 2 selects a word there, 3 its line.
                 let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u8;
                 if let Some(tapped) = tapped.filter(|tapped| clicks > 1 && self.editing.fields.contains_key(tapped)) {
