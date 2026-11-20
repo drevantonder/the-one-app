@@ -15,23 +15,23 @@ pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
         Err(error) => format!("{error:#}"),
     };
     reported(entrypoint, started, &why);
-    unopened_launcher(entrypoint, why).await
+    unopened_launcher(entrypoint, why, false).await
 }
 
 /// A phone's launcher that isn't drawn natively is its page's.
 #[cfg(mobile)]
-pub(super) async fn unopened_launcher(_: &str, _: String) -> Option<WindowId> {
+pub(super) async fn unopened_launcher(_: &str, _: String, _: bool) -> Option<WindowId> {
     None
 }
 
-/// The launcher's panel in place of one whose page didn't open: its problem box, with Try Again, on the client's own
-/// page (`UNOPENED`), or where that can't be drawn either, why in words alone; where this computer's native windows
-/// can't start, none.
+/// The launcher's panel in place of one whose page didn't open, or `crashed` once it had: its problem box, with Try
+/// Again, or Reload where it crashed, on the client's own page (`UNOPENED`), or where that can't be drawn either, why
+/// in words alone; where this computer's native windows can't start, none.
 #[cfg(desktop)]
-pub(super) async fn unopened_launcher(entrypoint: &str, why: String) -> Option<WindowId> {
+pub(super) async fn unopened_launcher(entrypoint: &str, why: String, crashed: bool) -> Option<WindowId> {
     let name = named(entrypoint, None).await;
-    let said = format!("{name} didn't open: {why}");
-    let unopened = Unopened { entrypoint: entrypoint.to_owned(), subject: None, link: entrypoint.to_owned(), name, why: why.clone(), crashed: false };
+    let said = if crashed { format!("{name} stopped working: {why}") } else { format!("{name} didn't open: {why}") };
+    let unopened = Unopened { entrypoint: entrypoint.to_owned(), subject: None, link: entrypoint.to_owned(), name, why: why.clone(), crashed };
     if let Some(id) = launcher_instead(Instead::Unopened(unopened)).await {
         return Some(id);
     }
@@ -62,11 +62,11 @@ pub(super) async fn unopened_launcher(entrypoint: &str, why: String) -> Option<W
     id
 }
 
-/// The launcher's panel `old`, whose page failed as it started, replaced by one with its problem box
-/// (`unopened_launcher`), which shows if it was showing. The old one goes first, and its client forgets it, as the
-/// new one is the launcher's as its client knows it.
+/// The launcher's panel `old`, whose page failed as it started, or `crashed` once it had, replaced by one with its
+/// problem box (`unopened_launcher`), which shows if it was showing. The old one goes first, and its client forgets
+/// it, as the new one is the launcher's as its client knows it.
 #[cfg(desktop)]
-pub(super) fn replace_launcher(entrypoint: String, why: String, old: Option<WindowId>) {
+pub(super) fn replace_launcher(entrypoint: String, why: String, crashed: bool, old: Option<WindowId>) {
     let (showing_to, showing) = tokio::sync::oneshot::channel();
     if let (Some(old), Ok(native)) = (old, Native::get()) {
         native.run(move |windows| {
@@ -77,7 +77,7 @@ pub(super) fn replace_launcher(entrypoint: String, why: String, old: Option<Wind
     crate::hosts::forget(&entrypoint, None);
     crate::spawn(async move {
         let showing = showing.await.unwrap_or(false);
-        computer::native(unopened_launcher(&entrypoint, why).await);
+        computer::native(unopened_launcher(&entrypoint, why, crashed).await);
         if showing {
             computer::summon();
         }

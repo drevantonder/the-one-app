@@ -22,6 +22,8 @@ function steps({ connection, starting }) {
 /// fixes it, if there is one.
 /** @param {import("xstate").SnapshotFrom<typeof machine>} now @returns {[string, string, string | undefined, string | undefined] | undefined} */
 function problemOf(now) {
+  // One that crashed once it had opened says so, with Reload, as a browser's crashed tab does (src/unopened.js).
+  if (now.matches("launcher_failed") && now.context.crashed) return [`${baseName()} stopped working`, "Reload it to start it again.", now.context.why, "Reload"]
   if (now.matches("launcher_failed")) return [`${baseName()} didn't open.`, "Try again in a moment.", now.context.why, "Try Again"]
   if (now.matches("native_failed")) return [`${baseName()} can't open its windows on this device.`, "Its graphics didn't start.", now.context.why, undefined]
   if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]

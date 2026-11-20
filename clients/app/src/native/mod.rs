@@ -420,11 +420,16 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
             }
             // A page that crashed after it started is gone, and Telemetry hears why, as an error: an app's window
             // closes and its app is forgotten, so it opens afresh, and the client's own page says it stopped, with
-            // Reload, as a browser's crashed tab does; the launcher opens again, as a phone's app is relaunched.
+            // Reload, as a browser's crashed tab does. So does the launcher's, in its place: a computer's panel, and a
+            // phone's page. A page of the client's own in the launcher's place opens again.
             Event::Crashed(why) => {
                 eprintln!("{entrypoint} crashed: {why}");
                 if let Ok(views) = crate::views() {
                     views.client.report(json!({"name": "one.client.native.crash", "error": why, "attributes": {"one.view": app}}));
+                }
+                #[cfg(desktop)]
+                if launcher_page {
+                    return replace_launcher(entrypoint.clone(), why, true, shown.get().copied());
                 }
                 #[cfg(desktop)]
                 if launcher {
@@ -432,7 +437,7 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 }
                 #[cfg(mobile)]
                 if launcher {
-                    return computer::native(None);
+                    return computer::unopened(why, true);
                 }
                 close(&shown);
                 crate::hosts::forget(&entrypoint, subject.as_deref());
@@ -444,11 +449,11 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 reported(&entrypoint, started, &why);
                 #[cfg(mobile)]
                 if launcher {
-                    computer::native(None);
+                    computer::unopened(why.clone(), false);
                 }
                 #[cfg(desktop)]
                 if launcher_page {
-                    replace_launcher(entrypoint.clone(), why, shown.get().copied());
+                    replace_launcher(entrypoint.clone(), why, false, shown.get().copied());
                     return;
                 }
                 if app_window {
@@ -463,7 +468,7 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 reported(&entrypoint, started, &why);
                 #[cfg(desktop)]
                 if launcher_page {
-                    replace_launcher(entrypoint.clone(), why, shown.get().copied());
+                    replace_launcher(entrypoint.clone(), why, false, shown.get().copied());
                     return;
                 }
                 #[cfg(desktop)]
@@ -474,7 +479,7 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 }
                 #[cfg(mobile)]
                 if launcher {
-                    computer::native(None);
+                    computer::unopened(why, false);
                 } else {
                     close(&shown);
                     let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
@@ -712,16 +717,17 @@ pub(crate) mod computer {
     pub fn hide(_: bool) {}
     pub fn resize(_: Option<f64>, _: Option<f64>) {}
 
-    /// Behind its servers, the page says Update Required.
+    /// Behind its servers, its window closes, and the page says Update Required.
     pub fn behind() {
-        native(None)
+        close();
+        crate::app().shell.emit("launcher", serde_json::json!({"native": false, "behind": true}));
     }
 
-    /// The launcher can't be drawn natively after all (its page needs a newer host, or its servers are ahead): its
-    /// window closes, and the page shows the web launcher.
-    pub fn native(_: Option<renderer::platform::WindowId>) {
+    /// The launcher's page didn't open after all, as `why` says, or `crashed` once it had: its window closes, and the
+    /// page says so in its place, with Try Again, or Reload where it crashed.
+    pub fn unopened(why: String, crashed: bool) {
         close();
-        crate::app().shell.emit("launcher", serde_json::json!({"native": false}));
+        crate::app().shell.emit("launcher", serde_json::json!({"native": false, "why": why, "crashed": crashed}));
     }
 
     /// Its page was updated: its window opens again on the new version.

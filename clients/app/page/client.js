@@ -452,12 +452,13 @@ function openLauncher() {
     on({ type: "drawn", key: baseKey() })
   }, failed)
 }
-// The native launcher closed, as its new version needs a newer renderer, or its servers are ahead (Update Required):
-// the window says why.
+// The native launcher closed: its page didn't open after all, or crashed once it had, which the window says, with
+// why (a build before 21 Nov says none: its page needed a newer renderer); or its servers are ahead (`behind`), which
+// it says as Update Required (`tooOld`).
 listen("launcher", ({ payload }) => {
   if (payload?.native === false && nativeLauncher) {
     nativeLauncher = false
-    on({ type: "failed", key: baseKey(), why: NEWER })
+    if (!payload.behind) on({ type: "failed", key: baseKey(), why: payload.why ?? NEWER, crashed: payload.crashed === true })
   }
   if (typeof payload?.over === "boolean") (launcherOver = payload.over), gestures()
 })
