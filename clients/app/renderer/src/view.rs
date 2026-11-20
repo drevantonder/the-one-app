@@ -177,6 +177,10 @@ pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(vec![ttf])
 }
 
+/// How long a scroll stops before what's under a still pointer is hovered again, as Blink's fake mouse move after a
+/// scroll waits (`MouseEventManager`'s 100 ms).
+const HOVER_AFTER_SCROLL: f64 = 100.0;
+
 /// How long after its shortcut summoned a panel, or after it was last pressed again, the shortcut's key is still its:
 /// longer than a key's repeat delay, so one held repeats into nothing.
 /// The roles of what the DOM draws as a button, which Tab reaches (core/ui's drawing-primitives/primitives.tsx `pressed`).
@@ -319,6 +323,9 @@ pub struct Screen {
     /// Where the pointer is, what it's over and what it pressed, for styles' states and pointer events.
     states: States,
     pointer: Option<Point<f32>>,
+    /// When, on the page's clock, what's under a still pointer is found again after what's under it scrolled: it isn't
+    /// as it scrolls, as browsers find it again only once a scroll has stopped for a moment (`HOVER_AFTER_SCROLL`).
+    hover_after: Option<f64>,
     /// The pointer is a finger, as a phone's is, which pointer events say (`pointerType`).
     pub touch: bool,
     /// When the device says the input being handled happened, on the page's clock (`happened`).
@@ -476,6 +483,7 @@ impl Screen {
             coasts: HashMap::new(),
             states: States::default(),
             pointer: None,
+            hover_after: None,
             touch: false,
             happened: None,
             finger: None,
@@ -718,7 +726,8 @@ impl Screen {
         let frames = self.frames.values().filter_map(|child| child.screen.due());
         // For a harness, a picture decoded is there at its time on its clock (`Pictures::due`).
         let pictures = self.pictures.due().map(|ms| Duration::from_secs_f64(ms / 1000.0));
-        settle.into_iter().chain(self.blinks()).chain(frames).chain(pictures).min()
+        let hover = self.hover_after.map(|at| Duration::from_secs_f64((at - self.js.clock().now()).max(0.0) / 1000.0));
+        settle.into_iter().chain(self.blinks()).chain(frames).chain(pictures).chain(hover).min()
     }
 
     /// Whether its page, or a frame's in it, asked for the display's next frame (`requestAnimationFrame`).
@@ -764,6 +773,12 @@ impl Screen {
         }
         self.pump();
         self.tell_settled();
+        if self.hover_after.is_some_and(|at| at <= self.js.clock().now()) {
+            self.hover_after = None;
+            if let Some(at) = self.pointer.filter(|_| !self.touch) {
+                self.hover(at);
+            }
+        }
     }
 
     /// Applies what the app's JS has posted since it was last asked, all at once, as it's one turn's or more, and
@@ -1014,7 +1029,7 @@ impl Screen {
         self.tell_settled();
         scene.finish();
         self.settle_focus(modal);
-        self.tell_placed(intersections);
+        self.tell_placed(intersections, plan.scrolled.then_some(plan.now));
         self.cost.paint += crate::platform::on_cpu().saturating_sub(started);
         self.cost.painted += 1;
     }
@@ -1093,6 +1108,7 @@ impl Screen {
         }
         // What's kept of what only moves, grows or fades is drawn again where what it draws from changed: anything
         // fetched, decoded, scrolled or in another frame's page, or the window's conditions.
+        let scrolled = self.seen.as_ref().is_some_and(|was| (&was.scrolled, &was.stretched) != (&seen.scrolled, &seen.stretched));
         if self.seen.as_ref().is_none_or(|was| (was.size, was.conditions, &was.scrolled, &was.stretched, was.fetched, was.decoded, &was.frames) != (seen.size, seen.conditions, &seen.scrolled, &seen.stretched, seen.fetched, seen.decoded, &seen.frames)) {
             self.layers.clear();
         }
@@ -1142,13 +1158,13 @@ impl Screen {
         // It's drawn ahead in a frame where nothing moves, as a browser draws in idle time, not in one that's busy.
         let still = moving.is_empty();
         self.frame += 1;
-        Some(Plan { conditions, window, scale, now, caret, everything, changed, moving, below, layered, still })
+        Some(Plan { conditions, window, scale, now, caret, everything, changed, moving, below, layered, still, scrolled })
     }
 
     /// Styles, lays out and paints the tree into `scene`, as `plan` says, and the window's own title and notice
     /// over it. → what the painter found as it drew.
     fn draw(&mut self, plan: &Plan, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> Drawing {
-        let Plan { conditions, window, scale, now, caret, everything, ref changed, ref moving, ref below, ref layered, still } = *plan;
+        let Plan { conditions, window, scale, now, caret, everything, ref changed, ref moving, ref below, ref layered, still, .. } = *plan;
         let line = self.line();
         let stretched = self.stretched();
         let mut painter = Painter {
@@ -1393,7 +1409,7 @@ impl Screen {
 
     /// What's told of where things landed: what a still pointer is over now, as a browser finds again after layout;
     /// where each node listening for `layout` is; and whether each listening for `intersection` is near the window.
-    fn tell_placed(&mut self, intersections: Vec<(Id, bool)>) {
+    fn tell_placed(&mut self, intersections: Vec<(Id, bool)>, scrolled: Option<f64>) {
         // What took the keyboard as its page said so (`autofocus`) is scrolled into view once it's drawn, as a browser's
         // `focus()` does it, which is how the arrow keys on a list's rows go on past what shows.
         if let Some(id) = self.focus.reveal.take() {
@@ -1403,8 +1419,12 @@ impl Screen {
             }
         }
         self.ask_lists(self.painted.0.height);
-        // What moved under a pointer that's still is what it's over now, as a browser finds again after layout.
-        if let Some(at) = self.pointer.filter(|_| !self.touch) {
+        // What moved under a pointer that's still is what it's over now, as a browser finds again after layout; what
+        // scrolled under it, once it's stopped a moment (`hover_after`), so a wheel's notches move what's drawn rather
+        // than lighting each row they pass under it, which drew each again.
+        if let Some(now) = scrolled {
+            self.hover_after = Some(now + HOVER_AFTER_SCROLL);
+        } else if let Some(at) = self.pointer.filter(|_| !self.touch && self.hover_after.is_none()) {
             let before = self.states.hovered.clone();
             self.hover(at);
             self.again |= self.states.hovered != before;
@@ -2430,6 +2450,8 @@ struct Plan {
     below: HashSet<Id>,
     layered: HashSet<Id>,
     still: bool,
+    /// Something scrolled since the frame before.
+    scrolled: bool,
 }
 
 /// What the painter found as it drew a frame (`Screen::draw`): what takes the pointer and the
