@@ -8,7 +8,7 @@
 //!
 //! The source is where the frames come from and where what the viewer does goes (`source`): `scrcpy`, an Android
 //! phone's own H.264 from scrcpy's server; `idb`, an iOS Simulator's own, from idb's companion; `x11`, a Linux
-//! display's, encoded here.
+//! display's, and `screencapturekit`, a Mac's, encoded here.
 //!
 //! The data channel (id 0, negotiated) carries what the UI library's LiveScreen sends (`input::Input`).
 #[cfg(target_os = "macos")]
@@ -16,6 +16,8 @@ mod idb;
 mod h264;
 mod input;
 mod scrcpy;
+#[cfg(target_os = "macos")]
+mod screencapturekit;
 mod session;
 #[cfg(target_os = "linux")]
 mod x11;
@@ -45,6 +47,8 @@ pub enum SourceConfig {
     Scrcpy(scrcpy::Config),
     #[cfg(target_os = "macos")]
     Idb(idb::Config),
+    #[cfg(target_os = "macos")]
+    Screencapturekit(screencapturekit::Config),
     #[cfg(target_os = "linux")]
     X11(x11::Config),
 }
@@ -70,6 +74,8 @@ fn start(config: SourceConfig, events: Sender<Event>) -> anyhow::Result<Box<dyn 
         SourceConfig::Scrcpy(config) => Box::new(scrcpy::Scrcpy::start(config, events)?),
         #[cfg(target_os = "macos")]
         SourceConfig::Idb(config) => Box::new(idb::Idb::start(config, events)?),
+        #[cfg(target_os = "macos")]
+        SourceConfig::Screencapturekit(config) => Box::new(screencapturekit::ScreenCaptureKit::start(config, events)?),
         #[cfg(target_os = "linux")]
         SourceConfig::X11(config) => Box::new(x11::X11::start(config, events)?),
     })
