@@ -39,15 +39,17 @@ const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
 impl Context {
     /// Compiles, in the background, the pipelines a window of this platform draws its frames with, as it starts, so its
     /// first window's first frame doesn't wait for its GPU to compile them (half a second on a Mac's Metal): its
-    /// format (`Renderer::new`), see-through first, as the Home Screen's panel is, then opaque, then a snapshot's.
-    /// Metal composites no surface premultiplied (it offers Opaque and PostMultiplied), so a Mac's and an iPhone's
-    /// windows draw only straight alpha: compiling the premultiplied pipelines first had a Mac's Home Screen wait for
-    /// them and then compile its own (its renderer 279 ms, 20 Nov).
+    /// format (`Renderer::new`), opaque first, as an app's window is (`transparent`), then see-through, as only a
+    /// launcher's panel is on Windows and Linux, then a snapshot's. A phone's windows are never see-through, and Metal
+    /// composites no surface premultiplied (it offers Opaque and PostMultiplied), so a Mac's windows draw only straight
+    /// alpha too. Compiling the premultiplied pipelines first had the first window wait for them and then compile its
+    /// own: a Mac's Home Screen (its renderer 279 ms, 20 Nov), and the Surface's windows reopened after an update
+    /// (2 s, issue 26).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prepare(&self) {
         let (device, queue, compiled) = (self.device.clone(), self.queue.clone(), self.pipelines.clone());
         let format = if cfg!(target_os = "android") { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Bgra8Unorm };
-        let kinds: &'static [bool] = if cfg!(target_vendor = "apple") { &[false] } else { &[true, false] };
+        let kinds: &'static [bool] = if cfg!(any(target_os = "windows", target_os = "linux")) { &[false, true] } else { &[false] };
         std::thread::spawn(move || {
             for &premultiplied in kinds {
                 super::renderer::Pipelines::shared(&device, &queue, &compiled, format, premultiplied);
