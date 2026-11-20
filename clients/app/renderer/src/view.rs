@@ -994,6 +994,27 @@ impl Screen {
         Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reduced_motion, insets, title_bar, page: self.page, rem }
     }
 
+    /// Draws its canvas over what it painted, `opacity` as opaque: its page's background with nothing on it, under its
+    /// title row where its window has one (`title_row`), as its window shows while its page starts (`platform`'s
+    /// `Cover`).
+    pub(crate) fn paint_canvas(&self, room: Size<Pixels>, scale: f32, opacity: f32, scene: &mut Scene) {
+        let (_, background) = Text::root(self.conditions());
+        let Some(background) = background else { return };
+        let top = if self.title.is_some() { self.insets.top } else { 0.0 };
+        let canvas = Bounds { origin: point(0.0, top), size: Size { width: room.width.0, height: (room.height.0 - top).max(0.0) } };
+        scene.insert_primitive(Quad {
+            order: 0,
+            border_style: Default::default(),
+            bounds: canvas.scale_to(scale),
+            content_mask: ContentMask { bounds: canvas.scale_to(scale) },
+            background: Background::from(Hsla { a: background.a * opacity, ..background }),
+            border_color: Hsla::default(),
+            corner_radii: Corners::default(),
+            border_widths: Edges::default(),
+            transformation: TransformationMatrix::unit(),
+        });
+    }
+
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).
     fn safe_area(&self) -> Value {
         json!({"top": self.insets.top, "right": self.insets.right, "bottom": self.insets.bottom, "left": self.insets.left})

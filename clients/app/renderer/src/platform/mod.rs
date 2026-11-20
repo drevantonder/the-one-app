@@ -384,9 +384,52 @@ fn start() -> anyhow::Result<Native> {
     Ok(Native(sender))
 }
 
-/// How long a window waits to show for its page to hear back from what it first asked, so it shows its first frame
-/// with what it asked for, or says why it didn't open, as its page turns out to need.
+/// How long a window's snapshot covers its page while its page hasn't heard back from what it first asked, so the page
+/// shows with what it asked for, or as it is, as its page turns out to need.
 const SHOWN_WITHIN: std::time::Duration = std::time::Duration::from_millis(1000);
+/// How long a window with no snapshot shows its bare canvas while its page starts, before the page shows as it is,
+/// its own loading state, so a quick page shows no spinner (Andre, 20 Nov), and how long what covers a page takes to
+/// fade into it.
+const QUIET: std::time::Duration = std::time::Duration::from_millis(150);
+const FADES_IN: std::time::Duration = std::time::Duration::from_millis(200);
+
+/// What covers a window's page as it opens, as iOS shows an app's snapshot as it launches: its snapshot (`picture`),
+/// or with none its canvas (the page's background, under its title row), from the moment it shows until its page is
+/// ready, made as it's first drawn; then fading into it. A page shown still starting, its own loading state, fades
+/// into what it shows once it's ready the same way, what was on the screen its cover.
+enum Cover {
+    Over(Option<crate::render::scene::Scene>),
+    Fading(crate::render::scene::Scene, web_time::Instant),
+    Gone,
+}
+
+impl Cover {
+    /// How opaque it's drawn now, easing in and out as it fades.
+    fn opacity(&self) -> f32 {
+        match self {
+            Cover::Over(_) => 1.0,
+            Cover::Fading(_, began) => {
+                let t = (since(*began).as_secs_f32() / FADES_IN.as_secs_f32()).min(1.0);
+                1.0 - t * t * (3.0 - 2.0 * t)
+            }
+            Cover::Gone => 0.0,
+        }
+    }
+
+    fn scene(&self) -> Option<&crate::render::scene::Scene> {
+        match self {
+            Cover::Over(scene) => scene.as_ref(),
+            Cover::Fading(scene, _) => Some(scene),
+            Cover::Gone => None,
+        }
+    }
+}
+
+/// The whole of a window `size` device pixels big.
+fn whole(size: Size<DevicePixels>) -> crate::geometry::Bounds<crate::geometry::ScaledPixels> {
+    let px = crate::geometry::ScaledPixels;
+    crate::geometry::Bounds { origin: Point { x: px(0.0), y: px(0.0) }, size: Size { width: px(size.width.0 as f32), height: px(size.height.0 as f32) } }
+}
 
 /// One of a window's native windows, each with a surface of its own: a window's only one, or each part of a panel's
 /// page that has the system's material (`Glass`), its search and its card, the first the panel itself and the rest its
@@ -459,11 +502,16 @@ struct Window {
     /// Its spring from a swipe back from the left edge let go (`view::touch`), where the host leaves that to its app.
     #[cfg_attr(not(any(target_os = "ios", feature = "fake")), allow(dead_code))]
     slide: Option<Slide>,
-    /// Where its frame is kept (`WindowOptions::snapshot`), and the one kept, as RGBA rows its size, shown until its
-    /// page has started and heard back, and whether its renderer has it yet.
+    /// Where its frame is kept (`WindowOptions::snapshot`), and the one kept, as RGBA rows its size, which covers its
+    /// page until its page has started and heard back, and whether its renderer has it yet; what covers its page now,
+    /// and whether its page shows still starting, its own loading state.
     snapshot: Option<std::path::PathBuf>,
     picture: Option<Vec<u8>>,
     pictured: bool,
+    cover: Cover,
+    loading: bool,
+    /// What covered its page went: its page is drawn afresh once more, without it.
+    uncovered: bool,
     /// Its frames while something on it moves.
     timing: frame_timing::Timing,
     /// Whether it's handed the display a frame since the display's last tick (`Windows::turned`).
@@ -611,6 +659,7 @@ impl Windows {
         let opened = now();
         let device = native.device_size();
         let picture = options.snapshot.as_deref().filter(|_| pending || screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));
+        let screen_failed = screen.is_err() && !pending;
         let panel = options.panel.is_some();
         let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
         self.windows.insert(
@@ -651,6 +700,10 @@ impl Windows {
                 snapshot: options.snapshot,
                 picture,
                 pictured: false,
+                // A panel is summoned once its page has drawn; one that says why it didn't open has nothing to cover.
+                cover: if panel || screen_failed { Cover::Gone } else { Cover::Over(None) },
+                loading: false,
+                uncovered: false,
                 presented: false,
                 frames: 0,
                 timing: Default::default(),
@@ -1187,7 +1240,8 @@ impl Windows {
         for window in self.windows.values_mut() {
             let (room, icon) = (window.room(), window.icon);
             let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
-            let Some(pull) = window.pull.as_mut().filter(|pull| pull.springing()) else { continue };
+            // An opening waits on its icon for its window's first frame, which a slow GPU takes a while to show.
+            let Some(pull) = window.pull.as_mut().filter(|pull| pull.springing() && !(pull.opens() && window.frames == 0)) else { continue };
             let (moved, still) = pull.step(Size { width: room.width.0, height: room.height.0 }, icon, reduced);
             match still {
                 Some(1.0) => home = true,
@@ -1255,7 +1309,7 @@ impl Windows {
     /// enough, or a renderer has drawn nothing for a while (`Renderer::idle`).
     pub fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
-        let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some() || window.reloading).map(|window| SHOWN_WITHIN.saturating_sub(since(window.opened)));
+        let showing = self.windows.values().filter(|window| !window.shown || matches!(window.cover, Cover::Over(_)) || window.reloading).map(|window| (if window.picture.is_some() { SHOWN_WITHIN } else { QUIET }).saturating_sub(since(window.opened)));
         // Where the display says nothing of its frames, or hasn't yet since they were asked for, the next is a 60 Hz
         // display's.
         let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(since(self.framed)));
@@ -1286,7 +1340,7 @@ impl Windows {
     /// for one (`requestAnimationFrame`).
     fn framing(&self) -> bool {
         self.check.as_ref().is_some_and(conformance::Check::moving)
-            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.slide.is_some() || window.pull.as_ref().is_some_and(rail::Pull::springing) || window.screen.as_ref().is_ok_and(Screen::framing)))
+            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.slide.is_some() || window.pull.as_ref().is_some_and(rail::Pull::springing) || matches!(window.cover, Cover::Fading(..)) || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
@@ -1441,13 +1495,39 @@ impl Windows {
             }
         }
         for window in self.windows.values_mut() {
-            // A new window shows once its page has heard back from what it asked, or has waited long enough: at once
-            // where it has a snapshot, which it shows until then.
+            // A new window shows at once, its page covered (`Cover`) by its snapshot until its page has heard back from
+            // what it asked, or has waited long enough, or with no snapshot by its canvas, until its page is ready or a
+            // moment has gone by; then what covers it fades into it.
             let starting = (window.pending || window.screen.as_ref().is_ok_and(Screen::starting)) && since(window.opened) < SHOWN_WITHIN;
+            let device = window.parts[0].native.device_size();
+            if window.picture.as_ref().is_some_and(|picture| picture.len() != (device.width.0 * device.height.0 * 4) as usize) {
+                window.picture = None;
+            }
+            if matches!(window.cover, Cover::Over(_)) && (!starting || (window.picture.is_none() && since(window.opened) >= QUIET)) {
+                window.loading = starting;
+                window.cover = match std::mem::replace(&mut window.cover, Cover::Gone) {
+                    Cover::Over(Some(cover)) => Cover::Fading(cover, now()),
+                    _ => Cover::Gone,
+                };
+            }
+            // A page shown as it started is ready: what was on the screen, as it was last drawn, fades into it.
+            if window.loading && !starting {
+                window.loading = false;
+                let mut shown = crate::render::scene::Scene::default();
+                shown.splice(&window.scene, 1.0, [0.0, 0.0], 1.0, whole(device));
+                shown.finish();
+                window.cover = Cover::Fading(shown, now());
+            }
+            if let Cover::Fading(_, began) = window.cover {
+                window.dirty = true;
+                if since(began) >= FADES_IN {
+                    (window.cover, window.picture, window.uncovered) = (Cover::Gone, None, true);
+                }
+            }
             if !window.shown {
                 // Not before it can be drawn, so it never shows with nothing drawn on it: as its pipelines compile
                 // (`compiled`).
-                if (starting && window.picture.is_none()) || (window.parts[0].native.has_surface() && window.parts[0].renderer.is_none() && !self.background) {
+                if window.parts[0].native.has_surface() && window.parts[0].renderer.is_none() && !self.background {
                     continue;
                 }
                 window.shown = true;
@@ -1459,7 +1539,6 @@ impl Windows {
                     let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
                     let room = window.room();
                     let (moved, _) = opening.step(Size { width: room.width.0, height: room.height.0 }, window.icon, reduced);
-                    opening.shown();
                     self.display.set_moved(&window.parts[0].native, moved);
                     window.pull = Some(opening);
                 }
@@ -1498,13 +1577,7 @@ impl Windows {
                 }
                 continue;
             }
-            // Its snapshot, while it fits the window, until its page has started; then what its page draws.
-            let device = window.parts[0].native.device_size();
             let (width, height) = (device.width.0 as u32, device.height.0 as u32);
-            if window.picture.as_ref().is_some_and(|picture| !starting || picture.len() != (width * height * 4) as usize) {
-                window.picture = None;
-                window.dirty = true;
-            }
             if ticking && window.presented && window.summoned.is_none() {
                 continue;
             }
@@ -1520,18 +1593,7 @@ impl Windows {
             let began = web_time::Instant::now();
             let (room, scale) = (window.room(), window.parts[0].native.scale());
             let mut changed = true;
-            if let Some(picture) = &window.picture {
-                if !std::mem::replace(&mut window.pictured, true)
-                    && let Some(renderer) = &mut window.parts[0].renderer
-                {
-                    renderer.picture(snapshot::RASTER, width, height, picture);
-                }
-                window.scene.clear();
-                let px = crate::geometry::ScaledPixels;
-                let whole = crate::geometry::Bounds { origin: Point { x: px(0.0), y: px(0.0) }, size: Size { width: px(width as f32), height: px(height as f32) } };
-                window.scene.picture(snapshot::RASTER, whole);
-                window.scene.finish();
-            } else {
+            {
                 match &mut window.screen {
                     Ok(screen) => {
                         // In its first second, its page is laid out in the room its window has, never in another it
@@ -1543,7 +1605,12 @@ impl Windows {
                         {
                             self.display.wrong(format!("{} was laid out {}×{} in its first second, in a window {}×{}", window.title, told.width, told.height, room.width.0, room.height.0));
                         }
-                        changed = screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                        // Under what covers it, drawn afresh, as what covers it is drawn into the same scene.
+                        if !matches!(window.cover, Cover::Gone) || std::mem::take(&mut window.uncovered) {
+                            screen.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                        } else {
+                            changed = screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                        }
                         window.moving = screen.take_again();
                         let calls = screen.text_input(&mut window.text_input);
                         if !calls.is_empty() {
@@ -1564,6 +1631,30 @@ impl Windows {
                     }
                     Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
                 }
+                // What covers it as it opens, made as it's first drawn: its snapshot, or its canvas, which a window whose
+                // page isn't there yet (`opening`) has drawn bare.
+                if let Cover::Over(cover @ None) = &mut window.cover {
+                    let mut made = crate::render::scene::Scene::default();
+                    match (&window.picture, &window.screen) {
+                        (Some(picture), _) => {
+                            if !std::mem::replace(&mut window.pictured, true)
+                                && let Some(renderer) = &mut window.parts[0].renderer
+                            {
+                                renderer.picture(snapshot::RASTER, width, height, picture);
+                            }
+                            made.picture(snapshot::RASTER, whole(device), 1.0);
+                        }
+                        (None, Ok(screen)) => screen.paint_canvas(room, scale, 1.0, &mut made),
+                        (None, Err(_)) => made.splice(&window.scene, 1.0, [0.0, 0.0], 1.0, whole(device)),
+                    }
+                    made.finish();
+                    *cover = Some(made);
+                }
+            }
+            // What it shows is its page with what covers it over it, as opaque as it's faded to.
+            if let Some(cover) = window.cover.scene() {
+                window.scene.splice(cover, 1.0, [0.0, 0.0], window.cover.opacity(), whole(device));
+                window.scene.finish();
             }
             // A character no font had draws as a font's missing glyph: a gap where a symbol or an emoji goes.
             for character in self.text.undrawn() {
@@ -1593,6 +1684,12 @@ impl Windows {
             window.missed = 0;
             window.presented = true;
             window.frames += 1;
+            // Its opening out of its icon starts from the frame it first shows something in.
+            if window.frames == 1
+                && let Some(opening) = window.pull.as_mut().filter(|pull| pull.opens())
+            {
+                opening.shown();
+            }
             if self.check.is_some() {
                 self.record.present();
             }
@@ -1625,7 +1722,7 @@ impl Windows {
                 window.reloading = false;
                 (window.on_event)(Event::Drawn);
             }
-            if window.picture.is_none() && !window.pending && !std::mem::replace(&mut window.live, true) {
+            if !window.pending && !matches!(window.cover, Cover::Over(_)) && !std::mem::replace(&mut window.live, true) {
                 (window.on_event)(Event::Live);
             }
             if let Some(asked) = window.summoned.take() {
@@ -1686,7 +1783,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else { return };
         let (room, scale) = (window.room(), window.parts[0].native.scale());
         let (Some(stem), Ok(screen)) = (&window.snapshot, &mut window.screen) else { return };
-        if self.background || !window.drawn || window.picture.is_some() || screen.starting() {
+        if self.background || !window.drawn || !matches!(window.cover, Cover::Gone) || window.loading || screen.starting() {
             return;
         }
         let device = Size { width: DevicePixels((room.width.0 * scale).round() as i32), height: DevicePixels((room.height.0 * scale).round() as i32) };
@@ -2126,6 +2223,11 @@ impl Windows {
         }
     }
 
+    /// Whether window `id`'s page is still under what covers it as it opens (`Cover`).
+    pub fn revealing(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|window| !matches!(window.cover, Cover::Gone))
+    }
+
     /// It's a phone's screen, `screen` points big: every window but a panel is the whole of it, whatever it was asked
     /// to be, as an iPhone's and an Android phone's are.
     pub fn phone(&self, screen: Size<Pixels>) {
@@ -2156,6 +2258,8 @@ impl Windows {
                     "title": window.title,
                     "moved": {"scale": moved.scale, "x": moved.x, "y": moved.y, "opacity": moved.opacity, "dim": moved.dim},
                     "snapshot": window.picture.is_some(),
+                    "covered": window.cover.opacity(),
+                    "starting": window.screen.as_ref().is_ok_and(Screen::starting),
                     "told": told.map(|told| serde_json::json!({"width": told.width, "height": told.height})),
                     "room": {"width": room.width.0, "height": room.height.0},
                 })
@@ -2268,7 +2372,9 @@ impl Windows {
             // that's there at its time).
             let tick = (self.display.wanted() || self.windows.values().any(|window| window.dirty && window.on_screen())).then(|| refresh - now.rem_euclid(refresh)).map(|next| if next < 0.001 { next + refresh } else { next });
             let timer = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.timer_due()).reduce(f64::min).map(|due| due.max(0.0));
-            let next = tick.into_iter().chain(timer).reduce(f64::min).filter(|next| *next <= left);
+            // A refresh a hair past the end, as a driver's own refresh, `1000 / hz` ms, is a hair short of the
+            // display's (a `Duration`, whole nanoseconds), is the one it ends on, where it was never shown.
+            let next = tick.into_iter().chain(timer).reduce(f64::min).filter(|next| *next <= left + 0.001);
             // The platform's time moves on once, its pages' clock with it, then each page runs what's due by then.
             let by = next.unwrap_or(left.max(0.0));
             fake::advance(by);
