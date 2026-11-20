@@ -51,22 +51,34 @@ defmodule ComputerUse.Desktop do
   @uses %{"Screen Recording" => "see this Mac's screen", "Accessibility" => "use this Mac's mouse and keyboard"}
   @needed %{"screenshot" => "Screen Recording", "windows" => "Screen Recording"}
 
-  @doc "The caller's computers that are on, each a screen as Computer Use lists them, with its server's key as `desktop`."
+  @doc """
+  The caller's computers that are on, each a screen as Computer Use lists them, with its server's key as `desktop`,
+  and why each that couldn't say its own couldn't, by its name: each computer's screen is its own server's, so one
+  that doesn't answer takes away only its own.
+  """
   def screens(call) do
-    for server <- OneCore.Service.servers(call, __MODULE__), not is_integer(OneCore.Service.seen(server)), may?(call, server) do
-      status = OneCore.Service.call(call, __MODULE__, :status, [], server)
-      name = OneCore.Service.name(server)
+    listed =
+      for server <- OneCore.Service.servers(call, __MODULE__), not is_integer(OneCore.Service.seen(server)), may?(call, server) do
+        name = OneCore.Service.name(server) || server
 
-      %{
-        "name" => name || server,
-        "description" =>
-          "#{name}'s own screen, as its person sees it" <>
-            if(status["missing"] == [], do: "", else: "; macOS doesn't allow #{Enum.join(status["missing"], " or ")} for #{called()} yet"),
-        "width" => status["width"],
-        "height" => status["height"],
-        "desktop" => server
-      }
-    end
+        try do
+          status = OneCore.Service.call(call, __MODULE__, :status, [], server)
+
+          %{
+            "name" => name,
+            "description" =>
+              "#{name}'s own screen, as its person sees it" <>
+                if(status["missing"] == [], do: "", else: "; macOS doesn't allow #{Enum.join(status["missing"], " or ")} for #{called()} yet"),
+            "width" => status["width"],
+            "height" => status["height"],
+            "desktop" => server
+          }
+        rescue
+          problem -> {name, Exception.message(problem)}
+        end
+      end
+
+    {Enum.filter(listed, &is_map/1), Map.new(Enum.reject(listed, &is_map/1))}
   end
 
   @doc """

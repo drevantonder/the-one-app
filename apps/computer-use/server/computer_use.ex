@@ -103,7 +103,7 @@ defmodule ComputerUse do
         name: "screens",
         read_only: true,
         description:
-          "The screens you can use, as `screens`: each one's name, what it is, its width and height in pixels, the app it's from, and what it was last used for, by whom, when (ms since 1970). An app that couldn't list its screens is in `failed`, with why.",
+          "The screens you can use, as `screens`: each one's name, what it is, its width and height in pixels, the app it's from, and what it was last used for, by whom, when (ms since 1970). An app that couldn't list its screens is in `failed`, with why, as is a computer whose own screen didn't answer.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -134,7 +134,7 @@ defmodule ComputerUse do
             failed: %{
               type: "object",
               additionalProperties: %{type: "string"},
-              description: "Why each app that couldn't list its screens couldn't, by its name"
+              description: "Why each app that couldn't list its screens couldn't, by its name, and each computer whose own screen couldn't be listed, as `computer-use/<its name>`"
             }
           },
           required: ["screens", "failed"]
@@ -324,16 +324,21 @@ defmodule ComputerUse do
   end
 
   # Every screen the caller may use, each with the app it's from, its own computers' and phones' first, and why each
-  # app that couldn't say its own couldn't.
+  # app, or each of its own computers (`computer-use/<name>`), that couldn't say its own couldn't.
   defp screens(call) do
     {:ok, lists, failed} = Call.run_hook(call, "screens", %{})
     theirs = for {app, list} <- lists, s <- List.wrap(list), do: Map.put(s, "app", app)
+    {desktops, unanswered} = Desktop.screens(call)
+    failed = Map.merge(failed, Map.new(unanswered, fn {name, why} -> {"computer-use/#{name}", why} end))
 
-    try do
-      {Enum.map(Desktop.screens(call) ++ Phone.screens(call), &Map.put(&1, "app", "computer-use")) ++ theirs, failed}
-    rescue
-      problem -> {theirs, Map.put(failed, "computer-use", Exception.message(problem))}
-    end
+    {phones, failed} =
+      try do
+        {Phone.screens(call), failed}
+      rescue
+        problem -> {[], Map.put(failed, "computer-use", Exception.message(problem))}
+      end
+
+    {Enum.map(desktops ++ phones, &Map.put(&1, "app", "computer-use")) ++ theirs, failed}
   end
 
   # A screen by its name, or by its app's name and its own (`containers/proof`) where two are called the same.

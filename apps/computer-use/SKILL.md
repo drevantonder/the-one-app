@@ -14,7 +14,8 @@ press keys at what you see. Its person watches in the Computer Use app.
 - `screens` lists the screens you can use: each one's name, what it is, its size, and what it was last used for.
   A person's own computer is one (below), so is their Android phone (below), and other apps bring more: a container made from the image `desktop` is one
   (Containers' `create`). If you have none, make one first. Two of the same name, from two apps, are named `app/name`. An app that
-  couldn't list its screens (its machine is asleep, say) is in `failed`, with why, and the rest are still listed.
+  couldn't list its screens (its machine is asleep, say) is in `failed`, with why, and the rest are still listed, as is
+  a computer whose own screen didn't answer (`computer-use/<its name>`): each computer's screen is its own.
 - `screenshot` shows the screen. x and y in every other tool are pixels of that picture, from its top left.
 - `click` (button left, right or middle), `double_click`, `move`, `drag` (a path of points), `scroll` (up, down,
   left or right, by steps), `type` (text where the focus is), `key` (`ctrl+l`, `Return`, `ctrl+shift+t`; several,
