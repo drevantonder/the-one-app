@@ -600,7 +600,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     let every = 1000.0 / request.f64("input_hz").unwrap_or(hz).clamp(1.0, 1000.0);
     let after = request.f64("after").unwrap_or(2000.0).max(0.0);
     let snaps = renderer::inspect::snaps(request);
-    let track = match request.inputs.get("track") {
+    let mut track = match request.inputs.get("track") {
         Some(Value::Object(selector)) => {
             let mut query = json!({"op": "query"});
             for (name, value) in selector {
@@ -673,8 +673,14 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         frame["at"] = json!((tick * 100.0).round() / 100.0);
         frame["pressure"] = json!(windows.pressure());
         frame["drawn"] = json!(drew);
-        // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it.
-        if let Some(query) = &track {
+        // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it: the node the
+        // selector first found, not another it finds once that's gone (an App Library's Notes, as Home's goes).
+        if let Some(query) = &mut track {
+            if query.get("node").is_none()
+                && let Some(node) = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"][0]["node"].as_u64())
+            {
+                *query = json!({"op": "query", "node": node});
+            }
             match ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"][0]["rect"].as_object().cloned()) {
                 Some(rect) => {
                     frame["x"] = rect["x"].clone();

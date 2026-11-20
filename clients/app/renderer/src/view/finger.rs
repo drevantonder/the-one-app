@@ -126,6 +126,7 @@ impl Screen {
         let long = crate::platform::Timing::long(std::time::Duration::from_secs_f64(frame_ms / 1000.0), std::time::Duration::from_secs_f64(refresh / 1000.0));
         let mut finger = Some(self.finger_down(trace.start, begun));
         let (mut next, mut frames) = (0, Vec::new());
+        let mut followed: Option<crate::tree::Id> = None;
         // As many frames as its length and `after` take, and for a trace with no frames drawn, as its moves take.
         let last = ((ms + after) / frame_ms).ceil() as u64 + 1;
         for n in 1..=last.max(1) {
@@ -153,9 +154,11 @@ impl Screen {
             let mut drawn = draw(self)?;
             drawn["at"] = json!((frame * 100.0).round() / 100.0);
             drawn["pressure"] = json!(self.pressure.name());
-            // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it.
+            // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it: the node the
+            // selector first found, not another it finds once that's gone (an App Library's Notes, as Home's goes).
             if let Some(selector) = track {
-                match inspect::one(&self.tree, selector).ok().and_then(|id| self.rects.get(&id)) {
+                followed = followed.or_else(|| inspect::one(&self.tree, selector).ok());
+                match followed.filter(|id| self.tree.nodes.contains_key(id)).and_then(|id| self.rects.get(&id)) {
                     Some(rect) => {
                         drawn["x"] = json!((rect.x * 100.0).round() / 100.0);
                         drawn["y"] = json!((rect.y * 100.0).round() / 100.0);
