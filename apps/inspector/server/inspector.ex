@@ -170,7 +170,7 @@ defmodule Inspector do
       op(
         "settle",
         true,
-        "Waits until nothing's pending that ends by itself, or `deadline` ms (5000), and says what still is: requests the app asked that aren't answered, timers (an interval never ends, so isn't waited for), transitions, and what the page moves a frame at a time or a list flung (`animation`). With the clock paused, nothing moves by itself, so what moves is listed but isn't waited for.",
+        "Waits until nothing's pending that ends by itself, or `deadline` ms (5000), and says what still is: requests the app asked that aren't answered, what its page posted that its window hasn't applied yet (`posted`), timers (an interval never ends, so isn't waited for), transitions, and what the page moves a frame at a time or a list flung (`animation`). A loop that never ends (a spinner) isn't waited for either, and is counted as `repeating`. With the clock paused, nothing moves by itself, so what moves is listed but isn't waited for.",
         %{deadline: %{type: "number", minimum: 0}}
       )
     ]

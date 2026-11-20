@@ -497,6 +497,11 @@ impl Screen {
         if let Some(free) = self.js.holding() {
             pending.push(json!({"kind": "busy", "in": free}));
         }
+        // What its page posted and its window hasn't applied yet: its window applies it on its next turn, or after the
+        // turns a page slower than its window takes (`Late`).
+        if self.js.has_posted() || self.late.as_ref().is_some_and(super::Late::holding) {
+            pending.push(json!({"kind": "posted"}));
+        }
         // A picture decoding in the background is drawn once it's ready.
         if self.pictures.pending() > 0 {
             pending.push(json!({"kind": "picture", "decoding": self.pictures.pending()}));

@@ -336,6 +336,11 @@ impl Thread {
         self.sent
     }
 
+    /// Whether it's posted what its window hasn't taken yet (`take`).
+    pub fn has_posted(&self) -> bool {
+        POSTED.with_borrow(|posted| !posted.is_empty())
+    }
+
     /// Nothing seeds a browser's page's thread.
     pub fn holding(&self) -> Option<f64> {
         None

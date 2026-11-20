@@ -615,6 +615,11 @@ impl Thread {
         (posts.posted.drain(..).collect(), posts.ran)
     }
 
+    /// Whether it's posted what its window hasn't taken yet (`take`).
+    pub fn has_posted(&self) -> bool {
+        !self.shared.posts().posted.is_empty()
+    }
+
     /// How many calls it's been sent: the last one's number.
     pub fn sent(&self) -> u64 {
         self.sent
