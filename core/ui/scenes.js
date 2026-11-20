@@ -38,7 +38,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, env, pageFolder, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, pageFolder, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -53,7 +53,7 @@ const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
 const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size"].includes(args[at - 1])).map((folder) => resolve(folder))
 const targets = folders.length ? folders : [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")))]
-const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
+let harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 // The runtime version the UI library needs, and the native host's: a host whose version is older draws nothing of a
 // page written for this one, so there's nothing yet to compare.
 const speaks = (file, pattern) => Number(readFileSync(join(root, file), "utf8").match(pattern)?.[1])
@@ -61,6 +61,7 @@ const needed = speaks("core/ui/src/drawing-primitives/renderer.ts", /export cons
 const hosted = speaks("clients/app/renderer/src/lib.rs", /pub const RUNTIME_VERSION: u32 = (\d+)/)
 
 if (stale(harness)) throw new Error(stale(harness))
+if (existsSync(harness)) harness = copied(harness, out)
 
 // What a page runs to have its semantic tree as text, as `bun record.js --dom` makes it.
 const outlined = Bun.spawnSync(["bun", here("record.js"), "--dom"]).stdout.toString()

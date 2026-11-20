@@ -68,7 +68,7 @@ const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--
 // GPU and CPU draw each frame, as calibrate.js has them, and its tier is judged by the times it took there.
 const ssh = option("--ssh")
 const present = flag("--present")
-const harness = ssh ? option("--harness") && resolve(option("--harness")) : join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
+let harness = ssh ? option("--harness") && resolve(option("--harness")) : join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 /// How every harness runs, here and in scenes.js, on a machine others share: Vulkan on lavapipe, which draws on the
 /// CPU with 2 threads rather than one a core (`LP_NUM_THREADS`), as a few run at once.
 export const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json", LP_NUM_THREADS: process.env.LP_NUM_THREADS ?? "2" }
@@ -85,6 +85,15 @@ export function stale(harness) {
   if (!existsSync(here("dist/build/app.js")) || changed(here("src"), here("tables.ts"), here("build.js")) > statSync(here("dist/build/app.js")).mtimeMs) return "Build the UI library: `bun build.js` in core/ui"
   if (existsSync(harness) && changed(join(root, "clients/app/renderer/src"), join(root, "clients/app/renderer/examples")) > statSync(harness).mtimeMs) return `Build the native harness again, which is older than the renderer: \`cargo build -p renderer --example screenshot --features fake${harness.includes("/release/") ? " --release" : ""}\``
 }
+/// The harness a run starts with, copied into `out`, so one built again while the run goes on (by whoever else works in
+/// the same checkout) can't change what draws the rest of it. → the copy.
+export function copied(harness, out) {
+  const copy = join(out, ".harness", basename(harness))
+  mkdirSync(dirname(copy), { recursive: true })
+  cpSync(harness, copy)
+  return copy
+}
+
 /// Why a capped harness was stopped, by its exit status, if it was.
 export const stopped = (status) => ({ 137: `it used more than ${MEMORY}B of memory, and was stopped`, 124: `it ran for ${MINUTES} minutes, and was stopped` })[status]
 
@@ -934,6 +943,7 @@ async function round(targets) {
 if (import.meta.main) {
   if (stale(ssh ? undefined : harness)) throw new Error(stale(ssh ? undefined : harness))
   if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot --features fake`")
+  if (!ssh) harness = copied(harness, out)
   // A debug build's CPU is several times a shipped one's.
   if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's: --release for a shipped build's")
   if (!hostScore && !ssh) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
