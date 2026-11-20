@@ -4,7 +4,7 @@
 // combobox) and says which option it's on (`aria-activedescendant`); closed, the arrows choose the next one, as a
 // Mac's pop-up button's do, and a letter the next that starts with it, as a `<select>`'s; open, the arrows, Home and
 // End move through the options, skipping those that can't be chosen, a letter to the next that starts with it, Enter
-// and Space choose, and Escape, Tab, the keyboard leaving, a press outside and the device's back close it. Its list
+// and Space (a press of its face) choose, and Escape, Tab, the keyboard leaving, a press outside and the device's back close it. Its list
 // opens under its face, as wide, flipped above where there isn't room. On our host's layout (`onLayout`,
 // `viewport()`).
 import { createEffect, createSignal } from "solid-js"
@@ -87,10 +87,6 @@ export function createSelect(props: SelectProps, field: { disabled: () => boolea
       event.preventDefault()
       const next = event.key === "Home" ? step(-1, 1) : step(items().length, -1)
       if (next !== undefined) setHighlighted(next)
-    } else if (at() && (event.key === "Enter" || (event.key === " " && !typeahead.active()))) {
-      event.preventDefault()
-      const item = items()[highlighted()]
-      if (item) choose(item)
     } else if (at() && event.key === "Tab") close()
     else if (at() && layer.keydown(event)) return
     else if (isTypeaheadKey(event)) {
@@ -132,8 +128,15 @@ export function createSelect(props: SelectProps, field: { disabled: () => boolea
       onKeyDown: keyed,
       onBlur: close,
     }),
-    /** Opens its list under its face, or closes it. */
-    toggle: (event: Located) => (at() ? close() : open(event.currentTarget.getBoundingClientRect())),
+    /** Opens its list under its face; open, chooses the option it's on. Enter and Space press the face, as a
+     * button's, which is how they open it and choose: a native host presses what has the keyboard on either, which a
+     * `keydown`'s `preventDefault` comes too late to stop (renderer's `Screen::key`), so the face's keys leave them to
+     * its press. While it's open, a pointer's press lands on what's around the list, so a press of the face is a key's. */
+    toggle: (event: Located) => {
+      if (!at()) return open(event.currentTarget.getBoundingClientRect())
+      const item = items()[highlighted()]
+      if (item) choose(item)
+    },
     outside: () => layer.outside,
     list: () => ({
       role: "listbox" as const,
