@@ -403,21 +403,28 @@ pub(crate) async fn sessions(client: std::sync::Weak<Client>) {
                 }
             }
             State::SignedIn { .. } => {
-                // A network on one machine has no token to renew. One a new build hasn't renewed yet is renewed now,
-                // which says so.
-                let Some(config) = open.config() else {
+                // A network on one machine has no token to renew. Renewing says which build this is (`device_info`),
+                // which its network keeps as the device's one record of it: so it's renewed as it starts and each
+                // time it's back online, as well as before it ends, and the device's record is the program that last
+                // started or came back, not one that last renewed up to half an hour before.
+                if open.config().is_none() {
                     drop(open);
                     if state.wait_for(moved).await.is_err() {
                         return;
                     }
                     continue;
-                };
-                let built_same = config.build.as_deref() == Some(BUILD);
-                let left = renews.take().unwrap_or_else(|| if built_same { config.left() } else { Duration::ZERO });
+                }
+                let left = renews.take().unwrap_or(Duration::ZERO);
                 drop(open);
+                let offline = now.connection() != Connection::Online;
+                let back = |state: &State| offline && state.connection() == Connection::Online;
                 tokio::select! {
                     _ = sleep(left) => {}
-                    changed = state.wait_for(moved) => if changed.is_err() { return } else { continue },
+                    changed = state.wait_for(|state| moved(state) || back(state)) => match changed.map(|state| moved(&state)) {
+                        Err(_) => return,
+                        Ok(true) => continue,
+                        Ok(false) => {}
+                    },
                 }
                 let Some(open) = client.upgrade() else { return };
                 renews = Some(open.renew(&now).await);
