@@ -305,7 +305,6 @@ impl Client {
         };
         if client.is_string() {
             let mut resource = self.resource.write().expect("no report panics");
-            resource.insert("service.name".into(), json!("mcp"));
             resource.insert("mcp.client.name".into(), client.clone());
         }
         let client = client.as_str().map(str::to_owned);

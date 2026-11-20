@@ -232,10 +232,10 @@ fn short(text: &str) -> String {
 /// What a client tells a server of what it reported, for the apps that hear `measured`.
 const MEASURED: &str = "notifications/one/measured";
 
-/// What a client says of itself in what it reports, until it says more (`Client::report`).
-pub(crate) fn resource() -> serde_json::Map<String, Value> {
+/// What a client of program `service` says of itself in what it reports.
+pub(crate) fn resource(service: &str) -> serde_json::Map<String, Value> {
     serde_json::Map::from_iter([
-        ("service.name".to_owned(), json!("cli")),
+        ("service.name".to_owned(), json!(service)),
         ("service.version".to_owned(), json!(BUILD)),
         ("os.type".to_owned(), json!(env::consts::OS)),
     ])
@@ -261,12 +261,6 @@ impl Client {
         if self.state.borrow().connection().answers() {
             self.send_soon();
         }
-    }
-
-    /// Which client this is, as what it reports says: OpenTelemetry's `service.name`, such as `app`. It's `cli`
-    /// unless said, and an MCP client's says which it is as it starts.
-    pub fn service(&self, name: &str) {
-        self.resource.write().expect("no report panics").insert("service.name".into(), json!(name));
     }
 
     /// Reports a panic of this program's when it happens, so it's told next time any of its device's clients

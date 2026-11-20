@@ -1144,9 +1144,7 @@ async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
         let mut tools = computer_use_client::tools();
         // A native window's inspector, which is this program's own.
         tools.push(Arc::new(native::Inspector));
-        let client = Client::open(home, cli::resolvers(), tools).await?;
-        client.service("app");
-        anyhow::Ok(client)
+        Client::open(home, "app", cli::resolvers(), tools).await
     };
     CLIENT.get_or_try_init(open).await.cloned()
 }

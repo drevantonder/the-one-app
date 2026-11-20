@@ -729,7 +729,6 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     #[cfg(unix)]
     rlimit::increase_nofile_limit(u64::MAX).context("couldn't raise how many files the server may open")?;
     let here = Here::of(&client::home()?);
-    client.service("server");
     let reports = Reports { client: client.clone(), server: here.key()? };
     let ran = serve(&client, &here, &reports).await;
     reports.tell(true).await;

@@ -314,9 +314,11 @@ impl Client {
     /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do,
     /// and answers a server's call of `tools`, the device's own. It opens whether or not its device is in its network:
     /// where that is, is its `state`, which it moves on by itself from here (`sessions`). Only a home it can't read
-    /// is an error.
+    /// is an error. `service` is which program it's of, as all it reports says (OpenTelemetry's `service.name`:
+    /// `cli`, `app`, `server`, `mcp`), from the first thing it reports, which may be as it opens.
     pub async fn open(
         home: impl Into<PathBuf>,
+        service: &str,
         resolvers: Vec<Arc<dyn InputResolver>>,
         tools: Vec<Arc<dyn DeviceTools>>,
     ) -> Result<Arc<Self>> {
@@ -361,7 +363,7 @@ impl Client {
         let listed = std::sync::Mutex::default();
         let listing = Mutex::default();
         let reach = Mutex::default();
-        let resource = Arc::new(std::sync::RwLock::new(resource()));
+        let resource = Arc::new(std::sync::RwLock::new(resource(service)));
         let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
             home, key, address, state: watch::Sender::new(state), admitting: Mutex::default(),

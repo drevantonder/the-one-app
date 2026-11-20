@@ -50,7 +50,7 @@ pub fn main() -> ExitCode {
     // Run by git as its remote helper, it's that, under the name git found it by, with `.exe` after it on Windows.
     let named = env::args().next().map(|program| Path::new(&program).file_stem().map(|name| name.to_owned()));
     let result = if named.flatten().is_some_and(|name| name == git_repos_client::HELPER) {
-        runtime.block_on(async { git_repos_client::helper(Client::open(client::home()?, resolvers(), Vec::new()).await?, &args).await })
+        runtime.block_on(async { git_repos_client::helper(Client::open(client::home()?, "cli", resolvers(), Vec::new()).await?, &args).await })
     } else {
         git_repos_client::beside();
         runtime.block_on(run(args))
@@ -94,7 +94,12 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     if let ["serve", "on", "--address", address, "--first", first, "--owner", owner] = words.as_slice() {
         return Ok(printed(serving::first(address, first, owner).await?));
     }
-    let client = Client::open(client::home()?, resolvers(), Vec::new()).await?;
+    let service = match words.as_slice() {
+        ["serve", "run", ..] => "server",
+        ["mcp", ..] => "mcp",
+        _ => "cli",
+    };
+    let client = Client::open(client::home()?, service, resolvers(), Vec::new()).await?;
     // A server runs whether or not its device is signed in, as a new network's first server's isn't until its owner
     // has joined: the network knows a server by its own key.
     if !matches!(words.as_slice(), ["serve", "run", ..]) {
