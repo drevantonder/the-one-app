@@ -142,12 +142,13 @@ function endpoint(env: RelayEnv, request: Request, url: URL) {
     const { relay, until } = (await joined) ?? {};
     if (!relay) return;
     if (until !== undefined && until < Date.now()) return ours.close(1008, "Its token expired");
+    // Either side may have closed while this waited for it to join.
     if (frame[0] === PING) {
       frame[0] = PONG;
-      ours.send(frame);
+      if (ours.readyState === WebSocket.OPEN) ours.send(frame);
     } else if (frame[0] === CLIENT_TO_RELAY_DATAGRAM || frame[0] === CLIENT_TO_RELAY_DATAGRAM_BATCH) {
       if (frame.length < 33) return ours.close(1002, "A datagram names who it's for");
-      relay.send(frame);
+      if (relay.readyState === WebSocket.OPEN) relay.send(frame);
     }
   });
   ours.send(Uint8Array.of(SERVER_CHALLENGE, ...challenge));
@@ -181,12 +182,15 @@ async function join(env: RelayEnv, ours: WebSocket, challenge: Uint8Array, token
   const joined = (await relay(env.RELAY, (relay) => relay.fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } }))).webSocket!;
   joined.accept();
   joined.binaryType = "arraybuffer";
-  joined.addEventListener("message", ({ data }) => ours.send(data as ArrayBuffer));
+  joined.addEventListener("message", ({ data }) => ours.readyState === WebSocket.OPEN && ours.send(data as ArrayBuffer));
   joined.addEventListener("close", () => ours.close(1000, "It connected again"));
   ours.addEventListener("close", () => joined.close(1000, "It left"));
   ours.send(Uint8Array.of(SERVER_CONFIRMS_AUTH));
   return { relay: joined, until: admitted.until, key };
 }
+
+/** The one of `connections` that's open, where one is: the others are closing, and take nothing more. */
+const open = (connections: WebSocket[]) => connections.find((connection) => connection.readyState === WebSocket.OPEN);
 
 export class Relay extends DurableObject<RelayEnv> {
   constructor(ctx: DurableObjectState, env: RelayEnv) {
@@ -339,20 +343,22 @@ export class Relay extends DurableObject<RelayEnv> {
   async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer) {
     const attachment: Attachment = ws.deserializeAttachment() ?? {};
     if (attachment.call) {
-      const [server] = this.ctx.getWebSockets(`outside ${attachment.to}`);
+      const server = open(this.ctx.getWebSockets(`outside ${attachment.to}`));
       if (!server) return ws.close(1011, "That server left");
       return server.send(JSON.stringify({ call: attachment.call, message }));
     }
     if (attachment.outside) {
       const { call, answer } = JSON.parse(message as string);
-      for (const waiting of this.ctx.getWebSockets(`call ${call}`)) waiting.send(answer);
+      open(this.ctx.getWebSockets(`call ${call}`))?.send(answer);
       return;
     }
     if (!attachment.key) return;
     // The key it's for becomes the key it's from, and the rest is passed on untouched. With nobody there it's
     // dropped, as a network drops a packet, and QUIC sends again.
     const frame = new Uint8Array(message as ArrayBuffer);
-    const [to] = this.ctx.getWebSockets(`endpoint ${hex.encode(frame.subarray(1, 33))}`);
+    // One that connected again has its old connection listed too until that one's close is answered, which a peer
+    // that went away never answers: only the open one takes it.
+    const to = open(this.ctx.getWebSockets(`endpoint ${hex.encode(frame.subarray(1, 33))}`));
     if (!to) return;
     frame[0] += 2;
     frame.set(hex.decode(attachment.key), 1);
