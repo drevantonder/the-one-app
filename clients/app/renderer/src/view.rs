@@ -768,15 +768,20 @@ impl Screen {
     /// How long until the caret blinks on or off: as GTK's does, on two thirds of each 1.2 s and off a third, until
     /// it's been still 10 s, when it stays on. None while the app's clock is paused, or no input has the keyboard.
     fn blinks(&self) -> Option<Duration> {
-        let clock = self.js.clock();
+        (!self.js.clock().paused()).then(|| self.blink_due()).flatten().map(|ms| Duration::from_secs_f64(ms / 1000.0))
+    }
+
+    /// When the caret next blinks on or off, in ms on the app's clock, which a harness steps as a timer (`timer_due`),
+    /// where no input has the keyboard.
+    pub(super) fn blink_due(&self) -> Option<f64> {
         let typing = self.active && self.focus.focused.is_some_and(|id| self.editing.fields.contains_key(&id));
-        let since = clock.now() - self.editing.blink;
-        if !typing || clock.paused() || since >= BLINK_STOPS {
+        let since = self.js.clock().now() - self.editing.blink;
+        if !typing || since >= BLINK_STOPS {
             return None;
         }
         let into = since % BLINK;
-        let next = if into < BLINK * 2.0 / 3.0 { BLINK * 2.0 / 3.0 - into } else { BLINK - into };
-        Some(Duration::from_secs_f64(next / 1000.0))
+        // At least a microsecond on, so a clock a hair short of a blink isn't stepped by nothing, again and again.
+        Some((if into < BLINK * 2.0 / 3.0 { BLINK * 2.0 / 3.0 - into } else { BLINK - into }).max(0.001))
     }
 
     /// Whether the caret shows now.

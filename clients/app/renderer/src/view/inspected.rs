@@ -422,7 +422,8 @@ impl Screen {
     /// whose display ticks of its own (the fake platform's), which this waits on the app's JS thread for. → whether
     /// its page changed anything, which its window draws.
     pub fn advance(&mut self, ms: f64) -> bool {
-        self.moved(ms, false)
+        // The caret blinked since it was drawn, as the loop's `due` wakes a device's for.
+        self.moved(ms, false) | self.seen.as_ref().is_some_and(|seen| seen.caret != self.caret_shows())
     }
 
     /// Whether what it shows is still on its way somewhere: a transition, a node let go springing back, a list
@@ -447,8 +448,9 @@ impl Screen {
 
     /// When its page's next timer is due, or a picture it decoded is there for a harness, in ms from now on its clock.
     pub fn timer_due(&self) -> Option<f64> {
-        // A picture decoded is there at its time, for a harness (`Pictures::due`), as a timer is.
-        self.js.due().into_iter().chain(self.pictures.due()).chain(self.frames.values().filter_map(|child| child.screen.pictures.due())).reduce(f64::min)
+        // A picture decoded is there at its time, for a harness (`Pictures::due`), as a timer is, and the caret blinks
+        // at its, which a device's loop wakes for (`due`).
+        self.js.due().into_iter().chain(self.pictures.due()).chain(self.blink_due()).chain(self.frames.values().filter_map(|child| child.screen.pictures.due())).reduce(f64::min)
     }
 
     fn moved(&mut self, ms: f64, frames: bool) -> bool {
