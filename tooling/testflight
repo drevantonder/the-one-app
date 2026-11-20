@@ -11,10 +11,9 @@
 # (`clients/app/gen/apple`), is as TestFlight's latest build had it is left as it is, as is one a newer build there has
 # the changes of. `tooling/release client` runs it for a network with an iPhone among its devices.
 #
-# Everything iPhone is done on the Mac `ssh mac` reaches, by this script there (`--on-mac`), at the lowest priority, as
-# its person may be using it, in its checkout ~/scratch/testflight, kept between builds so each builds only what
-# changed, one at a time, with the network's `app/` beside it in ~/scratch/testflight-network. Each line it prints
-# says how many seconds into it it is. The build number is the commit's count of commits (`tooling/version`).
+# It's built, signed and uploaded on GitHub's macOS runner, by its workflow (`.github/workflows/testflight.yml`), which
+# runs this script there (`--build`) with the network's `app/` beside it. Each line it prints says how many seconds
+# into it it is. The build number is the commit's count of commits (`tooling/version`).
 set -euo pipefail
 
 # The team that signs the One App, and its App Store Connect API key, an Admin's, whose .p8 is in 1Password.
@@ -22,18 +21,41 @@ team=X96JC3HCV7
 key_id=R49QVKSHMK
 issuer=2dac44a7-07fb-45f2-85a8-e7f63345f838
 
-if [[ ${1:-} == --on-mac ]]; then
-  # On the Mac, in its checkout at the commit: archives the app unsigned, as no Apple account is signed in to Xcode
-  # there, then exports it for the App Store, signed with the team's Apple Distribution certificate in the keychain,
-  # unlocked in this connection, and each target's App Store profile, which Xcode fetches with the API key where it
-  # hasn't one. It's manual signing: Xcode's automatic signing exports only with Apple's cloud-managed certificates,
-  # which App Store Connect refuses this key (403). Then it uploads it with the key, which arrives on standard input
-  # and is read first, before anything else reads what's there, into a folder of its own for these commands alone.
-  keychain=$HOME/Library/Keychains/ptc-build.keychain-db
-  work=$(mktemp -d) && trap 'rm -rf "$work"; security lock-keychain "$keychain"' EXIT
+# Asks App Store Connect's API for `$1`, with a token its key signs (ES256, for 20 minutes).
+asc() {
+  bun -e '
+    const { createPrivateKey, sign } = require("node:crypto");
+    const { ASC_KEY, key_id, issuer } = process.env;
+    const part = (it) => Buffer.from(JSON.stringify(it)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const unsigned = `${part({ alg: "ES256", kid: key_id, typ: "JWT" })}.${part({ iss: issuer, iat: now, exp: now + 1200, aud: "appstoreconnect-v1" })}`;
+    const signature = sign("sha256", Buffer.from(unsigned), { key: createPrivateKey(ASC_KEY), dsaEncoding: "ieee-p1363" }).toString("base64url");
+    const response = await fetch(`https://api.appstoreconnect.apple.com${process.argv[1]}`, { headers: { authorization: `Bearer ${unsigned}.${signature}` } });
+    if (!response.ok) throw new Error(`App Store Connect said ${response.status} to ${process.argv[1]}: ${await response.text()}`);
+    console.log(await response.text());
+  ' "$1"
+}
+
+if [[ ${1:-} == --build ]]; then
+  # On the runner, at the commit, with the network's `app/` in `$2`: archives the app unsigned, as no Apple account is
+  # signed in to Xcode there, then exports it for the App Store, signed with the team's Apple Distribution identity
+  # (the workflow puts it in a keychain of the run's own) and each target's App Store profile, fetched with the API
+  # key. It's manual signing: Xcode's automatic signing exports only with Apple's cloud-managed
+  # certificates, which App Store Connect refuses this key (403). Then it uploads it with the key, which arrives on
+  # standard input and is read first, before anything else reads what's there, into a folder of its own for these
+  # commands alone.
+  network=$(cd "$2" && pwd)
+  work=$(mktemp -d) && trap 'rm -rf "$work"' EXIT
   cat >"$work/AuthKey_$key_id.p8" && exec </dev/null
+  ASC_KEY=$(cat "$work/AuthKey_$key_id.p8") && export ASC_KEY key_id issuer
+  # Each target's App Store profile, from App Store Connect, where Xcode finds it by its name.
+  profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" && mkdir -p "$profiles"
+  for name in "The One App App Store" "The One App Notifications App Store"; do
+    profile=$(asc "/v1/profiles?filter%5Bname%5D=$(jq -rn --arg name "$name" '$name | @uri')&filter%5BprofileState%5D=ACTIVE" | jq -c '.data[0].attributes')
+    [[ $profile != null ]] || { echo "App Store Connect has no profile \"$name\"" >&2 && exit 1; }
+    jq -r .profileContent <<<"$profile" | base64 -d >"$profiles/$(jq -r .uuid <<<"$profile").mobileprovision"
+  done
   cd "$(dirname "$0")/../clients/app"
-  network=$HOME/scratch/testflight-network/app
   git clean -qfdx gen/apple
   # Its name is the commit's, said before the build changes the Xcode project's files git tracks, which would make
   # every phone's build `.dirty` (`core/client/build.rs`).
@@ -63,7 +85,6 @@ if [[ ${1:-} == --on-mac ]]; then
   </dict>
 </dict></plist>
 PLIST
-  printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
   auth=(-authenticationKeyPath "$work/AuthKey_$key_id.p8" -authenticationKeyID "$key_id" -authenticationKeyIssuerID "$issuer")
   xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$work/export.plist" -exportPath "$work/out" -allowProvisioningUpdates "${auth[@]}"
   (cd "$work" && unzip -q out/*.ipa -d signed && codesign --verify --strict --deep signed/Payload/*.app)
@@ -77,21 +98,6 @@ cd "$(dirname "$0")/.."
 [[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
 ASC_KEY=$(op document get "PTC Builds App Store Connect API key (key $key_id)" --vault ptc-nosudo) || exit 1
 export ASC_KEY key_id issuer
-
-# Asks App Store Connect's API for `$1`, with a token its key signs (ES256, for 20 minutes).
-asc() {
-  bun -e '
-    const { createPrivateKey, sign } = require("node:crypto");
-    const { ASC_KEY, key_id, issuer } = process.env;
-    const part = (it) => Buffer.from(JSON.stringify(it)).toString("base64url");
-    const now = Math.floor(Date.now() / 1000);
-    const unsigned = `${part({ alg: "ES256", kid: key_id, typ: "JWT" })}.${part({ iss: issuer, iat: now, exp: now + 1200, aud: "appstoreconnect-v1" })}`;
-    const signature = sign("sha256", Buffer.from(unsigned), { key: createPrivateKey(ASC_KEY), dsaEncoding: "ieee-p1363" }).toString("base64url");
-    const response = await fetch(`https://api.appstoreconnect.apple.com${process.argv[1]}`, { headers: { authorization: `Bearer ${unsigned}.${signature}` } });
-    if (!response.ok) throw new Error(`App Store Connect said ${response.status} to ${process.argv[1]}: ${await response.text()}`);
-    console.log(await response.text());
-  ' "$1"
-}
 
 # The network's app as its repo's main has it on the remote, which is what's built, whatever its checkout here has:
 # only its objects are read, never its files.
@@ -124,12 +130,16 @@ if [[ -n $latest ]]; then
   fi
 fi
 
-echo "Building $build for TestFlight on the Mac, as $number"
-mac() { ssh -o ConnectTimeout=15 mac "zsh -lc $(printf %q "set -e; export PATH=\$HOME/.local/bin:\$HOME/.cargo/bin:\$PATH CARGO_BUILD_JOBS=4; $1")"; }
-git -C "$network" archive --format=tar origin/main app |
-  mac "rm -rf ~/scratch/testflight-network && mkdir -p ~/scratch/testflight-network && tar -x -C ~/scratch/testflight-network"
-mac "lockf -k ~/scratch/testflight.lock bash -c $(printf %q "set -e
-  [[ -d ~/scratch/testflight ]] || git clone -q https://github.com/ptc-au/the-one-app.git ~/scratch/testflight
-  cd ~/scratch/testflight && git fetch -q origin $commit && git reset -q --hard $commit
-  nice -n 19 taskpolicy -d throttle tooling/testflight --on-mac")" <<<"$ASC_KEY"
-echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves"
+echo "Building $build for TestFlight on GitHub's macOS runner, as $number"
+run=$(gh workflow run testflight.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" \
+  -f network="$(git -C "$network" archive --format=tar.gz origin/main app | base64 -w0)" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') ||
+  { echo "GitHub wasn't asked to build it" >&2 && exit 1; }
+id=${run##*/}
+# `gh run watch` ends at the first of GitHub's API calls that fails, as some do while many releases watch at once, so
+# one that ends early is started again, after the 30 s GitHub asks a client to wait.
+until [[ $(gh run view "$id" --json status --jq .status 2>/dev/null) == completed ]]; do
+  gh run watch "$id" --interval 30 >/dev/null 2>&1 || sleep 30
+done
+[[ $(gh run view "$id" --json conclusion --jq .conclusion) == success ]] ||
+  { echo "TestFlight's build failed on GitHub: gh run view $id --log-failed" >&2 && exit 1; }
+echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves: $run"
