@@ -8,7 +8,8 @@ Most of the code is written by AI agents, so it's built for them: point yours at
 [GLOSSARY.md](GLOSSARY.md) first to see what it's for and what its words mean.
 
 - **Ideas and bugs:** open an issue saying what you tried, what happened, and what you expected.
-- **Changes:** open a pull request with one small change that works on its own, as a
+- **Changes:** with write access to this repo, work as [AGENTS.md](AGENTS.md) says: small changes pushed straight to
+  `main` from your own worktree. Otherwise, open a pull request with one small change that works on its own, as a
   [Conventional Commit](https://www.conventionalcommits.org) (`fix(chrome): …`). There are no kept tests: say how you
   checked it, with pictures for anything on screen.
 - **Security:** don't open an issue for a vulnerability. Report it privately through the repo's Security tab.
