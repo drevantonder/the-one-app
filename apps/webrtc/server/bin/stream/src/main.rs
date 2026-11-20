@@ -13,6 +13,7 @@
 //! The data channel (id 0, negotiated) carries what the UI library's LiveScreen sends (`input::Input`).
 #[cfg(target_os = "macos")]
 mod idb;
+mod h264;
 mod input;
 mod scrcpy;
 mod session;

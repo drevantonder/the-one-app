@@ -1,19 +1,15 @@
 //! A Linux display's screen, X11's (`$DISPLAY`): its pictures, with its pointer drawn on them (XFixes), 30 a second
-//! at most and only when one changes, encoded
-//! as H.264 with OpenH264, constrained baseline, which every browser decodes; what the viewer does is played on the
-//! display through XTest. A display that's resized is a stream of another size, so the stream ends and the viewer
+//! at most, encoded as `h264` says; what the viewer does is played on the display through XTest. A display that's resized is a stream of another size, so the stream ends and the viewer
 //! connects again for it.
 //!
 //! Buttons are X's own; a key or a button pressed says the modifiers held with it, and one let go the same.
 use crate::{Event, Source, input::Input};
-use anyhow::{Context, anyhow};
-use openh264::OpenH264API;
-use openh264::encoder::{BitRate, Encoder, EncoderConfig, FrameRate, UsageType};
-use openh264::formats::{BgraSliceU8, YUVBuffer};
+use crate::h264::H264;
+use anyhow::Context;
 use serde::Deserialize;
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 use std::time::{Duration, Instant};
 use x11rb::connection::Connection;
@@ -40,6 +36,8 @@ pub struct X11 {
     spare: Vec<Keycode>,
     next: usize,
     keyframe: Arc<AtomicBool>,
+    /// How many times wider the display is than its pictures, which the viewer's positions are in.
+    scale: Arc<AtomicUsize>,
 }
 
 impl X11 {
@@ -49,14 +47,16 @@ impl X11 {
         let (keys, spare) = keyboard(&conn)?;
         let keyframe = Arc::new(AtomicBool::new(true));
         let wanted = keyframe.clone();
+        let scale = Arc::new(AtomicUsize::new(1));
+        let scaled = scale.clone();
         std::thread::spawn(move || {
-            let why = match pictures(&events, &wanted) {
+            let why = match pictures(&events, wanted, &scaled) {
                 Ok(why) => why,
                 Err(why) => format!("the display's pictures ended: {why:#}"),
             };
             let _ = events.send(Event::Ended(why));
         });
-        Ok(Self { conn, root, keys, spare, next: 0, keyframe })
+        Ok(Self { conn, root, keys, spare, next: 0, keyframe, scale })
     }
 
     fn fake(&self, kind: u8, detail: u8, x: i16, y: i16) {
@@ -110,7 +110,10 @@ impl Source for X11 {
     fn input(&mut self, input: Input) {
         use x11rb::protocol::xproto::{BUTTON_PRESS_EVENT, BUTTON_RELEASE_EVENT, MOTION_NOTIFY_EVENT};
         match input {
-            Input::Move { x, y } => self.fake(MOTION_NOTIFY_EVENT, 0, x as i16, y as i16),
+            Input::Move { x, y } => {
+                let scale = self.scale.load(Ordering::Relaxed) as f64;
+                self.fake(MOTION_NOTIFY_EVENT, 0, (x * scale) as i16, (y * scale) as i16)
+            }
             Input::Button { b, down: true, mods } => {
                 self.hold(&mods, true);
                 self.fake(BUTTON_PRESS_EVENT, b, 0, 0);
@@ -186,24 +189,15 @@ fn keyboard(conn: &RustConnection) -> anyhow::Result<(HashMap<Keysym, (Keycode, 
     Ok((keys, spare))
 }
 
-/// The display's pictures, each that differs from the one before encoded and sent, until it's resized: gives why
-/// it ended.
-fn pictures(events: &Sender<Event>, keyframe: &AtomicBool) -> anyhow::Result<String> {
+/// The display's pictures, until it's resized: gives why it ended.
+fn pictures(events: &Sender<Event>, keyframe: Arc<AtomicBool>, scale: &AtomicUsize) -> anyhow::Result<String> {
     let (conn, screen) = x11rb::connect(None)?;
     let root = conn.setup().roots[screen].root;
     conn.randr_select_input(root, randr::NotifyMask::SCREEN_CHANGE)?;
     conn.xfixes_query_version(5, 0)?.reply()?;
     let geometry = conn.get_geometry(root)?.reply()?;
-    // H.264 takes only an even width and height, so a display of an odd one leaves out its last column or row.
-    let (width, height) = (geometry.width & !1, geometry.height & !1);
-    let config = EncoderConfig::new()
-        .usage_type(UsageType::ScreenContentRealTime)
-        .max_frame_rate(FrameRate::from_hz(30.0))
-        .bitrate(BitRate::from_bps(6_000_000))
-        .skip_frames(false);
-    let mut encoder = Encoder::with_api_config(OpenH264API::from_source(), config).map_err(|why| anyhow!("{why}"))?;
-    let mut yuv = YUVBuffer::new(width as usize, height as usize);
-    let mut last = vec![];
+    let (width, height) = (geometry.width, geometry.height);
+    let mut h264 = H264::new(keyframe);
     loop {
         let started = Instant::now();
         while let Some(event) = conn.poll_for_event()? {
@@ -215,17 +209,12 @@ fn pictures(events: &Sender<Event>, keyframe: &AtomicBool) -> anyhow::Result<Str
         if let Ok(pointer) = conn.xfixes_get_cursor_image()?.reply() {
             draw(&mut image.data, width as usize, height as usize, &pointer);
         }
-        let whole = keyframe.swap(false, Ordering::Relaxed);
-        if whole || image.data != last {
-            yuv.read_rgb(BgraSliceU8::new(&image.data, (width as usize, height as usize)));
-            if whole {
-                encoder.force_intra_frame();
-            }
-            let frame = encoder.encode(&yuv).map_err(|why| anyhow!("{why}"))?.to_vec();
-            if !frame.is_empty() && events.send(Event::Frame(frame)).is_err() {
-                return Ok("the stream ended".into());
-            }
-            last = image.data;
+        let frame = h264.picture(&image.data, width as usize, height as usize, width as usize * 4)?;
+        scale.store(h264.scale, Ordering::Relaxed);
+        if let Some(frame) = frame
+            && events.send(Event::Frame(frame)).is_err()
+        {
+            return Ok("the stream ended".into());
         }
         std::thread::sleep(FRAME.saturating_sub(started.elapsed()));
     }

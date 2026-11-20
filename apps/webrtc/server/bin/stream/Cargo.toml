@@ -18,14 +18,14 @@ serde_json.workspace = true
 str0m = { version = "0.25", default-features = false, features = ["rust-crypto"] }
 # TURN over TCP, which str0m leaves to whoever uses it.
 turn-client-proto = "0.8"
+# H.264 for a display's screen: Cisco's OpenH264, built from its source.
+openh264 = "0.9"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
 
-# A Linux display's screen (X11): its pictures, with its pointer, encoded as H.264 with Cisco's OpenH264, built from its source, and
-# what the viewer does played on it through XTest.
+# A Linux display's screen (X11): its pictures, with its pointer, and what the viewer does played on it through XTest.
 [target.'cfg(target_os = "linux")'.dependencies]
-openh264 = "0.9"
 x11rb = { version = "0.14", features = ["randr", "xfixes", "xtest"] }
 
 # An iOS Simulator's screen: idb's companion, over its gRPC, for its own H.264 and its touches and keys.
