@@ -79,11 +79,11 @@ for kind in "${kinds[@]}"; do
       fi
     done
 
-    published=$(one download --target "$kind" | jq -c '.["server-runtime"] // empty')
+    # The server the core's release has for that kind, which every network takes (`tooling/release`).
+    published=$(curl -fsSL "https://github.com/ptc-au/the-one-app/releases/download/builds/$kind.json" | jq -c '.["server-runtime"] // empty')
     if [[ -n $(changed) && -n $published ]]; then
       unpacked=$(mktemp -d -p "$target")
-      mapfile -t headers < <(jq -r '.link.headers | to_entries[] | "-H", "\(.key): \(.value)"' <<<"$published")
-      curl -fsSL "${headers[@]}" -o "$unpacked.tar.gz" "$(jq -r .link.url <<<"$published")"
+      curl -fsSL -o "$unpacked.tar.gz" "$(jq -r .link.url <<<"$published")"
       [[ $(sha256sum "$unpacked.tar.gz" | cut -d' ' -f1) == $(jq -r .sha256 <<<"$published") ]] || { echo "The server published for $kind isn't what it should be" >&2 && exit 1; }
       tar -xzf "$unpacked.tar.gz" -C "$unpacked"
       # Where `tooling/release` puts One Core's in a server: beside its code.

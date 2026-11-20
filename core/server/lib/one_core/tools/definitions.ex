@@ -9,6 +9,7 @@ defmodule OneCore.Tools.Definitions do
 
   # A short-lived link to the bucket, as `OneCore.Bucket.link/2` gives it: sent by its `method` to its `url` with its
   # `headers`.
+  # A link to send to: a bucket's presigned one, with the headers it was signed with, or the core's release's, with none.
   @link %{
     type: "object",
     properties: %{
@@ -16,7 +17,7 @@ defmodule OneCore.Tools.Definitions do
       url: %{type: "string"},
       headers: %{type: "object", additionalProperties: %{type: "string"}}
     },
-    required: ["method", "url", "headers"]
+    required: ["method", "url"]
   }
 
   # One of code mode's calls, as `call` takes it.

@@ -611,5 +611,5 @@ if [[ -n ${ONE_RELEASE_PAIR:-} ]]; then
   echo "Built: published with the $([[ $part == server ]] && echo clients || echo server) as one update"
 else
   ! ((${#mine[@]})) || publish "$out"
-  echo "The network's servers take $build by themselves (\`one builds\` says how far), and a device with \`one update\`."
+  echo "Every network's servers take $build by themselves within five minutes (\`one builds\` says how far), and a device with \`one update\`."
 fi
