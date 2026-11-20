@@ -574,9 +574,11 @@ async function play(built, scene, name, motion, hz, folder) {
     }
     return { said: lines.join("\n") }
   }
+  // Where what it opens should first be drawn: what `opensFrom` names, before the press.
+  const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
   const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
-  const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, replay])
+  const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
   if (ran.failed || !answer?.result) return { said: `  ${hz} Hz: ${answer?.error ?? ran.said.split("\n").at(-1)}` }
   const { frames, budget_ms: budget, over, leaving } = answer.result
@@ -609,6 +611,17 @@ async function play(built, scene, name, motion, hz, folder) {
   const toward = Math.sign(values.at(-1) - values[0])
   const back = motion.steady ? values.findIndex((value, n) => n > 0 && frames[n].at <= end && (value - values[n - 1]) * toward < -1) : -1
   if (back >= 0) failed.push(`it went back ${Math.abs(values[back] - values[back - 1]).toFixed(0)} pt at frame ${back + 1} (${frames[back].at} ms)`)
+  // What it opens is first drawn where what it opens from is, as an iPhone's folder grows out of its square: within a
+  // point, or a step of its own motion, which may have taken one before the frame it's first drawn on.
+  if (origin) {
+    const from = ran.answers.at(-2)?.result?.nodes?.[0]?.rect
+    const drawn = frames.flatMap((frame) => (frame.rect ? [frame.rect] : []))
+    const apart = (a, b) => Math.max(...["x", "y", "width", "height"].map((side) => Math.abs(a[side] - b[side])))
+    const [first] = drawn
+    const next = drawn.find((one) => apart(one, first) > 0)
+    if (!from || !first) failed.push(`${from ? "what it follows" : "what it opens from"} isn't there to compare`)
+    else if (apart(first, from) > Math.max(1, next ? apart(next, first) : 0)) failed.push(`it's first drawn at ${rect(first)}, not where it opens from, ${rect(from)}`)
+  }
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
   // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.
@@ -633,6 +646,9 @@ async function play(built, scene, name, motion, hz, folder) {
   }
   return { said: said.join("\n"), row: { scene: scene.name, motion: name, hz, folder: relative(out, folder), before: before && beforeAt } }
 }
+
+/// A rect as it's said: where, and how big.
+const rect = ({ x, y, width, height }) => `${Math.round(x)}, ${Math.round(y)} ${Math.round(width)} × ${Math.round(height)}`
 
 /// A tap as the harness's request, as scenes.js presses it.
 const pressed = (tap) => (tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) })

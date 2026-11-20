@@ -874,6 +874,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
                 Some(rect) => {
                     frame["x"] = rect["x"].clone();
                     frame["y"] = rect["y"].clone();
+                    frame["rect"] = Value::Object(rect);
                 }
                 None => frame["gone"] = json!(true),
             }
