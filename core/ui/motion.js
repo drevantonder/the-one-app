@@ -203,7 +203,7 @@ async function run(at, folder, scene, requests, seed = 0) {
   // that one's device pixels a point, where it's drawn at one here.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
   const slower = hostScore ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
 }
@@ -217,9 +217,9 @@ export async function scenesOf(target, built, folder, all = false) {
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
       .filter((scene) => all || (checking ? scene.checks : scene.motions))
-      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => {
+      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", motions, checks, seeds }) => {
         const [at, link] = (page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")).split("#")
-        return { name, page: at, link, uses, answers, taps, size, touch, motions, checks, seeds }
+        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, motions, checks, seeds }
       })
   }
   // The gallery lists its own, drawn at `#scenes`.

@@ -3,7 +3,7 @@
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--gpu] [--measure] [--seed <n>]
-//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>]
+//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--time-zone <IANA name>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -41,6 +41,7 @@
 //! `--slower` has each picture take that many times as long to decode as on this machine, as on a device with a slower
 //! CPU, where they come later after the page asks for them: the inspector's `window` says the longest one took
 //! (`picture_ms`).
+//! `--time-zone` has the page's clock show times in that time zone, as a device in it does: the clock is `UTC` otherwise.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
@@ -132,7 +133,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let started = std::time::Instant::now();
-    let clock = Clock::fixed();
+    let clock = flag("--time-zone").map_or_else(Clock::fixed, |zone| Clock::fixed_in(&zone));
     let js = Thread::start(&page, files, None, clock.clone(), touch)?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
     let asked: renderer::Asked = Box::new(move |message, _| {

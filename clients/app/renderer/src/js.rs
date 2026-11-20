@@ -33,6 +33,9 @@ struct Ticking {
     /// reads the browser's own `Date`.
     #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
     epoch_ms: Option<f64>,
+    /// The time zone a fixed clock shows times in, by its IANA name, where it isn't `UTC`.
+    #[cfg_attr(target_arch = "wasm32", allow(dead_code))]
+    zone: Option<String>,
     started: Instant,
     /// How far it's been moved on, beyond the real time since it started, and where it stopped, while it's paused.
     moved: Mutex<Moved>,
@@ -46,12 +49,17 @@ struct Moved {
 
 impl Clock {
     pub fn real() -> Clock {
-        Clock(Arc::new(Ticking { epoch_ms: None, started: Instant::now(), moved: Mutex::new(Moved { ahead: 0.0, paused: None }) }))
+        Clock(Arc::new(Ticking { epoch_ms: None, zone: None, started: Instant::now(), moved: Mutex::new(Moved { ahead: 0.0, paused: None }) }))
     }
 
     /// 1 January 2026, 00:00 UTC, paused.
     pub fn fixed() -> Clock {
-        Clock(Arc::new(Ticking { epoch_ms: Some(1_767_225_600_000.0), started: Instant::now(), moved: Mutex::new(Moved { ahead: 0.0, paused: Some(0.0) }) }))
+        Clock(Arc::new(Ticking { epoch_ms: Some(1_767_225_600_000.0), zone: None, started: Instant::now(), moved: Mutex::new(Moved { ahead: 0.0, paused: Some(0.0) }) }))
+    }
+
+    /// The same moment, shown in the time zone `zone` as a device in it would, by its IANA name.
+    pub fn fixed_in(zone: &str) -> Clock {
+        Clock(Arc::new(Ticking { zone: Some(zone.into()), ..Arc::into_inner(Clock::fixed().0).expect("one owner") }))
     }
 
     fn moved(&self) -> std::sync::MutexGuard<'_, Moved> {
@@ -101,10 +109,11 @@ impl Clock {
     }
 
     #[cfg(not(target_arch = "wasm32"))]
-    /// The time zone the sandbox's JS shows times in, by its IANA name: the host's, or for a fixed clock, `UTC`.
+    /// The time zone the sandbox's JS shows times in, by its IANA name: the host's, or for a fixed clock, `UTC`
+    /// unless it was given one.
     pub fn time_zone(&self) -> String {
         match self.0.epoch_ms {
-            Some(_) => "UTC".into(),
+            Some(_) => self.0.zone.clone().unwrap_or_else(|| "UTC".into()),
             None => crate::intl::host_time_zone(),
         }
     }
