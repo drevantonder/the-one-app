@@ -40,7 +40,10 @@ jobs:
         with:
           tool: tauri-cli@2.12.4
       - run: brew install xcodegen
+      # Kept whether or not the run succeeds: building the phone's Rust from nothing takes 40 minutes.
       - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
       # The identity, in a keychain of the run's own that codesign and xcodebuild find.
       - env:
           P12: ${{ secrets.DISTRIBUTION_P12 }}
