@@ -109,7 +109,7 @@ impl Opening {
         Self::with(view, |opening| {
             let (files, slowest) = opening.files;
             let ms = opening.started.elapsed().as_millis() as u64;
-            opening.steps.push((format!("{files} files read, the slowest in {slowest} ms; drawn"), ms, None, None));
+            opening.steps.push((format!("drawn, {files} files read, the slowest in {slowest} ms"), ms, None, None));
             opening.drawn = Some(ms);
             opening.app = app.to_owned();
         });
@@ -117,8 +117,9 @@ impl Opening {
     }
 
     /// `view`'s page is ready, once it's drawn and what it asked as it opened is answered: how it opened, in the log,
-    /// a line, and to Telemetry, a record each step (`one.client.open.step`, how long since it was asked to open, or
-    /// for a request how long it took).
+    /// a line, and to Telemetry, each step's milliseconds as a histogram by its view and step (`one.client.open.step`:
+    /// how long since it was asked to open, or for a request how long it took), and `ready`'s, so each step's
+    /// percentiles are read per device.
     fn ready(view: &str) {
         let mut openings = OPENING.lock().expect("nothing panics holding it");
         if !openings.get(view).is_some_and(|opening| opening.drawn.is_some() && opening.settled) {
@@ -137,9 +138,11 @@ impl Opening {
             .collect();
         eprintln!("{app} was ready in {ms} ms: {}", said.join(", "));
         let Ok(views) = crate::views() else { return };
-        for (step, at, took, server) in opening.steps {
-            let step = step.split(" at ").next().unwrap_or_default().to_owned();
-            views.client.report(json!({"name": "one.client.open.step", "took": took.unwrap_or(at), "attributes": {"one.view": app, "one.step": step, "one.server": server}}));
+        let steps = opening.steps.into_iter().map(|(step, at, took, _server)| (step, took.unwrap_or(at))).chain([("ready".to_owned(), ms)]);
+        for (step, ms) in steps {
+            // What's said after its name, as how many files it read, isn't the step's.
+            let step = step.split(',').next().unwrap_or_default();
+            views.client.report(json!({"name": "one.client.open.step", "value": ms, "attributes": {"one.view": app, "one.step": step}}));
         }
     }
 }
