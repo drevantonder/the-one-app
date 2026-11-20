@@ -26,8 +26,10 @@
 //! over the system's glass, a flat grey here, and its picture is theirs put together.
 //! `--seed` makes it adversarial, the same way each time for the same seed, as GPUI's randomized executor is: one
 //! refresh in five comes late (up to three in a row), what a person does comes a moment after what came before, as
-//! things are on their way somewhere, a click is held from 30 ms to a quarter of a second, and one batch in four of
-//! what its page changed reaches the window one to three of its turns late, as a page slower than its window's does.
+//! things are on their way somewhere, a click is held from 30 ms to a quarter of a second, one batch in four of
+//! what its page changed reaches the window one to three of its turns late, as a page slower than its window's does,
+//! and of what the window tells its page together, which its thread runs in one turn, now and then one waits for a turn
+//! of its own (`Thread::seed`).
 //! `--gpu` waits for the GPU after each frame drawn, and says how long that took with its cost (`gpu_ms`): on a real
 //! GPU, its time for the frame, as a device that draws it would take.
 //! `--latency` has each tool's answer come that many milliseconds of the page's clock after it was asked, as a round
@@ -168,6 +170,7 @@ fn main() -> anyhow::Result<()> {
     }
     // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.
     screen.idle();
+    screen.seed(seed);
     let ran = started.elapsed();
     if let Some(why) = screen.didnt_start() {
         anyhow::bail!("its page didn't start: {why}");

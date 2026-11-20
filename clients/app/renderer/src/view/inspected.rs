@@ -339,6 +339,13 @@ impl Screen {
         self.transitions.arriving() || self.coasting() || self.js.framing() || self.late.as_ref().is_some_and(super::Late::holding)
     }
 
+    /// Its page's thread as a busy device's, as `seed` says (`Thread::seed`): what it's called with together now and then
+    /// runs a turn apart. A browser's page runs on its own thread, the web's, which nothing seeds.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn seed(&mut self, seed: u64) {
+        self.js.seed(seed);
+    }
+
     /// Where the pointer is on it, if it's on it.
     pub fn pointer(&self) -> Option<crate::geometry::Point<f32>> {
         self.pointer

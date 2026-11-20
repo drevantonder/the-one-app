@@ -286,6 +286,17 @@ enum Call {
     Frame(f64),
 }
 
+/// A xorshift's next number below `below`, from `state`, where it's seeded (not 0).
+fn roll(state: &mut u64, below: u64) -> u64 {
+    if *state == 0 || below == 0 {
+        return 0;
+    }
+    *state ^= *state << 13;
+    *state ^= *state >> 7;
+    *state ^= *state << 17;
+    *state % below
+}
+
 #[derive(Default)]
 struct Shared {
     posted: Mutex<Posts>,
@@ -298,6 +309,8 @@ struct Shared {
     stop: Arc<AtomicBool>,
     /// The bytes its JS held as it was last collected.
     memory: std::sync::atomic::AtomicUsize,
+    /// With a seed (`Thread::seed`), a xorshift's state for which calls that came together it runs a turn apart.
+    split: Mutex<u64>,
 }
 
 #[derive(Default)]
@@ -393,8 +406,11 @@ impl Thread {
                 };
                 collect |= first.is_some();
                 let running = std::time::Instant::now();
-                // Every call that's come runs in this turn, and what they changed goes back as one batch.
-                for call in first.into_iter().chain(std::iter::from_fn(|| queue.try_recv().ok())) {
+                // Every call that's come runs in this turn, and what they changed goes back as one batch; with a seed,
+                // one that came with others now and then waits for a turn of its own, as a busy device's thread
+                // takes what came in two.
+                let apart = || roll(&mut on.split.lock().unwrap_or_else(std::sync::PoisonError::into_inner), 3) == 0;
+                for call in first.into_iter().chain(std::iter::from_fn(|| (!apart()).then(|| queue.try_recv().ok()).flatten())) {
                     ran += 1;
                     match call {
                         Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
@@ -437,6 +453,14 @@ impl Thread {
     /// Whether it asked for a frame, as its last turn left it.
     pub fn framing(&self) -> bool {
         self.shared.posts().framing
+    }
+
+    /// Whether, and how, it's adversarial, the same each time for the same seed, as GPUI's randomized executor is: of
+    /// the calls that came together, which its thread runs in one turn, now and then one waits for a turn of its own,
+    /// what it changed meanwhile going to its window first, as a busy device's thread takes what came in two. 0 for
+    /// never.
+    pub fn seed(&self, seed: u64) {
+        *self.shared.split.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = seed.wrapping_mul(0x9FB2_1C65_1E98_DF25) | u64::from(seed != 0);
     }
 
     fn call(&mut self, call: Call) {
