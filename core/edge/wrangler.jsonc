@@ -7,6 +7,8 @@
   // A request's signal is aborted when its client goes away, which the servers are told (`mcp/mcp.ts`).
   "compatibility_flags": ["enable_request_signal"],
   "workers_dev": false,
+  // Every five minutes it reads what the core has released, which the network's servers take (`updater/core.ts`).
+  "triggers": { "crons": ["*/5 * * * *"] },
   // The rules every agent is told first, which servers tell it too (`core/server/priv/rules.md`), as text.
   "rules": [{ "type": "Text", "globs": ["**/*.md"] }],
   // The network's updater (`updater/updater.ts`) and when a list of servers last changed (`Changes` in

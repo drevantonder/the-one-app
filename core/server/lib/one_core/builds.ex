@@ -17,10 +17,13 @@ defmodule OneCore.Builds do
   writes as it starts and as an update of it moves on (`say/1`), and a device's under its user's prefix,
   `devices/<key>`, which it says as it renews its pass (`seen/3`).
   """
-  alias OneCore.{Bucket, Protocol, Servers}
+  alias OneCore.{Bucket, Cache, Protocol, Servers}
 
   @builds "network/builds/"
   @latest @builds <> "latest"
+  # The core's release, whose builds every network takes, and the kinds of machine it makes them for.
+  @releases "https://github.com/ptc-au/the-one-app/releases/download/builds"
+  @targets ~w(linux-x86_64 linux-aarch64 macos-aarch64 windows-x86_64)
 
   @doc "The build this server is, as `tooling/version` names its commit: `0.15.2+2974.febd37350abc`."
   def build, do: Application.fetch_env!(:one_core, :build)
@@ -91,29 +94,43 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\", \"signature\"}}`.
+  The latest build of each name, as the core's release lists them for every kind of machine (`download/1`):
+  `%{name => %{\"build\", \"sha256\", \"size\", \"signature\"}}`, where a name is `server-code`, the same for every
+  kind, or `<what>/<target>`. A kind whose list can't be read now is left out.
   """
   def latest do
-    case Bucket.read(@latest) do
-      {:ok, latest, _tag} -> JSON.decode!(latest)
-      :absent -> %{}
-    end
+    for target <- @targets,
+        {:ok, list} <- [listed(target)],
+        {what, build} <- list,
+        into: %{},
+        do: {if(what == "server-code", do: what, else: "#{what}/#{target}"), Map.delete(build, "link")}
   end
 
   @doc """
-  The latest builds for a kind of machine, each with a link to download it by: `%{\"one\" => ...,
-  \"server-runtime\" => ..., \"server-code\" => ...}`, with whichever there's one of.
+  The latest builds for a kind of machine, each with a link to download it by, as the core's release lists them:
+  `%{\"one\" => ..., \"server-runtime\" => ..., \"server-code\" => ...}`, with whichever there's one of. Every network
+  takes the core's builds from there, as a new network's first server is installed from it
+  (`clients/cli/src/serving.rs`), so a release reaches every network without naming any (`core/edge/updater/core.ts`).
   """
   def download(target) do
-    for {name, build} <- latest(), what <- what(String.split(name, "/"), target), into: %{} do
-      {what, Map.put(build, "link", Bucket.link(@builds <> build["sha256"], :read))}
+    case listed(target) do
+      {:ok, list} -> list
+      {:error, why} -> raise "The core's builds for #{target} couldn't be read: #{why}"
     end
   end
 
-  # What a build is for a kind of machine: one for that kind, or one for every kind, as `server-code` is.
-  defp what([what, target], target), do: [what]
-  defp what([what], _target), do: [what]
-  defp what(_name, _target), do: []
+  # The core's release's list for a kind of machine, read again a minute after it last was, and none for a kind it
+  # makes no builds for.
+  defp listed(target) do
+    Cache.fetch(__MODULE__, target, fn ->
+      case Req.get("#{@releases}/#{target}.json", decode_body: false, retry: :transient) do
+        {:ok, %{status: 200, body: body}} -> {:commit, {:ok, Map.delete(JSON.decode!(body), "server")}, expire: 60_000}
+        {:ok, %{status: 404}} -> {:commit, {:ok, %{}}, expire: 60_000}
+        {:ok, %{status: status}} -> {:ignore, {:error, "the release answered #{status}"}}
+        {:error, why} -> {:ignore, {:error, Exception.message(why)}}
+      end
+    end)
+  end
 
   @doc """
   Makes `builds` the latest of their names: each `%{\"name\", \"build\", \"sha256\", \"size\"}`, and a runtime's

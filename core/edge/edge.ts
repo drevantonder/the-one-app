@@ -8,6 +8,7 @@ import mcp from "./mcp/mcp.ts";
 import presigner from "./presigner/presigner.ts";
 import relay from "./relay/relay.ts";
 import web from "./web/web.ts";
+import { followCore } from "./updater/core.ts";
 
 export { Network, Own, Changes } from "./presigner/presigner.ts";
 export { RelayEntrypoint } from "./relay/relay.ts";
@@ -37,5 +38,9 @@ export default {
     const part = env.PARTS[first];
     if (part) return (env[part as keyof Env] as unknown as Fetcher).fetch(request);
     return web.fetch(request, env);
+  },
+  // Every few minutes, what the core has released, which the network's servers take (`updater/core.ts`).
+  scheduled(_controller, env, ctx) {
+    ctx.waitUntil(followCore(env));
   },
 } satisfies ExportedHandler<Env>;
