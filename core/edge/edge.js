@@ -187,6 +187,13 @@ if ((await $`bun x wrangler deployments list --name ${edge.name}`.cwd(here).quie
   await Bun.write(`${built}/bare.jsonc`, JSON.stringify({ ...own, services: [], durable_objects: { ...edge.durable_objects, bindings } }, null, 2));
   await deploy(relative(here, `${built}/bare.jsonc`), `${here}/secrets`);
 }
+// A part is deployed, then its databases migrated. The tail parts go before the relay and the other parts, which name
+// them as their tail consumers, as Cloudflare refuses one that isn't there yet.
+const deployPart = async (/** @type {number} */ at) => {
+  await deploy(partConfigs[at], `${root}/apps/${workers[at].app}/edge/secrets`);
+  await migrate(workers[at], partConfigs[at], ["--remote"]);
+};
+for (const [at, { tail }] of workers.entries()) if (tail) await deployPart(at);
 // The relay is deployed only when what it runs changed: a deploy ends every connection it holds. Its version is tagged
 // with a hash of its bundle and config, as the build Wrangler would upload, and one with the same tag isn't deployed again.
 {
@@ -202,8 +209,5 @@ if ((await $`bun x wrangler deployments list --name ${edge.name}`.cwd(here).quie
   if (deployed === tag) console.log(`The relay is as deployed (${tag}), so it's left running`);
   else await deploy(relayConfig, `${here}/relay/secrets`, "--tag", tag);
 }
-for (const [at, part] of workers.entries()) {
-  await deploy(partConfigs[at], `${root}/apps/${part.app}/edge/secrets`);
-  await migrate(part, partConfigs[at], ["--remote"]);
-}
+for (const [at, { tail }] of workers.entries()) if (!tail) await deployPart(at);
 await deploy(edgeConfig, `${here}/secrets`);
