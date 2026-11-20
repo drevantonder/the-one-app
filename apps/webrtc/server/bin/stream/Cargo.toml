@@ -27,3 +27,11 @@ libc = "0.2"
 [target.'cfg(target_os = "linux")'.dependencies]
 openh264 = "0.9"
 x11rb = { version = "0.14", features = ["randr", "xfixes", "xtest"] }
+
+# An iOS Simulator's screen: idb's companion, over its gRPC, for its own H.264 and its touches and keys.
+[target.'cfg(target_os = "macos")'.dependencies]
+prost = "0.14"
+tokio = { workspace = true }
+tokio-stream = "0.1"
+tonic = { version = "0.14", default-features = false, features = ["transport", "codegen"] }
+tonic-prost = "0.14"
