@@ -95,9 +95,9 @@ async function run(at, folder, scene, requests) {
 /// answers, taps, size and touch.
 export async function scenesOf(target, built, folder, all = false) {
   if (existsSync(join(target, "client/scenes.json"))) {
-    const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
-    const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
-    return Object.entries(all)
+    const scenes = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
+    const whole = (scene) => (scene.like ? { ...whole(scenes[scene.like]), taps: undefined, ...scene, answers: { ...whole(scenes[scene.like]).answers, ...scene.answers } } : scene)
+    return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
       .filter((scene) => (all || scene.motions) && !scene.component && !scene.uses)
       .map(({ name, page = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false, motions }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], answers, taps, size, touch, motions }))
