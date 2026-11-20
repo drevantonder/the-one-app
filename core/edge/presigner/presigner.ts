@@ -38,6 +38,12 @@ const SERVER = /^servers\/([0-9a-f]{64})\//;
  */
 const OPEN = /^(?:(?:(?:users|groups)\/[^/]+\/|network\/)(?:apps\/.*|installs|installed|servers)|network\/owner|network\/(?:builds|deployed)\/.*)$/;
 /**
+ * An app's icon, kept by its SHA-256 the first time a server gives its address (`OneCore.Apps.Icons`): what an app's
+ * code says, which every server reads already. Any of the network's servers writes one, which lands only once, and
+ * reads them all, a person's own as much as the network's, since each gives the icons of the apps it runs.
+ */
+const ICON = /^icons\/[0-9a-f]{64}$/;
+/**
  * That a user, a group or the network installed an app is a blob under the app, `installed/<who>`, which a server
  * acting for them writes and removes, whoever's the app is: a deploy of it tells their servers.
  */
@@ -267,7 +273,8 @@ async function read(env: Env, by: string, token: string | null, body: string) {
 async function allowed(env: Env, by: string, token: string | null, { operation, key }: Ask) {
   const server = SERVER.exec(key)?.[1];
   const reads = operation === "read" || operation === "list";
-  const opens = server === by || (server !== undefined && operation === "read") || (OPEN.test(key) && reads);
+  const icon = ICON.test(key) && (operation === "read" || operation === "write");
+  const opens = server === by || (server !== undefined && operation === "read") || (OPEN.test(key) && reads) || icon;
   const installer = ((operation === "write" || operation === "remove") && INSTALLED.exec(key)?.[1]) || (!reads && DEPLOYED.exec(key)?.[1]);
   // A new network has no server yet, so nobody is on a list. The first is whichever shows the secret this
   // edge was deployed with (`FIRST_SERVER`), which only whoever deployed it knows: it writes the network's
