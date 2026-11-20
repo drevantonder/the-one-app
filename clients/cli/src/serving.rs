@@ -314,18 +314,18 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
             record.server_membership_stage = Some(stage);
         }
     };
-    let record = here.change(joining(ServerMembershipStage::Registering))?;
-    tool(client, "add_server", json!({"key": key})).await?;
+    let record = here.change(|record| {
+        joining(ServerMembershipStage::Registering)(record);
+        record.subject = Some(who.to_owned());
+    })?;
+    listed(client, here, "add_server", key).await?;
     here.change(joining(ServerMembershipStage::Downloading))?;
     if record.current.is_none() {
         let builds = download(client).await?;
         let build = here.take(&builds, &record.told(ServerDaemonStatus::Starting), None).await?;
         here.change(|record| record.current = Some(Pair { build, program: BUILD.to_owned() }))?;
     }
-    here.change(|record| {
-        joining(ServerMembershipStage::Installing)(record);
-        record.subject = Some(who.to_owned());
-    })?;
+    here.change(joining(ServerMembershipStage::Installing))?;
     let server = kept(here, key, &program()?, unit_env(who.to_owned(), None).await?);
     client::system::install(&server)?;
     here.change(joining(ServerMembershipStage::Starting))?;
@@ -351,7 +351,7 @@ async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
         Ok(false) => {}
         Err(why) => left.push(format!("the system may still have it: {why:#}")),
     }
-    if let Err(why) = tool(client, "remove_server", json!({"key": key})).await {
+    if let Err(why) = listed(client, here, "remove_server", key).await {
         left.push(format!("it's still on the list of servers: {why:#}"));
     }
     match fs::remove_dir_all(&here.folder) {
@@ -394,6 +394,19 @@ async fn settled(client: &Client, here: &Here, start: bool) -> Result<Record> {
 /// Who the server is for: whoever `ONE_SUBJECT` names, or this device's person.
 fn who(client: &Client) -> Result<String> {
     env::var("ONE_SUBJECT").or_else(|_| client.who().context("This device isn't signed in yet. Sign in on it first."))
+}
+
+/// Who this device's server is for once it has begun joining: whom it joined for, as its record says, whoever runs
+/// this program now, as its person's own `one serve off` of the network's server.
+fn whose(client: &Client, here: &Here) -> Result<String> {
+    here.read()?.subject.map_or_else(|| who(client), Ok)
+}
+
+/// Puts this device's server on the list of whoever it's for (`add_server`), or takes it off (`remove_server`), asked
+/// for them (`whose`), not for whoever runs this.
+async fn listed(client: &Client, here: &Here, name: &str, key: &str) -> Result<String> {
+    let request = json!({"name": name, "arguments": {"key": key}, "_meta": {"subject": whose(client, here)?}});
+    crate::said(client.request("tools/call", request).await?)
 }
 
 /// The environment the system runs the server with: the client it updates by, who it's for, and where programs
@@ -509,7 +522,7 @@ async fn leave(client: &Client, here: &Here, key: &str, lock: fs::File) -> Resul
     here.change(leaving(ServerMembershipStage::Draining))?;
     client::system::stop(SERVER, key)?;
     here.change(leaving(ServerMembershipStage::Deregistering))?;
-    tool(client, "remove_server", json!({"key": key})).await?;
+    listed(client, here, "remove_server", key).await?;
     here.change(leaving(ServerMembershipStage::Uninstalling))?;
     client::system::remove(SERVER, key)?;
     drop(lock);
@@ -519,13 +532,13 @@ async fn leave(client: &Client, here: &Here, key: &str, lock: fs::File) -> Resul
 /// Takes back what leaving did, from wherever it got to: it's back on its owner's list, as taking it off may have
 /// happened whatever the record says, and active, and the system runs it again unless it's what's running this.
 async fn undo_leaving(client: &Client, here: &Here, key: &str, start: bool) -> Result<()> {
-    tool(client, "add_server", json!({"key": key})).await.context("It couldn't be put back on the list of servers")?;
+    listed(client, here, "add_server", key).await.context("It couldn't be put back on the list of servers")?;
     here.change(|record| {
         record.server_membership = ServerMembership::Active;
         record.server_membership_stage = None;
     })?;
     if start {
-        let server = kept(here, key, &program()?, unit_env(who(client)?, None).await?);
+        let server = kept(here, key, &program()?, unit_env(whose(client, here)?, None).await?);
         client::system::install(&server)?;
         system::start(here, &server).await?;
     }
