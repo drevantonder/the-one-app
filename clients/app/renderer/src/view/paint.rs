@@ -55,15 +55,16 @@ pub(crate) struct Decoded {
 }
 
 /// Where a node's layout is drawn in the window: moved by `offset` and grown by `scale`, as its translates and
-/// scales and its parents' say.
+/// scales and its parents' say, and grown by `rest` once they're where their styles take them (`Look::rest_scale`).
 #[derive(Clone, Copy)]
 pub(super) struct Transform {
     pub(super) offset: Point<f32>,
     pub(super) scale: f32,
+    pub(super) rest: f32,
 }
 
 impl Transform {
-    pub(super) const NONE: Transform = Transform { offset: Point { x: 0.0, y: 0.0 }, scale: 1.0 };
+    pub(super) const NONE: Transform = Transform { offset: Point { x: 0.0, y: 0.0 }, scale: 1.0, rest: 1.0 };
 
     pub(super) fn point(&self, at: Point<f32>) -> Point<f32> {
         point(self.offset.x + at.x * self.scale, self.offset.y + at.y * self.scale)
@@ -73,11 +74,11 @@ impl Transform {
         Bounds { origin: self.point(bounds.origin), size: Size { width: bounds.size.width * self.scale, height: bounds.size.height * self.scale } }
     }
 
-    /// This, then a node's own move and growth around its middle, `centre`.
-    pub(super) fn then(&self, translate: Point<f32>, scale: f32, centre: Point<f32>) -> Transform {
+    /// This, then a node's own move and growth around its middle, `centre`, and the growth it rests at, `rest`.
+    pub(super) fn then(&self, translate: Point<f32>, scale: f32, rest: f32, centre: Point<f32>) -> Transform {
         // p ↦ centre + translate + (p − centre)·scale, then this.
         let moved = point(centre.x + translate.x - centre.x * scale, centre.y + translate.y - centre.y * scale);
-        Transform { offset: self.point(moved), scale: self.scale * scale }
+        Transform { offset: self.point(moved), scale: self.scale * scale, rest: self.rest * rest }
     }
 }
 
@@ -718,7 +719,7 @@ impl Painter<'_> {
                 Part::Scene(_, Some(recording)) => self.scene.raster(&recording, grown, [by.x * self.scale, by.y * self.scale], opacity, mask.scale_to(self.scale)),
                 Part::Scene(scene, None) => self.scene.splice(&scene, grown, [by.x * self.scale, by.y * self.scale], opacity, mask.scale_to(self.scale)),
                 Part::Sublayer(sublayer) => {
-                    let transform = Transform { offset: point(sublayer.transform.offset.x * grown + by.x, sublayer.transform.offset.y * grown + by.y), scale: sublayer.transform.scale * grown };
+                    let transform = Transform { offset: point(sublayer.transform.offset.x * grown + by.x, sublayer.transform.offset.y * grown + by.y), scale: sublayer.transform.scale * grown, rest: sublayer.transform.rest };
                     self.paint(sublayer.taffy_node, sublayer.offset, transform, moved(sublayer.mask).intersect(&mask), sublayer.opacity * opacity, sublayer.parent, sublayer.pointer);
                 }
             }
@@ -827,7 +828,7 @@ impl Painter<'_> {
         let (id, text, mut look, lines) = (leaf.id, leaf.text, leaf.look.clone(), leaf.line_clamp);
         if self.recording == Some(id) {
             // Its layer is drawn as it rests, and moved, grown and faded as it's drawn from it.
-            (look.translate, look.scale, look.opacity) = ((Offset::Px(0.0), Offset::Px(0.0)), 1.0, 1.0);
+            (look.translate, look.scale, look.rest_scale, look.opacity) = ((Offset::Px(0.0), Offset::Px(0.0)), 1.0, 1.0, 1.0);
         } else if self.recording.is_some() && self.layered.contains(&id) && self.turn != TransformationMatrix::unit() {
             // Turned in the layer being drawn, it's drawn in it as usual, which is drawn again each frame.
             self.animating = true;
@@ -851,7 +852,7 @@ impl Painter<'_> {
         // Its own move and growth, around its middle, which moves nothing around it.
         let centre = point(laid_out.origin.x + laid_out.size.width / 2.0, laid_out.origin.y + laid_out.size.height / 2.0);
         let translate = point(look.translate.0.of(laid_out.size.width), look.translate.1.of(laid_out.size.height));
-        let transform = if translate == point(0.0, 0.0) && look.scale == 1.0 { transform } else { transform.then(translate, look.scale, centre) };
+        let transform = if translate == point(0.0, 0.0) && look.scale == 1.0 && look.rest_scale == 1.0 { transform } else { transform.then(translate, look.scale, look.rest_scale, centre) };
         let bounds = transform.bounds(laid_out);
         let opacity = opacity * look.opacity;
         let rotate = look.rotate;
@@ -997,7 +998,7 @@ impl Painter<'_> {
                 // Several lines scroll by the wheel and a trackpad too, as a `<textarea>` does.
                 placed.scroll = self.paint_input(id, node, content, padding, laid.content_box_width(), transform.scale, text, opacity, mask).map(|most| (most, 0.0, false));
             }
-            Kind::Image => self.paint_image(node, content, radii, opacity, mask),
+            Kind::Image => self.paint_image(node, content, transform, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
             // Its latest frame, as the web's browser plays it, or as its connection decoded it natively.
             Kind::Video => self.paint_video(id, content, radii, opacity, mask),
@@ -1375,9 +1376,10 @@ impl Painter<'_> {
         });
     }
 
-    /// An image, scaled to fit its box keeping its shape, as GPUI's `img` is by default.
-    pub(super) fn paint_image(&mut self, node: &Node, content: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
-        let Some(src) = node.str("src") else { return };
+    /// An image, scaled to fit its box keeping its shape, as GPUI's `img` is by default, decoded for its box as it
+    /// rests (`Transform::rest`), and not at all where it doesn't show.
+    pub(super) fn paint_image(&mut self, node: &Node, content: Bounds<f32>, transform: Transform, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
+        let Some(src) = node.str("src").filter(|_| opacity > 0.0) else { return };
         // One by an address is drawn once its window has fetched it, as a `data:` address.
         let src = match self.fetched.get(src) {
             _ if src.starts_with("data:") => src,
@@ -1388,8 +1390,9 @@ impl Painter<'_> {
                 return self.wanted.push(src.to_owned());
             }
         };
-        let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
-        if device.width == 0 || device.height == 0 {
+        let rest = if transform.scale > 0.0 { transform.rest / transform.scale } else { 1.0 };
+        let device = Size { width: (content.size.width * self.scale * rest).round() as u32, height: (content.size.height * self.scale * rest).round() as u32 };
+        if device.width == 0 || device.height == 0 || content.size.width <= 0.0 || content.size.height <= 0.0 {
             return;
         }
         let Some((picture, tile)) = self.pictures.get(self.atlas, src, device) else { return self.pictures.drew_blank() };

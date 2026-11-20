@@ -43,6 +43,9 @@ pub struct Look {
     /// Moved along and down, each pixels or a part of its own size, grown, and turned (degrees), around its middle.
     pub translate: (Offset, Offset),
     pub scale: f32,
+    /// Its scale as its style has it, which a transition or a motion takes `scale` to: what a picture in it is decoded
+    /// for, so one growing or shrinking on its way there is drawn from the same pixels, as iOS draws a layer's.
+    pub rest_scale: f32,
     pub rotate: f32,
     pub z_index: i32,
     /// Whether it takes the pointer, as its style says (`pointerEvents`), or as what it's in does (`None`), as CSS's
@@ -143,6 +146,7 @@ impl Default for Look {
             scrolls: false,
             translate: (Offset::Px(0.0), Offset::Px(0.0)),
             scale: 1.0,
+            rest_scale: 1.0,
             rotate: 0.0,
             z_index: 0,
             pointer_events: None,
@@ -604,6 +608,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         scrolls: false,
         translate: (offset("translateX"), offset("translateY")),
         scale: number("scale").unwrap_or(1.0),
+        rest_scale: number("scale").unwrap_or(1.0),
         rotate: number("rotate").unwrap_or(0.0),
         z_index: number("zIndex").unwrap_or(0.0) as i32,
         pointer_events: word("pointerEvents").map(|events| events != "none"),

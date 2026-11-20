@@ -85,6 +85,8 @@ pub(super) struct Pictures {
     ready: HashMap<u64, Option<Decoded>>,
     /// Each address's picture as it was last put in the atlas, drawn while it decodes at another size.
     latest: HashMap<u64, (u64, Picture)>,
+    /// Each address's sizes it's been put in the atlas at, in device pixels.
+    copies: HashMap<u64, Vec<Size<u32>>>,
     /// How many have been decoded, which a frame that has more to show than the last is drawn for.
     pub(super) decoded: u64,
     /// What wakes its window as one's decoded.
@@ -194,9 +196,13 @@ impl Pictures {
     /// at once; before, decoded in the background, with the same picture as it was last put there at another size, if
     /// it was, in the meantime.
     pub(super) fn get(&mut self, atlas: &Atlas, src: &str, device: Size<u32>) -> Option<(Picture, AtlasTile)> {
-        let device = fitting(device, atlas);
-        let id = hash((device.width, device.height, src));
         let address = hash(src);
+        let device = fitting(device, atlas);
+        // A copy up to twice as large is drawn smaller rather than decoded again, as a GPU's mipmap is for what's up to
+        // half its size: an icon pressed in, a page's grown to fit its screen.
+        let fits = |copy: &&Size<u32>| copy.width >= device.width && copy.height >= device.height && copy.width <= device.width * 2 && copy.height <= device.height * 2;
+        let device = self.copies.get(&address).and_then(|copies| copies.iter().filter(fits).min_by_key(|copy| copy.width)).copied().unwrap_or(device);
+        let id = hash((device.width, device.height, src));
         let latest = |pictures: &Self| {
             let (id, picture) = *pictures.latest.get(&address)?;
             let tile = atlas.get_or_insert_with(&AtlasKey::Image(id), &mut || Ok(None)).ok()??;
@@ -214,6 +220,10 @@ impl Pictures {
             .flatten();
         if let (Some(tile), Some(Some(picture))) = (tile, self.sizes.get(&id).copied()) {
             self.latest.insert(address, (id, picture));
+            let copies = self.copies.entry(address).or_default();
+            if !copies.contains(&device) {
+                copies.push(device);
+            }
             return Some((picture, tile));
         }
         if let std::collections::hash_map::Entry::Vacant(asked) = self.asked.entry(id) {
