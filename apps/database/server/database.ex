@@ -52,31 +52,46 @@ defmodule Database do
   # again, a hook or a tool that only reads, before it's taken as gone. One that's there but stuck keeps the call
   # open, saying it's still running it, and a hook gives up at 10 s (`OneCore.Hooks`): so every hook passed to a
   # stuck holder gave up before anything took the lease back, and the next did the same. A holder that's up runs one
-  # in well under a second, and this leaves a hook time to take the lease over and answer.
+  # in well under a second, and this and `@witness` leave a hook time to take the lease over and answer.
   @reach 4_000
+
+  # How long, in milliseconds, a server another passed a call to, since that one couldn't reach the holder, gives the
+  # holder to run it: a holder that's up runs one in well under a second.
+  @witness 2_000
 
   # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
   # that needs what only another server has can't be passed on again (a Vault item only some servers open, say).
-  # Either way this server takes the lease, if the log still names that one and the relay at the network's address
-  # can't reach it either (`Database.Lease`), and runs the call itself. But not reaching it just now isn't its
-  # being gone: a network loses a connection now and then, and what this server knew of it may be from before it came
-  # back. So one given up on at once is asked once more first. One that was waited for has had what it was sent sent
-  # again by then (`@waited`). A server that isn't up takes no lease, so the call fails here, for whoever asked to ask
-  # another, as it does where the holder is still connected: it's this server that can't reach it.
+  # Not reaching it just now isn't its being gone: a network loses a connection now and then, and what this server
+  # knew of it may be from before it came back. So one given up on at once is asked once more first. One that was
+  # waited for has had what it was sent sent again by then (`@waited`).
   #
-  # How long that waited is said as a number of the app's (Telemetry's `one.database.lease.wait`): `not_answered`
-  # where the holder kept it `@waited` or more without running it, as one that's stuck does, which is warned of,
-  # `gone` where it said at once that it wouldn't, and `connected` where the relay still reached it.
+  # Then the call is passed to the other servers that may hold the database, as SWIM's indirect probe asks other
+  # members to reach one that didn't answer: one that reaches the holder has it run there, and the lease stays where
+  # the others reach it, and one that can't either takes the lease, two servers having failed to reach it, and runs it.
+  # Only where none of them answered, or there's none, does this server take the lease itself, as the log lets it
+  # (`Database.Lease`). A server that isn't up takes no lease, so the call fails here, for whoever asked to ask
+  # another, as it does where this server is the one out of reach.
+  #
+  # How long the holder kept it is said as a number of the app's (Telemetry's `one.database.lease.wait`):
+  # `not_answered` where it kept it `@waited` or more without running it, as one that's stuck does, which is warned
+  # of, `gone` where it said at once that it wouldn't, and `connected` where the relay still reached it after it
+  # took the lease from this one, and nothing else could be asked.
   defp taken_over(call, lease, server) do
     began = System.monotonic_time(:millisecond)
-    # A call another server passed here to run, as one whose own copy failed passes its own (`:failed`), can't be
-    # passed on again (`Call.forward_to/3`): this server takes the lease where the log or the relay lets it.
-    ask = server && call.forwarded != "to"
-    first = if ask, do: Call.forward_to(call, server, @reach)
-    again = if ask && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
+    # A call another server passed here to run, as one whose own copy failed passes its own (`:failed`), or as one
+    # that couldn't reach the holder does, is asked of the holder once, for `@witness`, and passed on no further.
+    passed = call.forwarded == :to
+    within = if passed, do: @witness, else: @reach
+    first = if server, do: Call.forward_to(call, server, within)
+    again = if server && not passed && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
     waited = System.monotonic_time(:millisecond) - began
-    # One that answered it would pass the call on in turn is there, and can't run it: it isn't asked of the relay.
-    took = :gen_statem.call(lease, {:take_over, server, :forwarding_loop in [first, again]})
+    whose = OneCore.User.owner(OneCore.Artifact.name(call.own))
+    # One that answered it would pass the call on in turn is there, and can't run it: the others aren't asked.
+    cannot_run = :forwarding_loop in [first, again]
+    others = if server && not passed && not cannot_run, do: OneCore.Apps.servers(whose) -- [server, OneCore.Server.key()], else: []
+    if others != [], do: Call.forward(call, others)
+    why = if(cannot_run, do: :cannot_run, else: if(passed, do: :unanswered, else: :alone))
+    took = :gen_statem.call(lease, {:take_over, server, why})
     app = Lease.app(call.own)
     holder = server && (OneCore.Servers.name(server) || server)
 
@@ -93,12 +108,12 @@ defmodule Database do
         :ok
 
       :connected ->
-        raise "#{holder} holds #{app}'s database and answers the network's relay, but it didn't answer this server within #{waited} ms, so this server doesn't take it over. Check this server's connection, then try again."
+        raise "#{holder} took #{app}'s database from this server and answers the network's relay, but it didn't answer this server within #{waited} ms, and no other server could be asked, so this server doesn't take it back. Check this server's connection, then try again."
 
       # This server is stopping, or not one of its network's yet, so it takes no lease that others would then come
       # to it for: the call goes to one of the servers that are, which takes it.
       :not_up ->
-        Call.forward(call, Lease.holders(OneCore.User.owner(OneCore.Artifact.name(call.own))))
+        Call.forward(call, OneCore.Apps.servers(whose))
         held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
         raise "This server is starting or stopping, so it doesn't take a database over, #{held}, and no other server took it. Try again in a moment."
 
@@ -106,14 +121,8 @@ defmodule Database do
       # the servers acting for whoever the database is, which takes the lease and runs it, and one passed on here is
       # answered as one this server would pass on again, so the server that passed it takes the lease (`Call.forward/2`).
       :failed ->
-        Call.forward(call, Lease.holders(OneCore.User.owner(OneCore.Artifact.name(call.own))))
+        Call.forward(call, OneCore.Apps.servers(whose))
         raise "This server's copy of #{app}'s database failed just now, so it handed its lease on, and no other server took it. Try again in a moment."
-
-      # This server's machine has a battery, and one of the servers acting for whose the database is stays on and is
-      # up: that one takes the lease (`Database.Lease`).
-      :gives_way ->
-        Call.forward(call, Lease.holders(OneCore.User.owner(OneCore.Artifact.name(call.own))))
-        raise "This server's machine has a battery, so it leaves #{app}'s database to a server that stays on, and none of those took it. Try again in a moment."
     end
   end
 
