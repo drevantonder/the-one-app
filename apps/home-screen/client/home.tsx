@@ -12,8 +12,8 @@
 // Home Screen, or hold it a while longer, or touch and hold a page's empty space. An app held in the App Library is
 // carried onto any owner's pages. Where it is, what's open over it and the editing are one state machine (machine.ts),
 // whose snapshot is one signal here. It's written on the UI library's primitives, so a native host draws it as the DOM does.
-import { createEffect, createMemo, Errored, Loading, refresh, Show } from "solid-js"
-import { Button, covers, haptic, keydown, Problem, render, View, viewport } from "ui"
+import { createEffect, createMemo, createSignal, Errored, Loading, onCleanup, refresh, Show } from "solid-js"
+import { Button, connection, covers, haptic, keydown, Problem, render, Status, View, viewport } from "ui"
 import { looks } from "./looks.ts"
 import { home, state, editing, launcher, windowWidth } from "./store.ts"
 import { type Owner, owners } from "./owners.ts"
@@ -106,9 +106,26 @@ function Broken(props: { error: Error }) {
   )
 }
 
+/// The Home Screen while what it shows hasn't come: nothing for a moment, as most of the time it's there at once, then
+/// that it's opening, and once that lasts, its problem box with Try Again, as DESIGN.md has one, never a blank screen,
+/// which a phone that asked as a server restarted showed until its person closed the app (20 Nov).
+function Waiting() {
+  const [waited, setWaited] = createSignal(0)
+  const ticking = setInterval(() => setWaited((seconds) => seconds + 1), 1000)
+  onCleanup(() => clearInterval(ticking))
+  const said = () => (connection() === "online" ? "Your network hasn't answered yet." : "This device isn't reaching your network.")
+  return (
+    <View style={[looks.broken, looks.tall(viewport().height)]}>
+      <Show when={waited() >= 10} fallback={<Show when={waited() >= 1}><Status heading="Opening your Home Screen…" /></Show>}>
+        <Problem heading="Home Screen didn't open." text={said()} action={<Button variant="secondary" onPress={() => (setWaited(0), refresh(owners))}>Try Again</Button>} />
+      </Show>
+    </View>
+  )
+}
+
 render(() => (
   <Errored fallback={(error) => <Broken error={error() as Error} />}>
-    <Loading>
+    <Loading fallback={<Waiting />}>
       <HomeScreen owners={owners()} />
     </Loading>
   </Errored>
