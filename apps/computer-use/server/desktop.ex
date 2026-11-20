@@ -146,20 +146,43 @@ defmodule ComputerUse.Desktop do
   @doc """
   Streams the screen as WebRTC video to the app whose SDP offer `request` has, as JSON, with the ICE servers to use
   and WebRTC's sender for each kind of machine (`webrtc`'s `sender`): this computer's, on its person's screen, answers
-  it and carries on by itself until the app goes. On Linux it's given the graphical session's display (X11's). Gives
-  the SDP answer.
+  it and carries on by itself until the app goes. On a Mac the helper starts it, so macOS allows it Screen Recording
+  and Accessibility as it does Cua Driver; on Linux it's given the graphical session's display (X11's). Gives the SDP
+  answer.
   """
   def stream(service, request) do
-    if not match?({:unix, :linux}, :os.type()), do: raise("A Mac's and a Windows PC's own screens have no live video yet: they're shown a picture at a time.")
+    if match?({:win32, _}, :os.type()), do: raise("A Windows PC's own screen has no live video yet: it's shown a picture at a time.")
     request = JSON.decode!(request)
     folder = OneCore.Service.folder(service)
     sender = sender(folder, request["sender"])
     file = Path.join(folder, "stream-#{System.unique_integer([:positive])}.json")
 
-    config = Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => Path.join(folder, "stream.log"), "source" => %{"kind" => "x11"}})
+    source =
+      case :os.type() do
+        {:unix, :darwin} -> "screencapturekit"
+        {:unix, :linux} -> "x11"
+      end
+
+    config = Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => Path.join(folder, "stream.log"), "source" => %{"kind" => source}})
     File.write!(file, JSON.encode!(config))
 
-    %{stdout: answer, stderr: why} = OneCore.Command.run([sender, file], 30, env: session())
+    {answer, why} =
+      case :os.type() do
+        # Started with open(1), so the helper is responsible for it; its answer is what it prints, in a file.
+        {:unix, :darwin} ->
+          answer = file <> ".answer"
+          helper = GenServer.call(service, :helper)
+          open = ["open", "-n", "-g", "-W", "--stdout", answer, "--stderr", answer <> ".why", helper, "--args", "run", sender, file]
+          OneCore.Command.run(open, 30)
+          said = {File.read(answer), File.read(answer <> ".why")}
+          for f <- [answer, answer <> ".why"], do: File.rm(f)
+          with {{:ok, sdp}, _} <- said, do: {sdp, ""}, else: ({_, {:ok, why}} -> {"", why}; _ -> {"", ""})
+
+        {:unix, :linux} ->
+          %{stdout: sdp, stderr: why} = OneCore.Command.run([sender, file], 30, env: session())
+          {sdp, why}
+      end
+
     if String.starts_with?(answer, "v=0"), do: answer, else: raise("Couldn't stream its screen: #{String.trim(why)}")
   end
 
@@ -174,7 +197,13 @@ defmodule ComputerUse.Desktop do
   defp sender(folder, senders) do
     arch = :erlang.system_info(:system_architecture) |> to_string() |> String.split("-") |> hd()
 
-    %{"url" => url, "sha256" => sha256} = senders["linux-#{arch}"] || raise "WebRTC has no sender for linux-#{arch}"
+    target =
+      case :os.type() do
+        {:unix, :darwin} -> "macos-#{arch}"
+        {:unix, :linux} -> "linux-#{arch}"
+      end
+
+    %{"url" => url, "sha256" => sha256} = senders[target] || raise "WebRTC has no sender for #{target}"
     file = Path.join(folder, "stream-#{sha256}")
 
     if not File.exists?(file) do
