@@ -1,0 +1,60 @@
+# Builds the One App for iPhone at a commit on GitHub's macOS runner, plain: unsigned, with the One App's own name and
+# identifier and no network in it, as `tooling/testflight` asks, which finishes it for a network on Linux, out of these
+# logs, which anyone can read. The app, `Payload/<its name>.app`, is the run's artifact `iphone`, zipped as it was so its
+# program stays executable.
+name: iPhone app
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: The commit to build
+        required: true
+      rust:
+        description: The Rust to build with, as `rustc -V` names it on the machine releasing
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      # Its build is named from the commits that lead to it (`tooling/version`).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust }}
+          targets: aarch64-apple-ios
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2.12.4
+      - run: brew install xcodegen
+      # Kept whether or not the run succeeds: building the phone's Rust from nothing takes 40 minutes.
+      - uses: Swatinem/rust-cache@v2
+        with:
+          cache-on-failure: true
+      # Its name is the commit's, said before the build changes the Xcode project's files git tracks, which would make
+      # every phone's build `.dirty` (`core/client/build.rs`). The team is the One App's, which Tauri's CLI names in the
+      # project; nothing is signed here.
+      - working-directory: clients/app
+        env:
+          APPLE_DEVELOPMENT_TEAM: X96JC3HCV7
+        run: |
+          export ONE_BUILD=$(../../tooling/version)
+          gen/apple/generate
+          cargo tauri ios build --archive-only --no-sign
+          mkdir "$RUNNER_TEMP/Payload" && cp -R gen/apple/build/app_iOS.xcarchive/Products/Applications/*.app "$RUNNER_TEMP/Payload/"
+          cd "$RUNNER_TEMP" && zip -qry iphone.zip Payload
+      - uses: actions/upload-artifact@v4
+        with:
+          name: iphone
+          path: ${{ runner.temp }}/iphone.zip
+          retention-days: 7
