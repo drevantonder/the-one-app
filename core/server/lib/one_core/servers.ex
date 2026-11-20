@@ -176,7 +176,7 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  Tells the network's updater `said`, through its relay, `%{published: <the server build>}` or `%{now: true}`, or with
+  Tells the network's updater `said`, through its relay, `%{now: true}`, or with
   none asks it, and gives what it says of the network's update (`OneCore.Release.network/0`): `{:ok, update}`, or
   `{:ok, nil}` from a server with no edge address, or `{:error, why}`.
   """

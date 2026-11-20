@@ -207,21 +207,18 @@ async function handleSeen(env: Env, request: Request, url: URL) {
 }
 
 /**
- * A server says builds were published to the network, `{"published": <the newest>, "latest": {<name>: <build>}}`,
- * the server build and each `one`, or asks for Update Now,
- * `{"now": true}`, with a POST, and the network's updater's status is given; a GET, from any of the network's own,
- * gives it.
+ * A server asks for Update Now, `{"now": true}`, with a POST, and the network's updater's status is given; a GET,
+ * from any of the network's own, gives it. What the core released the edge tells the updater itself
+ * (`../updater/core.ts`).
  */
 async function handleUpdate(env: Env, request: Request) {
   const admitted = await admit(env, request, request.method === "POST" ? await request.text() : "");
   if (admitted instanceof Response) return admitted;
   let input: Input = { status: true };
   if (request.method === "POST") {
-    if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
-    const { said } = admitted;
-    if (typeof said.published === "string" && said.latest && typeof said.latest === "object") input = { published: said.published, latest: said.latest as Record<string, string> };
-    else if (said.now === true) input = { now: true };
-    else return refuse(400, 'A server says {"published": <build>, "latest": {<name>: <build>}} or {"now": true}');
+    if (admitted.admitted.until !== undefined) return refuse(403, "Only a server asks for Update Now");
+    if (admitted.said.now !== true) return refuse(400, 'A server asks {"now": true}');
+    input = { now: true };
   }
   return Response.json(await relay(env, (relay) => relay.updated(input)), { headers: { "one-version": env.VERSION } });
 }

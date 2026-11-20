@@ -878,54 +878,6 @@ defmodule OneCore.Tools.Definitions do
       }
     },
     %{
-      name: "publish",
-      description: """
-      Makes builds the latest for the network's machines, which they take when they're asked to update.
-      While the network lacks any of their files, it gives a link to send each by, with its `method` and
-      `headers`, and changes nothing: send them, and ask again. `tooling/release` does all of this.
-      """,
-      inputs: %{
-        type: "object",
-        properties: %{
-          builds: %{
-            type: "array",
-            description:
-              "Each build: its name, <what>/<target> for a kind of machine (server-runtime/linux-x86_64, " <>
-                "one/macos-aarch64, one-setup/windows-x86_64) or <what> for every kind (server-code), its build, " <>
-                "sha256 and size, a runtime's inputs, the SHA-256 of what it's built from, and the platform's " <>
-                "signature of it, which `one` checks before it takes it",
-            items: %{
-              type: "object",
-              properties: %{
-                name: %{
-                  type: "string",
-                  pattern: "^[a-z0-9-]+(/[a-z0-9_]+-[a-z0-9_]+)?$"
-                },
-                build: %{type: "string"},
-                inputs: %{type: "string", pattern: "^[0-9a-f]{64}$"},
-                sha256: %{type: "string", pattern: "^[0-9a-f]{64}$"},
-                size: %{type: "integer"},
-                signature: %{type: "string", description: "Ed25519's of `<name> <build> <sha256>`, in base64"}
-              },
-              required: ["name", "build", "sha256", "size"]
-            }
-          }
-        },
-        required: ["builds"]
-      },
-      outputs: %{
-        type: "object",
-        properties: %{
-          send: %{
-            type: "object",
-            additionalProperties: @link,
-            description: "Where to send each build's file the network lacks, by its name, if it lacks any"
-          },
-          latest: %{type: "object", description: "The latest builds, by their names, once it has them all"}
-        }
-      }
-    },
-    %{
       name: "update",
       task_support: :optional,
       description: """

@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Builds server and client builds from the commit checked out, which is on main, and publishes them to a network.
-# Its servers take them by themselves, as the network's update (`core/edge/updater/updater.ts`) says, and a device
+# Builds server and client builds from the commit checked out, which is on main, and publishes them as the core's
+# release, which every network takes them from (`publish`): its servers by themselves, as its update
+# (`core/edge/updater/updater.ts`) says, and a device
 # with `one update`. Publishing is all this does:
 #
 #     tooling/release [server] [client] [--dry-run]
@@ -14,8 +15,8 @@
 # installer.nsi`); from then on it updates itself, as on Linux and a Mac. --dry-run says what it would build, and
 # builds nothing.
 #
-# The network is the one of the client this machine's `one` is, or the one in ONE_HOME. Whoever it is needs to be
-# the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
+# What's built is what the network of the client this machine's `one` is, or the one in ONE_HOME, runs, and what it
+# says is latest, which is the core's release's. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac's `one` needs
 # its system's frameworks: from Linux, it's built on a Mac (`tooling/on-mac`: GitHub's runner, or the owner's), from
 # the same commit with the same Rust, and published with the rest. A server release and a client release run at once,
@@ -67,7 +68,7 @@ done
 # a PKCS#8 DER in base64 (in 1Password, "The One App build signing key"), whose public half, `key`, is built into `one`,
 # which takes no build without it (`clients/cli/src/serving.rs`), as Tauri's updater and Sparkle take theirs.
 key=3fd5f3516020dafc3690044ac56dceef578b1f162b72ec4687af2d764192d2f2
-# The core's own release, which keeps what's published here for networks that have none yet (`mirror`).
+# The core's own release, which every network takes its builds from (`publish`).
 repo=ptc-au/the-one-app tag=builds
 # Without BUILD_SIGNING_KEY in the environment (an override, for a machine without 1Password) it's read from 1Password,
 # into this process only.
@@ -77,81 +78,76 @@ export BUILD_SIGNING_KEY
 [[ -n $dry ]] || [[ $(base64 -d <<<"${BUILD_SIGNING_KEY:-}" 2>/dev/null | openssl pkey -inform DER -pubout -outform DER 2>/dev/null |
   tail -c 32 | xxd -p -c 64) == "$key" ]] || { echo "BUILD_SIGNING_KEY isn't the platform's build signing key." >&2 && exit 1; }
 
-# Publishes the builds in each of the folders given, in one `one publish`: the network gives a link for each file it
-# doesn't have yet, which is sent there, and once it has them all, they're the latest, as one update.
+# Publishes the builds in each of the folders given as the core's release, `builds` on GitHub, which every network
+# takes its builds from (`OneCore.Builds`), its edge telling its updater within five minutes (`core/edge/updater/core.ts`),
+# and a new network's first server is installed from (`one serve on --first`): each file by its SHA-256, and for each
+# kind of machine, `<target>.json`, the latest of each name for it, `server-code` in every one, with its link there.
+# A `one` keeps `serving`, the build that first had what a server runs of it (`serves`), so one that changed only the
+# app around `one serve run` restarts no server. The builds before stay, as a machine may be downloading one as the
+# next is published, and what neither the lists before nor now name goes.
 publish() {
-  echo "Publishing to the network"
-  ONE=$(command -v one) BUILD=$build bun -e '
-    const { ONE, BUILD, BUILD_SIGNING_KEY } = process.env;
-    const { readdirSync } = require("node:fs");
+  echo "Publishing to the core's release, $repo $tag"
+  gh release view "$tag" -R "$repo" >/dev/null 2>&1 ||
+    gh release create "$tag" -R "$repo" --latest=false --title "The latest builds" \
+      --notes "What every network's servers and devices take, and a new network's first server is installed from: \`one serve on --address <address> --first <secret> --owner <name>\` (core/edge/README.md)." >/dev/null
+  REPO=$repo TAG=$tag BUILD=$build bun -e '
+    const { REPO, TAG, BUILD, BUILD_SIGNING_KEY } = process.env;
+    const { readdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync } = require("node:fs");
+    const { tmpdir } = require("node:os");
     const { createPrivateKey, sign } = require("node:crypto");
+    const gh = (...args) => {
+      const ran = Bun.spawnSync(["gh", ...args, "-R", REPO], { stderr: "inherit" });
+      if (ran.exitCode !== 0) throw new Error(`gh ${args.slice(0, 2).join(" ")} failed`);
+      return ran.stdout.toString();
+    };
     const key = createPrivateKey({ key: Buffer.from(BUILD_SIGNING_KEY, "base64"), format: "der", type: "pkcs8" });
     const files = process.argv.slice(1).flatMap((out) => readdirSync(out).filter((file) => /\.(gz|exe)$/.test(file)).map((file) => `${out}/${file}`));
     const builds = await Promise.all(files.map(async (path) => {
       const bytes = await Bun.file(path).bytes();
       const [, what, kind] = path.split("/").pop().match(/^(server-runtime|server-code|server|one-setup|one-cli|one)-?(.*?)(\.tar\.gz|\.gz|\.exe)$/);
-      // A runtime and a client are told by what they were built from, which the network keeps with them.
-      const from = Bun.file(path.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".inputs"));
-      const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
-      // And a `one`, by what a server runs of it (`serve_inputs`).
-      const serving = Bun.file(path.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".serves"));
-      const serves = (await serving.exists()) ? { serves: (await serving.text()).trim() } : {};
+      // A runtime and a client are told by what they were built from, and a `one` by what a server runs of it.
+      const said = async (ext) => { const file = Bun.file(path.replace(/(\.tar\.gz|\.gz|\.exe)$/, ext)); return (await file.exists()) ? (await file.text()).trim() : undefined; };
       const name = kind ? `${what}/${kind}` : what;
       const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
       const signature = sign(null, Buffer.from(`${name} ${BUILD} ${sha256}`), key).toString("base64");
-      return { path, name, build: BUILD, ...inputs, ...serves, sha256, signature, size: bytes.length };
+      return { path, what, kind, name, build: BUILD, inputs: await said(".inputs"), serves: await said(".serves"), sha256, signature, size: bytes.length };
     }));
-    const publish = () => {
-      const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ path, ...build }) => build))], { stderr: "inherit" });
-      if (published.exitCode !== 0) process.exit(1);
-      return JSON.parse(published.stdout.toString());
-    };
-    let published = publish();
-    if (published.send) {
-      await Promise.all(builds.filter(({ name }) => published.send[name]).map(async ({ path, name }) => {
-        const { method, url, headers } = published.send[name];
-        const sent = await fetch(url, { method, headers, body: Bun.file(path) });
-        if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
-      }));
-      published = publish();
+    const at = `https://github.com/${REPO}/releases/download/${TAG}`;
+    const TARGETS = ["linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64"];
+    const before = Object.fromEntries(await Promise.all(TARGETS.map(async (target) => {
+      const listed = await fetch(`${at}/${target}.json`);
+      return [target, listed.ok ? await listed.json() : null];
+    })));
+    const lists = structuredClone(before);
+    for (const { what, kind, build, inputs, serves, sha256, signature, size } of builds) {
+      for (const target of kind ? [kind] : TARGETS.filter((target) => lists[target] || builds.some((other) => other.kind === target))) {
+        const list = (lists[target] ??= {});
+        const was = list[what];
+        list[what] = { build, sha256, size, signature, ...(inputs && { inputs }), ...(serves && { serves }), link: { method: "GET", url: `${at}/${sha256}` } };
+        if (serves) list[what].serving = was?.serves === serves ? (was.serving ?? was.build) : build;
+      }
     }
-    if (published.send) throw new Error("The network didn'"'"'t take them");
+    const have = new Set(JSON.parse(gh("release", "view", TAG, "--json", "assets")).assets.map(({ name }) => name));
+    const out = mkdtempSync(`${tmpdir()}/release-`);
+    try {
+      for (const { path, sha256 } of builds.filter(({ sha256 }) => !have.has(sha256))) {
+        copyFileSync(path, `${out}/${sha256}`);
+        gh("release", "upload", TAG, `${out}/${sha256}`);
+        have.add(sha256);
+      }
+      const changed = TARGETS.filter((target) => lists[target] && JSON.stringify(lists[target]) !== JSON.stringify(before[target]));
+      for (const target of changed) writeFileSync(`${out}/${target}.json`, JSON.stringify(lists[target], null, 2));
+      if (changed.length) gh("release", "upload", TAG, "--clobber", ...changed.map((target) => `${out}/${target}.json`));
+      const named = new Set([...Object.values(before), ...Object.values(lists)].flatMap((list) => Object.values(list ?? {}).map(({ sha256 }) => sha256)));
+      for (const name of have) if (/^[0-9a-f]{64}$/.test(name) && !named.has(name)) gh("release", "delete-asset", TAG, name, "-y");
+    } finally {
+      rmSync(out, { recursive: true, force: true });
+    }
     for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
-  ' "$@" && mirror
+  ' "$@"
 }
 
-# Keeps the network's latest builds as the core's release too, `builds` on GitHub, which a new network's first server
-# is installed from, having no network to download from yet (`one serve on --first`, `clients/cli/src/serving.rs`):
-# each file by its SHA-256, and for each kind of machine, `<target>.json`, what `one download` gives for it, its links
-# there. What no list names any more goes.
-mirror() {
-  echo "Keeping the network's latest as the core's release, $repo $tag"
-  local lists named=() have target sha url
-  lists=$(mktemp -d)
-  gh release view "$tag" -R "$repo" >/dev/null 2>&1 ||
-    gh release create "$tag" -R "$repo" --latest=false --title "The latest builds" \
-      --notes "What a new network's first server is installed from: \`one serve on --address <address> --first <secret> --owner <name>\` (core/edge/README.md)." >/dev/null
-  have=$(gh release view "$tag" -R "$repo" --json assets -q '.assets[].name')
-  for target in $(one builds | jq -r '.latest | keys[] | select(contains("/")) | split("/")[1]' | sort -u); do
-    # `server` is the build before a server came as its code and its runtime, which nothing takes any more.
-    one download --target "$target" | jq 'del(.server)' >"$lists/$target.raw"
-    while read -r sha url; do
-      named+=("$sha")
-      grep -qx "$sha" <<<"$have" && continue
-      curl -fsSL -o "$lists/$sha" "$url" && gh release upload "$tag" -R "$repo" "$lists/$sha" >/dev/null && rm "$lists/$sha" || return 1
-      have+=$'\n'$sha
-    done < <(jq -r '.[] | "\(.sha256) \(.link.url)"' "$lists/$target.raw")
-    jq --arg at "https://github.com/$repo/releases/download/$tag" 'map_values(.link = {method: "GET", url: "\($at)/\(.sha256)"})' \
-      "$lists/$target.raw" >"$lists/$target.json"
-    gh release upload "$tag" -R "$repo" --clobber "$lists/$target.json" >/dev/null || return 1
-  done
-  for sha in $(grep -E '^[0-9a-f]{64}$' <<<"$have"); do
-    printf '%s\n' "${named[@]}" | grep -qx "$sha" || gh release delete-asset "$tag" "$sha" -R "$repo" -y >/dev/null
-  done
-  rm -rf "$lists"
-}
-
-# Servers and clients share nothing but the network they publish to, so each is its own release, with its own lock and
+# Servers and clients share nothing but the release they publish to, so each is its own release, with its own lock and
 # checkout (below), and one that asks for both builds the two at once. What they build is published together, as one
 # update, so a server takes the server build and the `one` that runs it as one pair: published apart, a server took the
 # new `one` alone, put in place beside the one running it, and then the server build as though its `one` hadn't changed
@@ -177,7 +173,7 @@ if ((${#want_servers[@]} && ${#want_clients[@]})); then
   if ((${#built[@]})); then
     build=$(tooling/version)
     publish "${built[@]}" || status=1
-    echo "The network's servers take $build by themselves (\`one builds\` says how far), and a device with \`one update\`."
+    echo "Every network's servers take $build by themselves within five minutes (\`one builds\` says how far), and a device with \`one update\`."
   fi
   wait "$server" || status=1
   wait "$client" || status=1
@@ -328,12 +324,10 @@ survey() {
   done
 }
 
-# A release with nothing left to build ends here, whenever that's found out, even while it waits: published again,
-# which sends nothing, so a network that didn't hear of what it has does.
+# A release with nothing left to build ends here, whenever that's found out, even while it waits.
 covered() {
   ((${#mine[@]})) && return
   printf '%s\n' "${notes[@]}"
-  [[ -n $dry ]] || one publish --builds '[]' >/dev/null
   exit 0
 }
 

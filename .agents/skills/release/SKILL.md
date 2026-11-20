@@ -41,8 +41,10 @@ Exactly two rules hold at runtime:
 
 ## Order
 
-Publishing is all a release does. The network's update takes every server to the latest build published by itself
-(`core/edge/updater/updater.ts`): each awake server prepares it, then each restarts on it, one at
+Publishing is all a release does: as the core's release, `builds` on GitHub, which every network takes its builds
+from, its edge telling it within five minutes (`core/edge/updater/core.ts`), so no release names a network. Each
+network's update takes every server to the latest build by itself (`core/edge/updater/updater.ts`): each awake server
+prepares it, then each restarts on it, one at
 a time, never the last ready one. A build published while another is under way takes its
 place; a server asleep or gone is caught up once it's back; one that goes back holds it, saying which and why, until
 a newer build or Update Now (the `update` tool). Run no `one update` for a release. `one builds` says how far it is

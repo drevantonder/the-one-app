@@ -1,6 +1,6 @@
 // The network update: one per network (`NetworkUpdater`), which takes the network's servers to the latest builds
-// published to the network, by itself, as self-updating software and a small cluster that holds leases do (Tailscale,
-// CockroachDB's rolling upgrades). Nobody runs `one update`: publishing a build is all.
+// the core released (`core.ts`), by itself, as self-updating software and a small cluster that holds leases do
+// (Tailscale, CockroachDB's rolling upgrades). Nobody runs `one update`: releasing a build is all.
 //
 //     up to date ──a newer build published: the server's, or a `one` that runs servers──► preparing
 //       every awake server not on its latest pair (the server build, and the `one` that runs it) downloads it and
@@ -19,7 +19,7 @@
 // the same rules once it's back. Each server prepares and goes as it's told (`clients/cli/src/serving.rs`): this
 // decides only when.
 //
-// It hears only through the relay's Durable Object, which calls it: a build published or Update Now (`/relay/update`), what each server says of itself as it changes (`/relay/seen`), and a
+// It hears only through the relay's Durable Object, which calls it: a build released (`core.ts`) or Update Now (`/relay/update`), what each server says of itself as it changes (`/relay/seen`), and a
 // server coming or going there. Each time it's given who's here (`Presence`), and answers with what it is, and what
 // every server is to do, which the relay tells them all (`notifications/one/update`). So it decides only as it's
 // told something, and its alarm only marks what didn't finish in time: a server that hears nothing new from it has

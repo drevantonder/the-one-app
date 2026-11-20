@@ -1,5 +1,5 @@
 defmodule OneCore.Tools.Builds do
-  @moduledoc "One Core's own tools for the platform's builds: which there are, downloading and publishing them, and the network's update, as `OneCore.Tools` calls them, with their definitions in `OneCore.Tools.Definitions`."
+  @moduledoc "One Core's own tools for the platform's builds: which there are, downloading them, and the network's update, as `OneCore.Tools` calls them, with their definitions in `OneCore.Tools.Definitions`."
   import OneCore.Tools.Helpers
   alias OneCore.{Apps, Bucket, Builds, Protocol, Release, Server, Servers, User}
   alias OneCore.Apps.{Installed, Store}
@@ -12,17 +12,6 @@ defmodule OneCore.Tools.Builds do
   end
 
   def run("download", %{"target" => target}, _principal, _pass, _request), do: Builds.download(target)
-
-  # What the network's servers run is the network's.
-  def run("publish", %{"builds" => builds}, principal, forward, _request) do
-    at("network", forward)
-    reaches!(principal, "network", "owner")
-
-    case Builds.publish(builds) do
-      {:send, links} -> %{send: links}
-      {:ok, latest} -> %{latest: latest}
-    end
-  end
 
   # What takes the latest builds is the program that keeps an installed server running, which hears this said.
   def run("update", _inputs, principal, _pass, _request) do
