@@ -437,7 +437,7 @@ defmodule Telemetry do
     retention = meanwhile(fn -> Tracer.with_span("telemetry retention", do: Store.retention(call.own)) end)
     shown = meanwhile(fn -> shown(call) end)
     {batches, from, to} = read(call, inputs["hours"] || 24)
-    {shown, names} = {Task.await(shown), names(call)}
+    {shown, names} = {shown(shown), names(call)}
 
     Tracer.with_span "telemetry aggregate" do
       %{
@@ -456,7 +456,7 @@ defmodule Telemetry do
   def call("errors", inputs, call) do
     shown = meanwhile(fn -> shown(call) end)
     {batches, _from, _to} = read(call, inputs["hours"] || 24)
-    %{errors: Read.errors(batches, Task.await(shown))}
+    %{errors: Read.errors(batches, shown(shown))}
   end
 
   def call("slowest", inputs, call) do
@@ -470,7 +470,7 @@ defmodule Telemetry do
     to = System.os_time(:nanosecond)
     batches = Store.trace(call, to - (inputs["hours"] || 24) * 3_600_000_000_000, id)
 
-    case Read.trace(batches, id, Task.await(shown)) do
+    case Read.trace(batches, id, shown(shown)) do
       [] -> raise "No trace #{id} in the last #{inputs["hours"] || 24} hours."
       spans -> %{trace: id, spans: spans}
     end
@@ -525,7 +525,11 @@ defmodule Telemetry do
   end
 
   # Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
-  # doing is open, and who did what isn't.
+  # doing is open, and who did what isn't. Asking whether the caller is an owner is an app's hook, which has its own
+  # ten seconds (`OneCore.Hooks.within/3`), so it's waited for that long, not `Task.await/1`'s five: a slow one failed
+  # the whole call.
+  defp shown(%Task{} = asking), do: Task.await(asking, :infinity)
+
   defp shown(%Call{actor: actor} = call) do
     owner = actor != nil and Tracer.with_span("telemetry owns", do: Call.owns?(%{call | subject: "network"}))
     fn whose -> owner or whose == OneCore.User.owner(actor || "") end
