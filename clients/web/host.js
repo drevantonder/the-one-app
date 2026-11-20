@@ -287,12 +287,9 @@ async function refresh(view) {
 /// entrypoint (`<subject>|<entrypoint>`), where it names one (`runtime_version`).
 /** @type {Map<string, number>} */
 const runtimes = new Map()
-/// Whether this browser draws apps' pages with the renderer, on its WebGPU, while the DOM's are the default: opened
-/// with `?renderer=webgpu` it does from then on, and `?renderer=dom` stops it.
-const RENDERER = "renderer"
-const chosenRenderer = new URLSearchParams(location.search).get(RENDERER)
-if (chosenRenderer) localStorage.setItem(RENDERER, chosenRenderer)
-const drawn = localStorage.getItem(RENDERER) === "webgpu"
+/// Whether this browser has the WebGPU the renderer draws every app's page on, asked as the page loads: one without it
+/// is sent to a page that names the browsers that have it (`unsupported.html`).
+const webgpu = navigator.gpu ? navigator.gpu.requestAdapter().then(Boolean, () => false) : Promise.resolve(false)
 /// The version of each app a server last listed, by the subject it's listed for.
 /** @type {Map<string | undefined, Map<string, string>>} */
 const versions = new Map()
@@ -413,6 +410,10 @@ const commands = {
   /// What the address it was opened at links to (`/?open=<one: link>`, as a request's link in Vault leads here) is
   /// opened once it's signed in: it's kept in this tab while its person signs in, and the address forgets it.
   async start() {
+    if (!(await webgpu)) {
+      location.replace("/unsupported")
+      return new Promise(() => {})
+    }
     const linked = new URLSearchParams(location.search).get("open")
     if (linked) {
       sessionStorage.setItem(OPEN, linked)
@@ -500,9 +501,9 @@ export const address = (view) => {
   const [app, ...page] = view.entrypoint.split("/")
   const version = versions.get(view.subject)?.get(app)
   const at = `${apps}/${view.host}/${version ? `${app}@${version}` : app}/${page.join("/")}`
-  // One drawn by the renderer is its frame (`renderer/`), which loads the page's own and says what it needs.
-  const runtime = drawn && runtimes.get(`${view.subject ?? ""}|${view.entrypoint}`)
-  return runtime ? `${location.origin}/renderer/?runtime=${runtime}#${at}` : at
+  // It's drawn by the renderer, in its frame (`renderer/`), which loads the page's own and says what it needs.
+  const runtime = runtimes.get(`${view.subject ?? ""}|${view.entrypoint}`) ?? 0
+  return `${location.origin}/renderer/?runtime=${runtime}#${at}`
 }
 
 /// What an app's frame may do. Its address is this page's, so it's given an origin of its own, which reaches

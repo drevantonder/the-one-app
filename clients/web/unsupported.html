@@ -1,0 +1,24 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
+  <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
+  <title>the One App</title>
+  <link rel="stylesheet" href="tokens.css">
+  <link rel="stylesheet" href="ui.css">
+  <link rel="stylesheet" href="client.css">
+</head>
+<body>
+  <!-- Where the web client sends a browser without WebGPU, which the renderer draws every app's page on (host.js): the
+       window's own problem box (index.html's #state), naming the browsers that have it. -->
+  <div id="state" class="ui-state middle">
+    <div class="problem" role="alert">
+      <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm-8,56a8,8,0,0,1,16,0v56a8,8,0,0,1-16,0Zm8,104a12,12,0,1,1,12-12A12,12,0,0,1,128,184Z"/></svg>
+      <strong>This browser can't show the One App</strong>
+      <p>Open this page in the latest Chrome, Edge or Safari.</p>
+    </div>
+  </div>
+</body>
+</html>
