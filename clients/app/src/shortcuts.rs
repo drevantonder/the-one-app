@@ -56,13 +56,17 @@ pub fn keep(shortcuts: Vec<Shortcut>) {
     if std::env::var_os("ONE_HOME").is_some() {
         return;
     }
+    // One keeps at a time, and what's kept is held only to read or change it: drawing each icon and writing the
+    // device's list takes seconds, which an app's window naming its app (`name`) waited for as it started (4 s on
+    // the owner's Mac, 20 Nov).
+    static KEEPING: Mutex<()> = Mutex::new(());
     std::thread::spawn(move || {
-        let mut kept = KEPT.lock().expect("no keep panics");
-        if kept.as_ref() == Some(&shortcuts) {
+        let _one = KEEPING.lock().expect("no keep panics");
+        if KEPT.lock().expect("no keep panics").as_ref() == Some(&shortcuts) {
             return;
         }
         match device::keep(&shortcuts) {
-            Ok(()) => *kept = Some(shortcuts),
+            Ok(()) => *KEPT.lock().expect("no keep panics") = Some(shortcuts),
             Err(error) => eprintln!("this device's shortcuts to its apps aren't up to date: {error:#}"),
         }
     });
