@@ -273,7 +273,7 @@ enum Target {
 }
 
 /// The format an offscreen frame is drawn in: 8-bit RGBA, as a PNG's pixels are.
-const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+pub(crate) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
 /// A shadow's tile's format: one channel, how much of each point its box covers.
 const TILE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;

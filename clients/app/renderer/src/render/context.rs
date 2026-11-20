@@ -39,7 +39,7 @@ const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
 impl Context {
     /// Compiles, in the background, the pipelines a window of this platform draws its frames with, as it starts, so its
     /// first window's first frame doesn't wait for its GPU to compile them (half a second on a Mac's Metal): its
-    /// format (`Renderer::new`), see-through first, as the Home Screen's panel is, then opaque.
+    /// format (`Renderer::new`), see-through first, as the Home Screen's panel is, then opaque, then a snapshot's.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prepare(&self) {
         let (device, queue, compiled) = (self.device.clone(), self.queue.clone(), self.pipelines.clone());
@@ -48,6 +48,8 @@ impl Context {
             for premultiplied in [true, false] {
                 super::renderer::Pipelines::shared(&device, &queue, &compiled, format, premultiplied);
             }
+            // Then a window's snapshot's, drawn offscreen as a phone's app goes to the background.
+            super::renderer::Pipelines::shared(&device, &queue, &compiled, super::renderer::OFFSCREEN_FORMAT, false);
         });
     }
 
