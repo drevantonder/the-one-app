@@ -431,6 +431,18 @@ fn whole(size: Size<DevicePixels>) -> crate::geometry::Bounds<crate::geometry::S
     crate::geometry::Bounds { origin: Point { x: px(0.0), y: px(0.0) }, size: Size { width: px(size.width.0 as f32), height: px(size.height.0 as f32) } }
 }
 
+/// What a window shows: its page's scene, with `cover` over it `opacity` as opaque, in a scene of its own, so its
+/// page's is as its page painted it, which it paints on from.
+fn covered(page: &crate::render::scene::Scene, cover: Option<&crate::render::scene::Scene>, opacity: f32, size: Size<DevicePixels>) -> crate::render::scene::Scene {
+    let mut shown = crate::render::scene::Scene::default();
+    shown.splice(page, 1.0, [0.0, 0.0], 1.0, whole(size));
+    if let Some(cover) = cover {
+        shown.splice(cover, 1.0, [0.0, 0.0], opacity, whole(size));
+    }
+    shown.finish();
+    shown
+}
+
 /// One of a window's native windows, each with a surface of its own: a window's only one, or each part of a panel's
 /// page that has the system's material (`Glass`), its search and its card, the first the panel itself and the rest its
 /// child windows, which move, hide and stack with it.
@@ -510,7 +522,7 @@ struct Window {
     pictured: bool,
     cover: Cover,
     loading: bool,
-    /// What covered its page went: its page is drawn afresh once more, without it.
+    /// What covered its page went: its page is presented once more, without it.
     uncovered: bool,
     /// Its frames while something on it moves.
     timing: frame_timing::Timing,
@@ -1517,9 +1529,7 @@ impl Windows {
             // A page shown as it started is ready: what was on the screen, as it was last drawn, fades into it.
             if window.loading && !starting {
                 window.loading = false;
-                let mut shown = crate::render::scene::Scene::default();
-                shown.splice(&window.scene, 1.0, [0.0, 0.0], 1.0, whole(device));
-                shown.finish();
+                let shown = covered(&window.scene, window.cover.scene(), window.cover.opacity(), device);
                 window.cover = Cover::Fading(shown, now());
             }
             if let Cover::Fading(_, began) = window.cover {
@@ -1530,8 +1540,9 @@ impl Windows {
             }
             if !window.shown {
                 // Not before it can be drawn, so it never shows with nothing drawn on it: as its pipelines compile
-                // (`compiled`).
-                if window.parts[0].native.has_surface() && window.parts[0].renderer.is_none() && !self.background {
+                // (`compiled`); and a panel, which nothing covers and which is drawn once put away and then summoned
+                // with that frame, not before its page has heard back, or has waited long enough.
+                if (window.panel && starting) || (window.parts[0].native.has_surface() && window.parts[0].renderer.is_none() && !self.background) {
                     continue;
                 }
                 window.shown = true;
@@ -1609,10 +1620,10 @@ impl Windows {
                         {
                             self.display.wrong(format!("{} was laid out {}×{} in its first second, in a window {}×{}", window.title, told.width, told.height, room.width.0, room.height.0));
                         }
-                        // Under what covers it, drawn afresh, as what covers it is drawn into the same scene.
-                        if !matches!(window.cover, Cover::Gone) || std::mem::take(&mut window.uncovered) {
-                            screen.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut window.scene);
-                        } else {
+                        // Under what covers it, painted only where some of it shows: a computer's title row, above its
+                        // canvas; under its snapshot, or a canvas over all of it, it's left until it's revealed, as
+                        // it was before it showed, so what it asks for as it's laid out is for its real layout.
+                        if !matches!(window.cover, Cover::Over(_)) || (window.picture.is_none() && screen.title.is_some()) {
                             changed = screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
                         }
                         window.moving = screen.take_again();
@@ -1655,11 +1666,10 @@ impl Windows {
                     *cover = Some(made);
                 }
             }
-            // What it shows is its page with what covers it over it, as opaque as it's faded to.
-            if let Some(cover) = window.cover.scene() {
-                window.scene.splice(cover, 1.0, [0.0, 0.0], window.cover.opacity(), whole(device));
-                window.scene.finish();
-            }
+            // What it shows is its page with what covers it over it, as opaque as it's faded to, drawn in its page's
+            // scene's place for this frame; and once more as it's gone.
+            changed |= !matches!(window.cover, Cover::Gone) || std::mem::take(&mut window.uncovered);
+            let page = window.cover.scene().map(|cover| covered(&window.scene, Some(cover), window.cover.opacity(), device)).map(|shown| std::mem::replace(&mut window.scene, shown));
             // A character no font had draws as a font's missing glyph: a gap where a symbol or an emoji goes.
             for character in self.text.undrawn() {
                 let what = format!("{} drew {character:?} (U+{:04X}) as a missing glyph: no font has it", window.title, u32::from(character));
@@ -1680,7 +1690,11 @@ impl Windows {
             if !changed && !window.unshown && window.drawn && window.summoned.is_none() && window.missed == 0 {
                 continue;
             }
-            if !window.arrange(&self.display, &self.context, &self.atlas, &glass) {
+            let arranged = window.arrange(&self.display, &self.context, &self.atlas, &glass);
+            if let Some(page) = page {
+                window.scene = page;
+            }
+            if !arranged {
                 window.missed(&self.context, &self.atlas);
                 continue;
             }
