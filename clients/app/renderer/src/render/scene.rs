@@ -556,17 +556,23 @@ impl<'a> Iterator for BatchIterator<'a> {
 impl PrimitiveBatch<'_> {
     /// Whether anything in it is drawn in `area`, cut to where it's drawn inside.
     pub(crate) fn reaches(&self, area: &Bounds<ScaledPixels>) -> bool {
-        fn any<'a>(mut all: impl Iterator<Item = (Bounds<ScaledPixels>, &'a ContentMask<ScaledPixels>)>, area: &Bounds<ScaledPixels>) -> bool {
-            all.any(|(bounds, mask)| bounds.intersect(&mask.bounds).intersects(area))
+        self.extents().iter().any(|extent| extent.intersects(area))
+    }
+
+    /// Where each thing in it is drawn, turned as it's drawn (`TransformationMatrix::around`) and cut to where it's
+    /// drawn inside, in order.
+    pub(crate) fn extents(&self) -> Vec<Bounds<ScaledPixels>> {
+        fn cut<'a>(all: impl Iterator<Item = (Bounds<ScaledPixels>, &'a ContentMask<ScaledPixels>)>) -> Vec<Bounds<ScaledPixels>> {
+            all.map(|(bounds, mask)| bounds.intersect(&mask.bounds)).collect()
         }
         match self {
-            PrimitiveBatch::Shadows(all) => any(all.iter().map(|one| (one.reach(), &one.content_mask)), area),
-            PrimitiveBatch::Quads(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
-            PrimitiveBatch::Underlines(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
-            PrimitiveBatch::MonochromeSprites { sprites, .. } => any(sprites.iter().map(|one| (one.bounds, &one.content_mask)), area),
-            PrimitiveBatch::PolychromeSprites { sprites, .. } => any(sprites.iter().map(|one| (one.bounds, &one.content_mask)), area),
-            PrimitiveBatch::Backdrops(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
-            PrimitiveBatch::Rasters(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
+            PrimitiveBatch::Shadows(all) => cut(all.iter().map(|one| (one.transformation.around(&one.reach()), &one.content_mask))),
+            PrimitiveBatch::Quads(all) => cut(all.iter().map(|one| (one.transformation.around(&one.bounds), &one.content_mask))),
+            PrimitiveBatch::Underlines(all) => cut(all.iter().map(|one| (one.bounds, &one.content_mask))),
+            PrimitiveBatch::MonochromeSprites { sprites, .. } => cut(sprites.iter().map(|one| (one.transformation.around(&one.bounds), &one.content_mask))),
+            PrimitiveBatch::PolychromeSprites { sprites, .. } => cut(sprites.iter().map(|one| (one.transformation.around(&one.bounds), &one.content_mask))),
+            PrimitiveBatch::Backdrops(all) => cut(all.iter().map(|one| (one.bounds, &one.content_mask))),
+            PrimitiveBatch::Rasters(all) => cut(all.iter().map(|one| (one.transformation.around(&one.bounds), &one.content_mask))),
         }
     }
 }
@@ -707,6 +713,15 @@ impl TransformationMatrix {
     pub fn apply(&self, [x, y]: [f32; 2]) -> [f32; 2] {
         let [[a, b], [c, d]] = self.rotation_scale;
         [a * x + b * y + self.translation[0], c * x + d * y + self.translation[1]]
+    }
+
+    /// The box round where it takes `bounds`, which a shader draws what's in `bounds` within.
+    pub(crate) fn around(&self, bounds: &Bounds<ScaledPixels>) -> Bounds<ScaledPixels> {
+        let (Bounds { origin, size }, px) = (bounds, ScaledPixels);
+        let corners = [[origin.x.0, origin.y.0], [origin.x.0 + size.width.0, origin.y.0], [origin.x.0, origin.y.0 + size.height.0], [origin.x.0 + size.width.0, origin.y.0 + size.height.0]].map(|corner| self.apply(corner));
+        let (left, top) = (corners.iter().map(|[x, _]| *x).fold(f32::MAX, f32::min), corners.iter().map(|[_, y]| *y).fold(f32::MAX, f32::min));
+        let (right, bottom) = (corners.iter().map(|[x, _]| *x).fold(f32::MIN, f32::max), corners.iter().map(|[_, y]| *y).fold(f32::MIN, f32::max));
+        Bounds { origin: crate::geometry::Point { x: px(left), y: px(top) }, size: crate::geometry::Size { width: px(right - left), height: px(bottom - top) } }
     }
 
     /// The same, for coordinates `factor` times as large: logical pixels to device pixels.

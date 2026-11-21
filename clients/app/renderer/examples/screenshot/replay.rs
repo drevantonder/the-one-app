@@ -118,10 +118,11 @@ pub(crate) fn replay(windows: &mut Windows, id: renderer::platform::WindowId, re
         let mut frame = windows.cost(id).unwrap_or_default();
         if !drew && let Some(frame) = frame.as_object_mut() {
             frame.remove("gpu_ms");
+            frame.remove("blur_ms");
         }
         if !drew {
             frame["draws"] = json!(0);
-            frame["work"] = json!({"quads": 0, "shadows": 0, "sprites": 0, "backdrops": 0, "rasters": 0, "copied": 0, "uploaded": 0});
+            frame["work"] = json!({"quads": 0, "shadows": 0, "sprites": 0, "backdrops": 0, "rasters": 0, "copied": 0, "uploaded": 0, "blurred": 0, "blurs": 0, "blurs_kept": 0});
         }
         frame["at"] = json!((tick * 100.0).round() / 100.0);
         frame["pressure"] = json!(windows.pressure());

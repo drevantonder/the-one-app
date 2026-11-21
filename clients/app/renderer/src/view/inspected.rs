@@ -424,7 +424,7 @@ impl Screen {
     /// draw on, the GPU), and, as `renderer` last drew it, its draw calls and render passes (`draws`, `passes`), what its GPU did (`work`,
     /// `Renderer::work`), its GPU's time by its timestamps of its passes, where it takes them, once it's waited for
     /// (`gpu_ms`, `Renderer::finish`: a frame that draws everything again costs it there, on a software GPU too), and
-    /// what its atlas holds (`atlas`).
+    /// of it its blurs' (`blur_ms`), and what its atlas holds (`atlas`).
     pub fn cost(&mut self, renderer: &crate::render::renderer::Renderer) -> Value {
         let ms = |time: Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
         let cost = std::mem::take(&mut self.cost);
@@ -441,8 +441,9 @@ impl Screen {
             "work": renderer.work(),
             "atlas": renderer.sprite_atlas().usage(),
         });
-        if let Some((gpu, _)) = renderer.gpu() {
+        if let Some((gpu, blur)) = renderer.gpu() {
             said["gpu_ms"] = json!(ms(gpu));
+            said["blur_ms"] = json!(ms(blur));
         }
         said
     }

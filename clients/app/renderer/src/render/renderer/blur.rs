@@ -12,7 +12,12 @@ pub(super) struct BackdropTextures {
     pub(super) levels: [[Option<(wgpu::Texture, wgpu::TextureView)>; 3]; BLUR_LEVELS],
 }
 
+/// What's behind a backdrop where its blur reads, thing by thing: what each is, where (a hash of its instance, and of
+/// the blur behind it where it's a backdrop), and the device pixels it's drawn in, left, top, right and bottom.
+pub(super) type Prints = Vec<(u64, [u32; 4])>;
+
 /// Where a backdrop's blur's parameters are in the frame's data, and at which level it's blurred.
+#[derive(Clone)]
 pub(super) struct Blur {
     /// What was drawn before it in what it blurs, by which a blur of it is kept (`Target::blurred`).
     pub(super) behind: Option<u64>,
@@ -20,6 +25,15 @@ pub(super) struct Blur {
     /// What of the frame it blurs, in its device pixels, left, top, right and bottom: the backdrop and twice the
     /// blur's reach round it (`Renderer::plan_blur`).
     pub(super) region: [u32; 4],
+    /// Its region where it's blurred whole, which a blur taken again only where what it blurs changed (`into`) keeps.
+    pub(super) whole: [u32; 4],
+    /// What it's drawn over (`Drawn::over`) and what's behind it, by which a blur of it kept from the frames before is
+    /// taken again only where they differ (`Blur::damaged`).
+    pub(super) over: u64,
+    pub(super) prints: Prints,
+    /// Where it's taken again only in part: the blur kept from the frames before it's drawn into, and what of it, in
+    /// device pixels, left, top, right and bottom.
+    pub(super) into: Option<(wgpu::TextureView, [u32; 4])>,
     /// Its sigma, in device pixels, by which another's blur is drawn through the same textures (`together`).
     pub(super) sigma: f32,
     /// The earliest it can be blurred, as a place among the frame's batches, a batch's and a backdrop's of it: past the
@@ -31,6 +45,40 @@ pub(super) struct Blur {
 }
 
 impl Blur {
+    /// What of a blur kept from the frames before (`kept`) must be taken again to be this one, where it's of the same
+    /// region and sigma over the same frame and what's behind it changed only in part (a glass button fading behind a
+    /// veil): the things behind that differ, where they're drawn, and round them as far as the blur's Gaussian reaches
+    /// (`fs_blur`'s taps), what it reads twice as far. → what to blur and what of it to keep, in device pixels, where
+    /// that's less than half the region; else none, as it's blurred whole.
+    pub(super) fn damaged(&self, kept: &KeptBlur) -> Option<([u32; 4], [u32; 4])> {
+        if kept.sigma != self.sigma || kept.region != self.whole || kept.over != self.over {
+            return None;
+        }
+        let mut count: std::collections::HashMap<u64, i32> = Default::default();
+        for (print, _) in &self.prints {
+            *count.entry(*print).or_default() += 1;
+        }
+        for (print, _) in &kept.prints {
+            *count.entry(*print).or_default() -= 1;
+        }
+        let differs = |prints: &Prints, sign: i32| prints.iter().filter(|(print, _)| count[print] * sign > 0).map(|(_, rect)| *rect).collect::<Vec<_>>();
+        let [left, top, right, bottom] = self.whole;
+        let mut changed = [u32::MAX, u32::MAX, 0, 0];
+        for rect in differs(&self.prints, 1).into_iter().chain(differs(&kept.prints, -1)) {
+            changed = [changed[0].min(rect[0]), changed[1].min(rect[1]), changed[2].max(rect[2]), changed[3].max(rect[3])];
+        }
+        let step = 1u32 << self.level;
+        let taps = (3.0 * (self.sigma / step as f32).max(0.5)).ceil().min(48.0) as u32 + 1;
+        let round = |margin: u32| {
+            let [l, t, r, b] = changed;
+            let out = |edge: u32, margin: u32, up: bool| if up { (edge + margin).div_ceil(step) * step } else { edge.saturating_sub(margin) / step * step };
+            [out(l, margin, false).max(left), out(t, margin, false).max(top), out(r, margin, true).min(right), out(b, margin, true).min(bottom)]
+        };
+        let (keep, take) = (round(taps * step), round(2 * taps * step));
+        let area = |[l, t, r, b]: [u32; 4]| u64::from(r.saturating_sub(l)) * u64::from(b.saturating_sub(t));
+        (2 * area(take) < area(self.whole)).then_some((take, keep))
+    }
+
     /// Whether `next` can be blurred in the same passes as `blurs`: at the same level, through the same textures, where
     /// what it blurs is none of theirs or as much blurred.
     pub(super) fn together(blurs: &[&Blur], next: &Blur) -> bool {
@@ -71,6 +119,17 @@ impl Blur {
     }
 }
 
+/// A blur kept from the frames before, of what's behind a backdrop (`Target::blurred`): its texture, whether this frame
+/// used it, and what it blurred, by which it's taken again only in part where that changed (`Blur::damaged`).
+pub(super) struct KeptBlur {
+    pub(super) view: wgpu::TextureView,
+    pub(super) used: bool,
+    pub(super) sigma: f32,
+    pub(super) region: [u32; 4],
+    pub(super) over: u64,
+    pub(super) prints: Prints,
+}
+
 /// `texture` from its texel at `left`, `top`, for a copy.
 fn texel(texture: &wgpu::Texture, left: u32, top: u32) -> wgpu::TexelCopyTextureInfo<'_> {
     wgpu::TexelCopyTextureInfo { texture, mip_level: 0, origin: wgpu::Origin3d { x: left, y: top, z: 0 }, aspect: wgpu::TextureAspect::All }
@@ -103,7 +162,7 @@ impl Renderer {
         let shrink = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / size.0 as f32, 1.0 / size.1 as f32], sigma: 0.0, shrink: step as f32 }));
         let across = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / width as f32, 0.0], sigma: shrunk, shrink: 0.0 }));
         let down = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 1.0 / height as f32], sigma: shrunk, shrink: 0.0 }));
-        Blur { level, region, sigma, ready: (0, 0), shrink, across, down, behind: None }
+        Blur { level, region, whole: region, over: 0, prints: Vec::new(), into: None, sigma, ready: (0, 0), shrink, across, down, behind: None }
     }
 
 
@@ -116,6 +175,7 @@ impl Renderer {
         let size = (frame.width(), frame.height());
         let level = blurs[0].level;
         let mut work = self.work.get();
+        work.blurs += blurs.len() as u32;
         for blur in blurs {
             work.blurred += f64::from(blur.region[2] - blur.region[0]) * f64::from(blur.region[3] - blur.region[1]);
         }
@@ -161,8 +221,8 @@ impl Renderer {
         let from = if readable { view } else { &backdrop.source.as_ref().expect("copied above").1 };
         let (shrunk, across, down) = (texture_of(0), texture_of(1), texture_of(2));
         // Each pass draws only each blur's region, at its level, of the texture it draws into.
-        let region = |blur: &Blur, level: usize, (width, height): (u32, u32)| {
-            let [left, top, right, bottom] = blur.region.map(|edge| edge >> level);
+        let region = |rect: [u32; 4], level: usize, (width, height): (u32, u32)| {
+            let [left, top, right, bottom] = rect.map(|edge| edge >> level);
             let (left, top) = (left.min(width), top.min(height));
             (left, top, right.min(width).saturating_sub(left), bottom.min(height).saturating_sub(top))
         };
@@ -176,7 +236,7 @@ impl Renderer {
             pass.set_bind_group(0, globals, &[]);
             pass.set_bind_group(2, &texture, &[]);
             for blur in blurs {
-                let (left, top, width, height) = region(blur, level, halved(size, level));
+                let (left, top, width, height) = region(blur.region, level, halved(size, level));
                 if width == 0 || height == 0 {
                     continue;
                 }
@@ -195,28 +255,34 @@ impl Renderer {
                 self.drew();
             }
         }
-        // Each kept in a texture of its own, as the next backdrops blur into the same ones.
+        // Each kept in a texture of its own, as the next backdrops blur into the same ones; one taken again in part
+        // into the one it was kept in, what of it changed.
         let down = &backdrop.levels[level - 1][2].as_ref().expect("made above").0;
         let (width, height) = (down.width(), down.height());
         let mut views = Vec::with_capacity(blurs.len());
         for blur in blurs {
-            let kept = self.device.create_texture(&wgpu::TextureDescriptor {
-                label: None,
-                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-                mip_level_count: 1,
-                sample_count: 1,
-                dimension: wgpu::TextureDimension::D2,
-                format: self.format,
-                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-                view_formats: &[],
-            });
-            let (left, top, width, height) = region(blur, level, (width, height));
+            let (view, copied) = match &blur.into {
+                Some((view, keep)) => (view.clone(), *keep),
+                None => {
+                    let kept = self.device.create_texture(&wgpu::TextureDescriptor {
+                        label: None,
+                        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                        mip_level_count: 1,
+                        sample_count: 1,
+                        dimension: wgpu::TextureDimension::D2,
+                        format: self.format,
+                        usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                        view_formats: &[],
+                    });
+                    (kept.create_view(&wgpu::TextureViewDescriptor::default()), blur.region)
+                }
+            };
+            let (left, top, width, height) = region(copied, level, (width, height));
             if width > 0 && height > 0 {
-                encoder.copy_texture_to_texture(texel(down, left, top), texel(&kept, left, top), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+                encoder.copy_texture_to_texture(texel(down, left, top), texel(view.texture(), left, top), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
             }
-            let view = kept.create_view(&wgpu::TextureViewDescriptor::default());
             if let Some(behind) = blur.behind {
-                target.blurred.insert(behind, (view.clone(), true));
+                target.blurred.insert(behind, KeptBlur { view: view.clone(), used: true, sigma: blur.sigma, region: blur.whole, over: blur.over, prints: blur.prints.clone() });
             }
             views.push(view);
         }

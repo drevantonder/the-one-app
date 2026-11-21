@@ -18,7 +18,7 @@ pub(super) struct Target {
     /// Each blur of what's behind a backdrop, by what was drawn before it (`Blur::behind`), kept while frames draw the
     /// same behind one, as iOS's materials blur what's behind them once while it holds still; and whether this frame
     /// used it.
-    pub(super) blurred: std::collections::HashMap<u64, (wgpu::TextureView, bool)>,
+    pub(super) blurred: std::collections::HashMap<u64, super::blur::KeptBlur>,
 }
 
 /// A window's surface, or a texture of our own, which `read` reads back.
@@ -213,12 +213,20 @@ impl Target {
         self.blurred.clear();
     }
 
-    /// The blur kept from the frames before of what's behind a backdrop, where what's drawn before it is the same, as
-    /// this frame's.
-    pub(super) fn kept_blur(&mut self, blur: &super::blur::Blur) -> Option<wgpu::TextureView> {
-        let (view, used) = self.blurred.get_mut(&blur.behind?)?;
-        *used = true;
-        Some(view.clone())
+    /// The blur kept from the frames before of what's behind a backdrop, where what's drawn before it is the same as
+    /// this frame's; or, where it changed only in part, that blur as `blur` takes it again there, into the one kept
+    /// (`Blur::damaged`), which is no longer kept as it was.
+    pub(super) fn kept_blur(&mut self, blur: &super::blur::Blur) -> Option<Result<wgpu::TextureView, super::blur::Blur>> {
+        let behind = blur.behind?;
+        if let Some(kept) = self.blurred.get_mut(&behind) {
+            kept.used = true;
+            return Some(Ok(kept.view.clone()));
+        }
+        // The one that leaves least to blur again, where several would do (another backdrop's over the same).
+        let area = |[left, top, right, bottom]: [u32; 4]| u64::from(right.saturating_sub(left)) * u64::from(bottom.saturating_sub(top));
+        let (was, (take, keep)) = self.blurred.iter().filter(|(_, kept)| !kept.used).filter_map(|(was, kept)| Some((*was, blur.damaged(kept)?))).min_by_key(|(was, (take, _))| (area(*take), *was))?;
+        let kept = self.blurred.remove(&was).expect("found above");
+        Some(Err(super::blur::Blur { region: take, into: Some((kept.view, keep)), ..blur.clone() }))
     }
 
     /// The bytes of GPU memory its surface's images hold (three, `desired_maximum_frame_latency` 2's), or its

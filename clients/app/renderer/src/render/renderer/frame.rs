@@ -87,6 +87,28 @@ impl Renderer {
                 hash(&|hasher| (std::mem::discriminant(batch), texture, bytes).hash(hasher))
             })
             .collect();
+        // Each thing in each batch, where a frame has glass: what it is (its kind, texture and instance) and where it's
+        // drawn, by which a blur that's behind it changed only in part is taken again there (`Blur::damaged`).
+        let glass = batches.iter().any(|batch| matches!(batch, PrimitiveBatch::Backdrops(_)));
+        let things: Vec<Vec<(u64, Bounds<ScaledPixels>)>> = batches
+            .iter()
+            .zip(&instances)
+            .filter(|_| glass)
+            .map(|(batch, (offset, _))| {
+                use std::hash::Hash;
+                let (texture, stride) = match batch {
+                    PrimitiveBatch::Quads(_) => (None, std::mem::size_of::<super::super::scene::Quad>()),
+                    PrimitiveBatch::Shadows(_) => (None, std::mem::size_of::<super::super::scene::Shadow>()),
+                    PrimitiveBatch::Underlines(_) => (None, std::mem::size_of::<super::super::scene::Underline>()),
+                    PrimitiveBatch::MonochromeSprites { texture_id, .. } => (Some(*texture_id), std::mem::size_of::<super::super::scene::MonochromeSprite>()),
+                    PrimitiveBatch::PolychromeSprites { texture_id, .. } => (Some(*texture_id), std::mem::size_of::<super::super::scene::PolychromeSprite>()),
+                    PrimitiveBatch::Backdrops(_) => (None, std::mem::size_of::<super::super::scene::Backdrop>()),
+                    PrimitiveBatch::Rasters(_) => (None, std::mem::size_of::<Raster>()),
+                };
+                let start = *offset as usize;
+                batch.extents().into_iter().enumerate().map(|(at, extent)| (hash(&|hasher| (std::mem::discriminant(batch), texture, &self.data[start + at * stride..start + (at + 1) * stride]).hash(hasher)), extent)).collect()
+            })
+            .collect();
         let generation = self.atlas.generation();
         let planned: Vec<Option<Planned>> = images
             .iter()
@@ -107,10 +129,16 @@ impl Renderer {
                 };
                 // A backdrop's blur is of what's drawn before it in what it blurs (`Blur::area`): the same while that
                 // is, wherever it is and whatever else moves, as the first of its batch moves (a sheet carried up) or
-                // a switch turns beside a bar of glass, it's kept. What's drawn there is the batches before that reach
-                // it, a backdrop among them as what's behind it is, and the backdrops of its own batch before it, not
-                // it, so a backdrop fading (a veil coming in) blurs what's behind it once, not each frame.
+                // a switch turns beside a bar of glass, it's kept. What's drawn there is each thing before it that's
+                // drawn there, a backdrop among them with what's behind it, and the backdrops of its own batch before it,
+                // not it, so a backdrop fading (a veil coming in) blurs what's behind it once, not each frame; and where
+                // only some of that changed (a glass button fading behind a veil), it's blurred again only round them
+                // (`Blur::damaged`).
                 let drawing: Vec<PrimitiveBatch<'_>> = reaching.iter().map(|at| batches[*at]).collect();
+                let device = |extent: &Bounds<ScaledPixels>| {
+                    let edge = |at: f32, from: f32, up: bool| (if up { (at - from).ceil() } else { (at - from).floor() }).max(0.0) as u32;
+                    [edge(extent.origin.x.0, origin[0], false), edge(extent.origin.y.0, origin[1], false), edge(extent.origin.x.0 + extent.size.width.0, origin[0], true), edge(extent.origin.y.0 + extent.size.height.0, origin[1], true)]
+                };
                 let mut blurs: Vec<Vec<Blur>> = Vec::with_capacity(drawing.len());
                 for (at, batch) in drawing.iter().enumerate() {
                     let PrimitiveBatch::Backdrops(backdrops) = batch else {
@@ -119,19 +147,25 @@ impl Renderer {
                     };
                     let mut these: Vec<Blur> = Vec::with_capacity(backdrops.len());
                     for (one, backdrop) in backdrops.iter().enumerate() {
-                        // Safety: the scene's primitives are `#[repr(C)]` structs of numbers, as `push_instances` reads.
-                        let earlier = unsafe { std::slice::from_raw_parts(backdrops.as_ptr().cast::<u8>(), std::mem::size_of_val(&backdrops[..one])) };
                         let shown = backdrop.bounds.intersect(&backdrop.content_mask.bounds);
                         let (x, y) = (shown.origin.x.0 - origin[0], shown.origin.y.0 - origin[1]);
                         let region = [x, y, x + shown.size.width.0, y + shown.size.height.0];
                         let mut blur = self.plan_blur(size, backdrop.blur.0, region);
                         let area = blur.area(*origin);
-                        let behind: Vec<u64> = (0..at)
+                        // Each thing drawn there, where it's drawn in its device pixels.
+                        let print = |before: usize, at: usize, blurred: &[Blur]| {
+                            let (thing, extent) = &things[reaching[before]][at];
+                            let thing = blurred.get(at).and_then(|blur| blur.behind).map_or(*thing, |behind| hash(&|hasher| std::hash::Hash::hash(&(thing, behind), hasher)));
+                            extent.intersects(&area).then(|| (thing, device(extent)))
+                        };
+                        blur.prints = (0..at)
                             .filter(|before| drawing[*before].reaches(&area))
-                            .flat_map(|before| std::iter::once(drawn.batches[before]).chain(blurs[before].iter().filter_map(|blur| blur.behind)))
-                            .chain(these.iter().filter_map(|blur| blur.behind))
+                            .flat_map(|before| (0..things[reaching[before]].len()).map(move |one| (before, one)))
+                            .filter_map(|(before, one)| print(before, one, &blurs[before]))
+                            .chain((0..one).filter_map(|earlier| print(at, earlier, &these)))
                             .collect();
-                        blur.behind = Some(hash(&|hasher| std::hash::Hash::hash(&(drawn.over, &behind, earlier, backdrop.blur.0.to_bits(), region.map(f32::to_bits)), hasher)));
+                        blur.over = drawn.over;
+                        blur.behind = Some(hash(&|hasher| std::hash::Hash::hash(&(drawn.over, &blur.prints, backdrop.blur.0.to_bits(), region.map(f32::to_bits)), hasher)));
                         blur.ready = blur.ready(&drawing, at, one, *origin);
                         these.push(blur);
                     }
@@ -289,7 +323,7 @@ impl Renderer {
         self.draw_batches(encoder, target, texture, view, globals, buffer, batches, instances, blurs, from..batches.len());
         target.last = drawn;
         // What's behind no backdrop this frame isn't kept; what's still drawn starts the next frame unused.
-        target.blurred.retain(|_, (_, used)| std::mem::take(used));
+        target.blurred.retain(|_, kept| std::mem::take(&mut kept.used));
     }
 
     /// Writes the frame's data into its buffer, grown to hold it, and what's been added to the atlas into its
@@ -416,16 +450,28 @@ impl Renderer {
         // pages made 13 passes a frame).
         let mut blurred: std::collections::HashMap<(usize, usize), wgpu::TextureView> = Default::default();
         let mut fresh: Vec<(usize, usize)> = Vec::new();
+        // Those taken again only where what's behind them changed (`Target::kept_blur`).
+        let mut partly: std::collections::HashMap<(usize, usize), Blur> = Default::default();
         if blurrable {
             for at in range.clone() {
                 for (one, blur) in blurs[at].iter().enumerate() {
                     match target.kept_blur(blur) {
-                        Some(kept) => drop(blurred.insert((at, one), kept)),
+                        Some(Ok(kept)) => {
+                            let mut work = self.work.get();
+                            work.blurs_kept += 1;
+                            self.work.set(work);
+                            blurred.insert((at, one), kept);
+                        }
+                        Some(Err(part)) => {
+                            partly.insert((at, one), part);
+                            fresh.push((at, one));
+                        }
                         None => fresh.push((at, one)),
                     }
                 }
             }
         }
+        let blur_of = |(at, one): (usize, usize)| partly.get(&(at, one)).unwrap_or(&blurs[at][one]);
         for at in range {
             let PrimitiveBatch::Backdrops(backdrops) = &batches[at] else {
                 run.push((at, None));
@@ -439,8 +485,8 @@ impl Renderer {
                 if !blurred.contains_key(&(at, one)) {
                     let mut group: Vec<(usize, usize)> = Vec::new();
                     for &(later, of) in fresh.iter().filter(|place| **place >= (at, one)) {
-                        let blur = &blurs[later][of];
-                        let together: Vec<&Blur> = group.iter().map(|(at, one)| &blurs[*at][*one]).collect();
+                        let blur = blur_of((later, of));
+                        let together: Vec<&Blur> = group.iter().map(|place| blur_of(*place)).collect();
                         if (group.is_empty() || blur.ready <= (at, one)) && !blurred.contains_key(&(later, of)) && Blur::together(&together, blur) {
                             group.push((later, of));
                         }
@@ -448,7 +494,7 @@ impl Renderer {
                     self.draw_run(encoder, view, load, globals, batches, instances, &run);
                     run.clear();
                     load = wgpu::LoadOp::Load;
-                    let taking: Vec<&Blur> = group.iter().map(|(at, one)| &blurs[*at][*one]).collect();
+                    let taking: Vec<&Blur> = group.iter().map(|place| blur_of(*place)).collect();
                     let views = self.blur_behind(encoder, target, texture, view, globals, buffer, &taking);
                     blurred.extend(group.into_iter().zip(views));
                 }

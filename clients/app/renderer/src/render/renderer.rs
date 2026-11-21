@@ -123,7 +123,8 @@ struct Drawn {
 /// What a frame's GPU did, the same on any GPU: the device pixels of quads (and underlines), shadows, glyphs and
 /// pictures (sprites), backdrops and layers' images (rasters) it drew, each counted as often as it's drawn over, the
 /// pixels it copied of the frames before, the bytes it uploaded to the atlas, and the device pixels of what it blurred
-/// afresh behind backdrops (`blurred`), where a blur kept from the frames before costs none.
+/// afresh behind backdrops (`blurred`), where a blur kept from the frames before costs none; and how many blurs it took
+/// afresh, whole or in part (`blurs`) and drew as they were kept from the frames before (`blurs_kept`).
 #[derive(Clone, Copy, Default)]
 struct Work {
     quads: f64,
@@ -134,6 +135,8 @@ struct Work {
     copied: f64,
     uploaded: u64,
     blurred: f64,
+    blurs: u32,
+    blurs_kept: u32,
 }
 
 /// What a layer's texture is for, a raster's or a frame kept: drawn into, sampled, and copied out of.
@@ -340,6 +343,8 @@ impl Renderer {
             "copied": px(work.copied),
             "uploaded": work.uploaded,
             "blurred": px(work.blurred),
+            "blurs": work.blurs,
+            "blurs_kept": work.blurs_kept,
         })
     }
 
@@ -370,7 +375,7 @@ impl Renderer {
     /// a shadow's tile), by kind.
     pub fn memory(&self) -> serde_json::Value {
         let backdrop = self.targets.iter().flat_map(|target| target.backdrop.iter()).flat_map(|backdrop| backdrop.source.iter().chain(backdrop.levels.iter().flatten().flatten())).map(|(texture, _)| bytes(texture));
-        let blurred = self.targets.iter().flat_map(|target| target.blurred.values()).map(|(view, _)| bytes(view.texture()));
+        let blurred = self.targets.iter().flat_map(|target| target.blurred.values()).map(|kept| bytes(kept.view.texture()));
         // Each raster's sheet once, however many of them it holds.
         let mut sheets: Vec<&Arc<Sheet>> = self.rasters.values().map(|(sheet, _)| sheet).collect();
         sheets.sort_by_key(|sheet| Arc::as_ptr(sheet));
