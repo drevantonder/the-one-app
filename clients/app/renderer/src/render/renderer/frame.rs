@@ -316,7 +316,11 @@ impl Renderer {
         pass.set_bind_group(0, globals, &[]);
         for (at, blurred) in run {
             let at = *at;
-            self.covered(&batches[at]);
+            // A backdrop is drawn alone, one of its batch's.
+            match (&batches[at], blurred) {
+                (PrimitiveBatch::Backdrops(backdrops), Some((_, one))) => self.covered(&PrimitiveBatch::Backdrops(&backdrops[*one..*one + 1])),
+                (batch, _) => self.covered(batch),
+            }
             if let PrimitiveBatch::Shadows(shadows) = &batches[at] {
                 self.draw_shadows(&mut pass, shadows, &instances.group, instances.offsets[at]);
                 continue;
