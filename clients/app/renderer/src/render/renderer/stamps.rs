@@ -38,9 +38,12 @@ impl Stamps {
     }
 
     /// As a frame starts: what the GPU has finished of the frames before is read, and a buffer free for this one's
-    /// chosen, if one is.
-    pub(super) fn begin(&mut self, device: &wgpu::Device) {
-        let _ = device.poll(wgpu::PollType::Poll);
+    /// chosen, if one is. The device isn't polled for it: each submit polls it, which maps what's finished. Polled
+    /// here, before the frame takes its command encoder, wgpu's pool (which its own writes take from too) handed each
+    /// frame one of 4 to 6 in turn, where it otherwise keeps to fewer: Intel's Direct3D 12 driver makes each of a frame's
+    /// command lists again (1 ms each, 20 to 40 a frame) on one that last held fewer, which took a Surface's frames 20
+    /// to 40 ms to submit as something began to move.
+    pub(super) fn begin(&mut self) {
         self.read();
         self.writing = self.read.iter().position(|(_, _, held)| held.is_none());
         self.passes.borrow_mut().clear();

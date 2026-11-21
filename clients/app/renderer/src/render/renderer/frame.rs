@@ -17,7 +17,7 @@ impl Renderer {
         self.passes.set(0);
         self.work.set(Work::default());
         if let Some(stamps) = &mut self.stamps {
-            stamps.begin(&self.device);
+            stamps.begin();
         }
         let acquiring = web_time::Instant::now();
         let images: Vec<Option<Image>> = self.targets.iter_mut().map(|target| target.acquire(&self.device)).collect();
