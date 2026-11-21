@@ -35,7 +35,7 @@ mod videos;
 mod paint;
 mod pictures;
 #[cfg(feature = "fake")]
-pub use pictures::decoding_takes;
+pub use pictures::{cut_short, decoding_takes};
 mod selection;
 mod text_selection;
 pub use text_selection::Magnifier;

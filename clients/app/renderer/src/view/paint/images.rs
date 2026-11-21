@@ -40,14 +40,16 @@ impl Painter<'_> {
     }
 
     /// An image, scaled to fit its box keeping its shape, as GPUI's `img` is by default, decoded for its box as it
-    /// rests (`Transform::rest`), and not at all where it doesn't show.
+    /// rests (`Transform::rest`), and not at all where it doesn't show. One that's broken (not found, or that failed to
+    /// decode every time it was tried) fills its box in a quiet grey, as a browser marks a broken image, never nothing.
     pub(in crate::view) fn paint_image(&mut self, node: &Node, content: Bounds<f32>, transform: Transform, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
         let Some(src) = node.str("src").filter(|_| opacity > 0.0) else { return };
+        let broken = |painter: &mut Self| painter.quad(content, mask, colour_token("quinary-label", painter.conditions), Edges::default(), Hsla::default(), radii, false, opacity);
         // One by an address is drawn once its window has fetched it, as a `data:` address.
         let src = match self.fetched.get(src) {
             _ if src.starts_with("data:") => src,
             Some(Some(data)) => data.as_str(),
-            Some(None) => return self.pictures.drew_blank(),
+            Some(None) => return broken(self),
             None => {
                 self.pictures.drew_blank();
                 return self.wanted.push(src.to_owned());
@@ -57,6 +59,9 @@ impl Painter<'_> {
         let device = Size { width: (content.size.width * self.scale * rest).round() as u32, height: (content.size.height * self.scale * rest).round() as u32 };
         if device.width == 0 || device.height == 0 || content.size.width <= 0.0 || content.size.height <= 0.0 {
             return;
+        }
+        if self.pictures.broken(src) {
+            return broken(self);
         }
         let Some((picture, tile)) = self.pictures.get(self.atlas, src, device) else { return self.pictures.drew_blank() };
         let fit = (content.size.width / picture.width as f32).min(content.size.height / picture.height as f32);

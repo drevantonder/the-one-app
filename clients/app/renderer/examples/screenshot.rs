@@ -34,7 +34,7 @@
 //! things are on their way somewhere, a click is held from 30 ms to a quarter of a second, one batch in four of
 //! what its page changed reaches the window one to three of its turns late, as a page slower than its window's does,
 //! and of what the window tells its page together, which its thread runs in one turn, now and then one waits for a turn
-//! of its own (`Thread::seed`).
+//! of its own (`Thread::seed`), and one picture in three fails to decode the first time, as a browser's under load.
 //! `--latency` has each tool's answer come that many milliseconds of the page's clock after it was asked, as a round
 //! trip to a server takes, but for the tools `--cached` names, which a client answers at once from what it keeps
 //! (a tool that only reads): so a page that opens on what isn't kept, or asks again for what an answer said, opens

@@ -24,9 +24,11 @@ impl Windows {
         self.display.wanted()
     }
 
-    /// The display's refreshes come late as `seed` decides (`fake::Display::seed`), and `random` draws from it too.
+    /// The display's refreshes come late as `seed` decides (`fake::Display::seed`), and `random` draws from it too, and
+    /// pictures' decodes are cut short now and then (`view::cut_short`).
     pub fn seed(&self, seed: u64) {
         self.display.seed(seed);
+        crate::view::cut_short(seed);
     }
 
     /// A number from 0 to below `below`, as the seed decides: always 0 with none.

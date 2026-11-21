@@ -1,6 +1,7 @@
 //! Pictures decoded in the background, as GPUI's image cache loads its images on its background executor, so a large
 //! one never holds up a frame: a box draws the same picture as it was last decoded at another size, or nothing, until
-//! it's ready, and the window is woken to draw it then.
+//! it's ready, and the window is woken to draw it then. One that doesn't decode is tried again a little later, as a
+//! browser's decode under load is cut short and comes the next time, and is broken only once it's failed every time.
 
 use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
@@ -66,6 +67,35 @@ fn decoding_ms(src: &str, pixels: u32) -> f64 {
     src.len() as f64 * per_byte + f64::from(pixels) * per_pixel
 }
 
+/// With a seed, one picture in three fails to decode the first time it's asked for, at once, as a browser's decode under
+/// load is cut short (`HTMLImageElement.decode()` rejecting): for a harness, which then shows whether it's tried again.
+#[cfg(feature = "fake")]
+static CUT_SHORT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+
+/// Decodes are cut short as `seed` says (`CUT_SHORT`), or none with 0.
+#[cfg(feature = "fake")]
+pub fn cut_short(seed: u64) {
+    CUT_SHORT.store(seed, std::sync::atomic::Ordering::Relaxed);
+}
+
+/// How long after a picture fails to decode it's tried again, each time it has: one that fails once more is broken,
+/// within the second a harness's scene is given to settle.
+const RETRIES_MS: [f64; 3] = [50.0, 200.0, 500.0];
+
+/// A picture that didn't decode: how many times it hasn't, and when it's tried again, or that it's being tried again,
+/// once its time's come and a frame's drawn it (`get`).
+struct Failed {
+    times: usize,
+    again: Again,
+}
+
+#[derive(PartialEq)]
+enum Again {
+    At(f64),
+    Due,
+    Trying,
+}
+
 /// What's decoded, waiting to go in the atlas, each with when it's there (for a harness, as late as the device it
 /// stands for would have it; on a device, as it's decoded), and how many are still decoding.
 #[derive(Default)]
@@ -95,10 +125,16 @@ pub(super) struct Pictures {
     decoding: Arc<(Mutex<Decoding>, Condvar)>,
     /// What's decoded and not yet in the atlas, which the next frame that draws it puts there.
     ready: HashMap<u64, Option<Decoded>>,
+    /// Each picture decoding's address, by its key: what's broken, if it doesn't.
+    addresses: HashMap<u64, u64>,
     /// Each address's picture as it was last put in the atlas, drawn while it decodes at another size.
     latest: HashMap<u64, (u64, Picture)>,
     /// Each address's sizes it's been put in the atlas at, in device pixels.
     copies: HashMap<u64, Vec<Size<u32>>>,
+    /// What didn't decode and is tried again, by its key.
+    failed: HashMap<u64, Failed>,
+    /// Each address that's failed to decode every time it was tried: broken, as a browser's broken image is.
+    broken: std::collections::HashSet<u64>,
     /// How many have been decoded, which a frame that has more to show than the last is drawn for.
     pub(super) decoded: u64,
     /// What wakes its window as one's decoded.
@@ -118,7 +154,8 @@ fn hash(key: impl Hash) -> u64 {
 }
 
 impl Pictures {
-    /// Takes what's been decoded since it was last asked and is there by now. → whether anything was.
+    /// Takes what's been decoded since it was last asked and is there by now, and has a frame draw again what's due to
+    /// be tried again. → whether anything was.
     pub(super) fn take(&mut self) -> bool {
         let now = now();
         let done: Vec<_> = {
@@ -127,22 +164,42 @@ impl Pictures {
             decoding.done = later;
             there
         };
-        let any = !done.is_empty();
+        let mut any = !done.is_empty();
         for (id, decoded, at) in done {
-            if let Some(asked) = self.asked.remove(&id) {
+            let asked = self.asked.remove(&id);
+            if decoded.is_none() {
+                let failed = self.failed.entry(id).or_insert(Failed { times: 0, again: Again::Trying });
+                if let Some(after) = RETRIES_MS.get(failed.times) {
+                    failed.times += 1;
+                    failed.again = Again::At(at.unwrap_or(now) + after);
+                    continue;
+                }
+                self.failed.remove(&id);
+                self.broken.insert(self.addresses.remove(&id).unwrap_or_default());
+            }
+            self.failed.remove(&id);
+            // How long the try that came took: one tried again was cut short, not slow.
+            if let Some(asked) = asked {
                 self.slowest = self.slowest.max(Duration::from_secs_f64((at.unwrap_or(now) - asked).max(0.0) / 1000.0));
             }
+            self.addresses.remove(&id);
             self.sizes.insert(id, decoded.as_ref().map(|decoded| decoded.picture));
             self.ready.insert(id, decoded);
             self.decoded += 1;
         }
+        // What's due to be tried again is, as a frame draws it.
+        for failed in self.failed.values_mut().filter(|failed| matches!(failed.again, Again::At(at) if at <= now)) {
+            failed.again = Again::Due;
+            self.decoded += 1;
+            any = true;
+        }
         any
     }
 
-    /// How many are decoding, or decoded and not yet taken.
+    /// How many are decoding, decoded and not yet taken, or to be tried again.
     pub(super) fn pending(&self) -> usize {
         let decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-        decoding.running + decoding.done.len()
+        decoding.running + decoding.done.len() + self.failed.values().filter(|failed| failed.again != Again::Trying).count()
     }
 
     /// Whether one's decoding, or decoded and there by now, to take: what a harness draws again for, not one that's
@@ -150,15 +207,21 @@ impl Pictures {
     pub(super) fn decoding(&self) -> bool {
         let decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = now();
-        decoding.running > 0 || decoding.done.iter().any(|(_, _, at)| at.is_none_or(|at| at <= now))
+        decoding.running > 0 || decoding.done.iter().any(|(_, _, at)| at.is_none_or(|at| at <= now)) || self.failed.values().any(|failed| failed.again == Again::Due)
     }
 
-    /// How long until the next decoded is there, in ms, where one's waiting to be: when a harness's clock has
-    /// something due.
+    /// How long until the next decoded is there, where one's waiting to be (for a harness), or the next that didn't
+    /// is tried again, in ms: when its window has something due.
     pub(super) fn due(&self) -> Option<f64> {
         let decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         let now = now();
-        decoding.done.iter().filter_map(|(_, _, at)| *at).map(|at| (at - now).max(0.0)).reduce(f64::min)
+        let again = self.failed.values().filter_map(|failed| if let Again::At(at) = failed.again { Some(at) } else { None });
+        decoding.done.iter().filter_map(|(_, _, at)| *at).chain(again).map(|at| (at - now).max(0.0)).reduce(f64::min)
+    }
+
+    /// Whether `src` failed to decode every time it was tried: a broken picture, which its box shows as one.
+    pub(super) fn broken(&self, src: &str) -> bool {
+        self.broken.contains(&hash(src))
     }
 
     /// Waits for what's decoding: for a harness, which draws what a step left once it's done.
@@ -175,9 +238,11 @@ impl Pictures {
         self.drawing_blank += 1;
     }
 
-    /// What's been decoded and wasn't drawn this frame goes: the atlas alone keeps a picture's pixels.
+    /// What's been decoded and wasn't drawn this frame goes: the atlas alone keeps a picture's pixels. What was due to
+    /// be tried again and wasn't drawn by this frame, which draws everything again (`decoded`), no longer shows.
     pub(super) fn drawn(&mut self) {
         self.ready.clear();
+        self.failed.retain(|_, failed| failed.again != Again::Due);
         self.blank = std::mem::take(&mut self.drawing_blank);
     }
 
@@ -187,6 +252,7 @@ impl Pictures {
         self.sizes.clear();
         self.ready.clear();
         self.latest.clear();
+        self.broken.clear();
     }
 
     /// An icon's path, drawn by `draw` in this frame the first time, as GPUI draws its paths in the frame: small, so a
@@ -238,9 +304,20 @@ impl Pictures {
             }
             return Some((picture, tile));
         }
+        // What didn't decode waits till it's due to be tried again.
+        let failed = self.failed.get_mut(&id);
+        if failed.as_ref().is_some_and(|failed| matches!(failed.again, Again::At(_))) {
+            return latest(self);
+        }
+        if let Some(failed) = failed {
+            failed.again = Again::Trying;
+        }
+        #[cfg(feature = "fake")]
+        let retried = self.failed.contains_key(&id);
         if let std::collections::hash_map::Entry::Vacant(asked) = self.asked.entry(id) {
             let when = now();
             asked.insert(when);
+            self.addresses.insert(id, address);
             let (decoding, wake, src) = (self.decoding.clone(), self.wake.clone(), src.to_owned());
             decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).running += 1;
             let done = move |decoded: Option<Decoded>, at: Option<f64>| {
@@ -258,6 +335,14 @@ impl Pictures {
             wasm_bindgen_futures::spawn_local(async move { done(crate::platform::web::decode(&src, device).await, None) });
             #[cfg(not(target_arch = "wasm32"))]
             run(Box::new(move || {
+                // For a harness, one cut short (`CUT_SHORT`) fails as it's asked for.
+                #[cfg(feature = "fake")]
+                {
+                    let seed = CUT_SHORT.load(std::sync::atomic::Ordering::Relaxed);
+                    if seed != 0 && !retried && hash((seed, id)) % 3 == 0 {
+                        return done(None, Some(when));
+                    }
+                }
                 let decoded = super::paint::decode(&src, device);
                 // For a harness, it's there as late as on the device it stands for: its decoding's time here
                 // (`decoding_ms`), `SLOWER` times over, on the harness's clock from when it was asked for, so a busy

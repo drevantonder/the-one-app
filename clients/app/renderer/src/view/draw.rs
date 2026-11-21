@@ -151,7 +151,7 @@ impl Screen {
             title: self.title.as_ref().map(|title| (title.name.clone(), title.start)),
             panel: self.panel.map(|panel| (panel.corner, panel.fill)),
             line: self.line(),
-            fetched: self.fetched.values().filter(|fetched| fetched.is_some()).count(),
+            fetched: self.fetched.len(),
             decoded: self.pictures.decoded,
             frames: self.frames.iter().map(|(id, child)| (*id, child.screen.frame)).collect(),
         };
@@ -394,13 +394,16 @@ impl Screen {
                 child.rect = rect;
             }
         }
-        // What it wanted to draw that's by an address is fetched by its window, once.
+        // What it wanted to draw that's by an address is fetched by its window, once; with nothing to fetch it, it
+        // isn't found.
         for src in wanted {
-            if !self.fetched.contains_key(&src) {
-                self.fetched.insert(src.clone(), None);
-                if let Some(fetch) = self.fetch.as_mut() {
-                    fetch(&src);
-                    self.fetching.insert(src);
+            if !self.fetched.contains_key(&src) && !self.fetching.contains(&src) {
+                match self.fetch.as_mut() {
+                    Some(fetch) => {
+                        fetch(&src);
+                        self.fetching.insert(src);
+                    }
+                    None => drop(self.fetched.insert(src, None)),
                 }
             }
         }
