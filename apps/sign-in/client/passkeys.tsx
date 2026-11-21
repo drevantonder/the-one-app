@@ -92,19 +92,23 @@ const opens = (tool: string, inputs?: object) => async () => {
 const whose = (scope?: string) => (scope === undefined ? "your" : scope === "network" ? "the network's" : `${scope.split("/").pop()}'s`)
 const listed = (names: string[]) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`)
 
-/// The servers waiting for a key, each row with the passkey that hands it to them.
+/// The servers waiting for a key, in one row whose passkey hands each its keys at once (the sign-in page's Unlock with
+/// Passkey, with no `scope`, hands over every key the person's opens).
 function Waiting() {
+  const servers = () => [...new Set(waitingFor()?.flatMap((waiting) => waiting.servers))]
+  const keys = () => {
+    const named = waitingFor()?.map((waiting) => whose(waiting.scope)) ?? []
+    return named.length === 1 ? `${named[0]} key` : `${listed(named)} keys`
+  }
   return (
     <Show when={waitingFor()?.length}>
       <Section heading="Waiting for Your Passkey">
-        <List each={waitingFor()} keyed={(waiting) => waiting.scope ?? ""}>
-          {(waiting) => (
-            <Row
-              heading={`${listed(waiting().servers)} ${waiting().servers.length === 1 ? "is" : "are"} waiting for ${whose(waiting().scope)} key`}
-              text="Your passkey hands it over."
-              action={<Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey", waiting().scope ? { scope: waiting().scope } : {})}>Use Passkey</Button>}
-            />
-          )}
+        <List>
+          <Row
+            heading={`${listed(servers())} ${servers().length === 1 ? "is" : "are"} waiting for ${keys()}`}
+            text={`Your passkey hands ${waitingFor()!.length === 1 ? "it" : "them"} over.`}
+            action={<Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Use Passkey</Button>}
+          />
         </List>
       </Section>
     </Show>
