@@ -44,7 +44,7 @@ impl Blur {
     /// The earliest backdrop `one` of batch `at`'s blur can be taken (`ready`): just past the last thing drawn before
     /// it that reaches its region, of a target whose top left is `origin` in the scene, as what's drawn after that is
     /// none of what it blurs.
-    pub(super) fn ready(&mut self, batches: &[PrimitiveBatch<'_>], at: usize, one: usize, origin: [f32; 2]) -> (usize, usize) {
+    pub(super) fn ready(&self, batches: &[PrimitiveBatch<'_>], at: usize, one: usize, origin: [f32; 2]) -> (usize, usize) {
         let px = ScaledPixels;
         let [left, top, right, bottom] = self.region.map(|edge| edge as f32);
         let area = Bounds { origin: point(px(left + origin[0]), px(top + origin[1])), size: size(px(right - left), px(bottom - top)) };
@@ -105,20 +105,12 @@ impl Renderer {
     }
 
 
-    /// The blur kept from the frames before of what's behind a backdrop, where what's drawn before it is the same, as
-    /// this frame's.
-    pub(super) fn kept_blur(&mut self, blur: &Blur) -> Option<wgpu::TextureView> {
-        let (view, used) = self.blurred.get_mut(&blur.behind?)?;
-        *used = true;
-        Some(view.clone())
-    }
-
-    /// Blurs what's drawn into `frame` so far, as each of `blurs` says (all at one level, `together`), into the
-    /// backdrop's textures: shrunk, then blurred across into one at its level's size and down into another, each a
+    /// Blurs what's drawn into `frame` so far, as each of `blurs` says (all at one level, `together`), into its
+    /// target's backdrop textures: shrunk, then blurred across into one at its level's size and down into another, each a
     /// separable Gaussian's pass, each blur's region drawn in the same three. Each blur's view, kept in a texture of
     /// its own. Only the textures the blurs go through are made, each the first time one needs it, and the frame is
     /// read as it is where its surface lets a shader read it.
-    pub(super) fn blur_behind(&mut self, encoder: &mut wgpu::CommandEncoder, frame: &wgpu::Texture, view: &wgpu::TextureView, globals: &wgpu::BindGroup, buffer: &wgpu::Buffer, blurs: &[&Blur]) -> Vec<wgpu::TextureView> {
+    pub(super) fn blur_behind(&mut self, encoder: &mut wgpu::CommandEncoder, target: &mut super::Target, frame: &wgpu::Texture, view: &wgpu::TextureView, globals: &wgpu::BindGroup, buffer: &wgpu::Buffer, blurs: &[&Blur]) -> Vec<wgpu::TextureView> {
         let size = (frame.width(), frame.height());
         let level = blurs[0].level;
         let mut work = self.work.get();
@@ -126,8 +118,8 @@ impl Renderer {
             work.blurred += f64::from(blur.region[2] - blur.region[0]) * f64::from(blur.region[3] - blur.region[1]);
         }
         self.work.set(work);
-        if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size) {
-            self.backdrop = Some(BackdropTextures { size, source: None, levels: Default::default() });
+        if target.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size) {
+            target.backdrop = Some(BackdropTextures { size, source: None, levels: Default::default() });
         }
         let make = |(width, height): (u32, u32), usage: wgpu::TextureUsages| {
             let texture = self.device.create_texture(&wgpu::TextureDescriptor {
@@ -143,7 +135,7 @@ impl Renderer {
             let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
             (texture, view)
         };
-        let backdrop = self.backdrop.as_mut().expect("made above");
+        let backdrop = target.backdrop.as_mut().expect("made above");
         for which in 0..3 {
             if backdrop.levels[level - 1][which].is_none() {
                 backdrop.levels[level - 1][which] = Some(make(halved(size, level), wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC));
@@ -162,7 +154,7 @@ impl Renderer {
                 }
             }
         }
-        let backdrop = self.backdrop.as_ref().expect("made above");
+        let backdrop = target.backdrop.as_ref().expect("made above");
         let texture_of = |which: usize| &backdrop.levels[level - 1][which].as_ref().expect("made above").1;
         let from = if readable { view } else { &backdrop.source.as_ref().expect("copied above").1 };
         let (shrunk, across, down) = (texture_of(0), texture_of(1), texture_of(2));
@@ -222,7 +214,7 @@ impl Renderer {
             }
             let view = kept.create_view(&wgpu::TextureViewDescriptor::default());
             if let Some(behind) = blur.behind {
-                self.blurred.insert(behind, (view.clone(), true));
+                target.blurred.insert(behind, (view.clone(), true));
             }
             views.push(view);
         }

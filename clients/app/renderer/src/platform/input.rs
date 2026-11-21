@@ -57,22 +57,22 @@ impl Windows {
         window.dirty = true;
         match input {
             Input::Resized(size) => return window.parts[part].native.resized(size),
-            // Its surface came, or a new one did: drawn on from now, a renderer for one that's gone let go first.
+            // A part's surface came, or a new one did: drawn on from now, by a renderer made again for all of its parts,
+            // the one for those it had let go first.
             Input::Surface => {
-                let part = &mut window.parts[part];
-                if let Some(mut renderer) = part.renderer.take() {
+                if let Some(mut renderer) = window.renderer.take() {
                     renderer.destroy();
                 }
-                if !background && part.native.has_surface() {
-                    match drawn_on(&self.context, self.atlas.clone(), &part.native) {
-                        Ok(renderer) => part.renderer = Some(renderer),
+                if !background && window.parts.iter().all(|part| part.native.has_surface()) {
+                    match draws_on(&self.context, self.atlas.clone(), &window.parts) {
+                        Ok(renderer) => window.renderer = Some(renderer),
                         Err(error) => log::error!("native window {id} can't draw: {error:#}"),
                     }
                 }
                 return;
             }
             Input::SurfaceLost => {
-                if let Some(mut renderer) = window.parts[part].renderer.take() {
+                if let Some(mut renderer) = window.renderer.take() {
                     renderer.destroy();
                 }
                 return;

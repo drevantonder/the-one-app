@@ -519,8 +519,8 @@ fn main() -> anyhow::Result<()> {
         let (scene, context, atlas) = windows.drawn(id).ok_or_else(|| anyhow::anyhow!("its window is gone"))?;
         let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };
         let mut second = Renderer::offscreen(context, atlas.clone(), device);
-        second.draw(scene, [0.0, 0.0]);
-        second.read();
+        second.draw(scene, &[[0.0, 0.0]]);
+        second.read(0);
         let window_mb = mb(resident().saturating_sub(alone));
         second.destroy();
         eprintln!(

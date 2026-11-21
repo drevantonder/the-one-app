@@ -17,37 +17,14 @@ mod params;
 mod pipelines;
 mod shadows;
 mod stamps;
+mod target;
 
-use blur::{BackdropTextures, Blur};
+use blur::Blur;
 use params::{GammaParams, GlobalParams, gamma_ratios};
 pub(crate) use pipelines::Pipelines;
 use shadows::{TileKey, tiled};
 use stamps::Stamps;
-
-/// Where a frame is drawn: a window's surface, or a texture of our own, which `read` reads back.
-enum Target {
-    Surface { surface: wgpu::Surface<'static>, config: wgpu::SurfaceConfiguration },
-    Offscreen { texture: wgpu::Texture, view: wgpu::TextureView, readback: wgpu::Buffer, row: u32 },
-}
-
-/// An image `size` device pixels to draw into offscreen, and what it's read back through.
-fn offscreen_target(device: &wgpu::Device, (width, height): (u32, u32)) -> Target {
-    let texture = device.create_texture(&wgpu::TextureDescriptor {
-        label: None,
-        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        mip_level_count: 1,
-        sample_count: 1,
-        dimension: wgpu::TextureDimension::D2,
-        format: OFFSCREEN_FORMAT,
-        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-        view_formats: &[],
-    });
-    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-    // A row of the copy is a multiple of 256 bytes.
-    let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-    let readback = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: u64::from(row) * u64::from(height), usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
-    Target::Offscreen { texture, view, readback, row }
-}
+use target::{Image, Target};
 
 /// The format an offscreen frame is drawn in: 8-bit RGBA, as a PNG's pixels are.
 pub(crate) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
@@ -65,18 +42,19 @@ const SPARE: usize = 2;
 pub struct Renderer {
     /// When it last drew a frame (`idle`).
     drew: web_time::Instant,
-    /// An image of its surface taken ahead, as its window went from the screen (`reserve`), drawn on first as it's
-    /// back; let go before the surface it's of.
-    reserved: Option<wgpu::SurfaceTexture>,
     device: wgpu::Device,
     queue: wgpu::Queue,
-    target: Target,
+    /// What it draws into, each frame in the same commands, submitted once: its window's surface, or each of a
+    /// panel's parts' (`platform::Window::arrange`), whose frames share what they draw from (the frame's data, its
+    /// rasters and shadows' tiles). wgpu-core keeps each command encoder the GPU is still on, so a renderer for each
+    /// part had a launcher's two parts, a few frames in flight, keep about ten, each a Direct3D 12 command allocator
+    /// that a Surface's Intel driver takes hundreds of ms to free.
+    targets: Vec<Target>,
     pipelines: Arc<Pipelines>,
-    /// The format of the target, which the pipelines and a backdrop's textures are for, and whether what's drawn
-    /// into it is premultiplied by its alpha.
+    /// The format of its targets, which the pipelines and a backdrop's textures are for, and whether what's drawn
+    /// into them is premultiplied by its alpha.
     format: wgpu::TextureFormat,
     premultiplied: bool,
-    size: (u32, u32),
     /// What a frame binds, each part at a multiple of this.
     alignment: u64,
     /// The frame's globals, its batches' instances and its blurs' parameters, written once a frame.
@@ -87,13 +65,8 @@ pub struct Renderer {
     atlas: Arc<Atlas>,
     sampler: wgpu::Sampler,
     gamma: GammaParams,
-    /// What a backdrop blurs: the frame as drawn so far, halved and halved again, then blurred one way and the other.
-    backdrop: Option<BackdropTextures>,
     /// Each shadow's tile, drawn the first frame it's in, with what binds it (`tiled`).
     tiles: std::collections::HashMap<TileKey, (wgpu::Texture, wgpu::BindGroup)>,
-    /// What the last frame drew, batch by batch (`Drawn`), and what of the frames before was the same and is kept.
-    last: Drawn,
-    kept: Option<Kept>,
     /// Textures a frame let go of (a raster's, a frame kept), each taken again by the next that needs one of its size,
     /// format and use, rather than made (`made`): one a window's size is more than a heap of 8 MB (`Context::create`),
     /// so a heap of its own, which Intel's Direct3D 12 driver makes resident as it's made, waiting on its GPU, and
@@ -105,10 +78,6 @@ pub struct Renderer {
     instances: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
     /// Each raster's texture, by its id, drawn the first frame it's in, kept while frames have it, and its bind group.
     rasters: std::collections::HashMap<u32, (wgpu::Texture, wgpu::BindGroup)>,
-    /// Each blur of what's behind a backdrop, by what was drawn before it (`Blur::behind`), kept while frames draw the
-    /// same behind one, as iOS's materials blur what's behind them once while it holds still; and whether this frame
-    /// used it.
-    blurred: std::collections::HashMap<u64, (wgpu::TextureView, bool)>,
     /// Each atlas texture's bind group, as of the atlas's having made so many textures.
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
     /// How many draw calls and render passes the last frame made (`draws`, `passes`).
@@ -118,8 +87,8 @@ pub struct Renderer {
     work: std::cell::Cell<Work>,
     /// Its thread's time on a CPU drawing since it was last asked (`drawing`).
     on_cpu: std::cell::Cell<web_time::Duration>,
-    /// Its passes' time on the GPU, where the GPU can say (`Stamps`), and how long it last waited for an image of its
-    /// surface to draw on.
+    /// Its passes' time on the GPU, where the GPU can say (`Stamps`), and how long it last waited for images of its
+    /// surfaces to draw on.
     stamps: Option<Stamps>,
     acquired: web_time::Duration,
     /// How long the last frame took to finish its commands and hand them to the GPU (`CommandEncoder::finish`,
@@ -181,80 +150,37 @@ impl Renderer {
         size: Size<DevicePixels>,
         transparent: bool,
     ) -> anyhow::Result<Self> {
-        // Safety: a window's renderer is let go before its window is.
-        #[cfg(not(target_arch = "wasm32"))]
-        let surface = unsafe { context.instance.create_surface_unsafe(target) }?;
-        #[cfg(target_arch = "wasm32")]
-        let surface = context.instance.create_surface(target)?;
-        let capabilities = surface.get_capabilities(&context.adapter);
-        // A browser's canvas may be read, as WebGPU's `GPUCanvasConfiguration.usage` has it, which wgpu's WebGPU
-        // backend doesn't say (only `RENDER_ATTACHMENT`): without it a backdrop drew nothing on the web, so its glass
-        // showed what's under it unblurred.
-        #[cfg(target_arch = "wasm32")]
-        let capabilities = wgpu::SurfaceCapabilities { usages: capabilities.usages | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING, ..capabilities };
-        // 8 bits a channel, unconverted: the shaders blend in sRGB, as the DOM does. BGRA where the surface has it,
-        // as most do, else RGBA, as Android's.
-        let format = [wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Rgba8Unorm]
-            .into_iter()
-            .find(|format| capabilities.formats.contains(format))
-            .or_else(|| capabilities.formats.iter().copied().find(|format| !format.is_srgb()))
-            .or_else(|| capabilities.formats.first().copied())
-            .ok_or_else(|| anyhow::anyhow!("this GPU can't draw on this window"))?;
-        // A see-through window's frame holds colours premultiplied by their alpha, as blending them over the cleared
-        // frame leaves them, which is what system compositors take: DirectComposition and Vulkan are told so (their
-        // "PostMultiplied" would read it as straight), and Core Animation reads any layer that way.
-        let alpha_mode = (if transparent {
-            &[wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::PostMultiplied, wgpu::CompositeAlphaMode::Inherit][..]
-        } else {
-            &[wgpu::CompositeAlphaMode::Opaque, wgpu::CompositeAlphaMode::Inherit][..]
-        })
-        .iter()
-        .copied()
-        .find(|mode| capabilities.alpha_modes.contains(mode))
-        .unwrap_or(capabilities.alpha_modes[0]);
-        // Each frame shown on the display's refresh, never as soon as it's drawn: Mailbox, the newest frame at each
-        // refresh, where the system has it (Vulkan, Direct3D 12), else Fifo, every frame in turn, as a Mac's and a
-        // phone's Metal have it. Immediate, which Blade's `DisplaySync::Recent` was on Metal (a CAMetalLayer's
-        // `displaySyncEnabled` off), handed each frame to the compositor whenever it was done, so it showed some
-        // twice and skipped others as they came either side of its refresh: what moved never moved smoothly on a Mac.
-        let present_mode = if capabilities.present_modes.contains(&wgpu::PresentMode::Mailbox) { wgpu::PresentMode::Mailbox } else { wgpu::PresentMode::Fifo };
-        let (width, height) = extent(size);
-        let config = wgpu::SurfaceConfiguration {
-            // A backdrop blurs what's drawn so far, read from the frame where the surface lets a shader read it
-            // (Vulkan's), else copied out of it (`blur_behind`).
-            // A frame starts as a copy of what's kept of the frames before, where the surface lets it be copied into.
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT
-                | (capabilities.usages & wgpu::TextureUsages::COPY_DST)
-                | if capabilities.usages.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
-                    wgpu::TextureUsages::TEXTURE_BINDING
-                } else {
-                    capabilities.usages & wgpu::TextureUsages::COPY_SRC
-                },
-            format,
-            width,
-            height,
-            present_mode,
-            // Three images, as Blade kept and Apple has a CAMetalLayer keep: one shown, one waiting for the next
-            // refresh and one drawn, so a frame drawn as the display's link says never waits for the one still on
-            // screen, as it did with two.
-            desired_maximum_frame_latency: 2,
-            alpha_mode,
-            view_formats: vec![],
-            color_space: wgpu::SurfaceColorSpace::Auto,
-        };
-        surface.configure(&context.device, &config);
-        let premultiplied = alpha_mode == wgpu::CompositeAlphaMode::PreMultiplied;
-        Ok(Self::with_target(context, atlas, Target::Surface { surface, config }, format, premultiplied, (width, height)))
+        let (target, format, premultiplied) = Target::surface(context, target, extent(size), transparent)?;
+        Ok(Self::with_target(context, atlas, target, format, premultiplied))
+    }
+
+    /// Draws into `target` too, after those it draws into: a surface as its platform gives it, a panel's part's.
+    pub fn add(&mut self, context: &Context, target: super::SurfaceTarget, size: Size<DevicePixels>, transparent: bool) -> anyhow::Result<()> {
+        let (target, format, premultiplied) = Target::surface(context, target, extent(size), transparent)?;
+        anyhow::ensure!((format, premultiplied) == (self.format, self.premultiplied), "a window's parts' surfaces draw in one format");
+        self.targets.push(target);
+        Ok(())
+    }
+
+    /// Draws into an image `size` device pixels offscreen too, after those it draws into, as a panel's part's on the
+    /// fake platform.
+    pub fn add_offscreen(&mut self, context: &Context, size: Size<DevicePixels>) {
+        self.targets.push(Target::offscreen(&context.device, extent(size)));
+    }
+
+    /// Lets go of its last target, a panel's part's, waiting for what's drawn on it, before its window goes.
+    pub fn remove(&mut self) {
+        self.targets.pop();
+        let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
     /// A renderer that draws offscreen, `size` device pixels, read back by `read`.
     pub fn offscreen(context: &Context, atlas: Arc<Atlas>, size: Size<DevicePixels>) -> Self {
-        let (width, height) = extent(size);
-        Self::with_target(context, atlas, offscreen_target(&context.device, (width, height)), OFFSCREEN_FORMAT, false, (width, height))
+        Self::with_target(context, atlas, Target::offscreen(&context.device, extent(size)), OFFSCREEN_FORMAT, false)
     }
 
     /// A renderer drawing into `target`, from `atlas`, which every renderer on the context shares.
-    fn with_target(context: &Context, atlas: Arc<Atlas>, target: Target, format: wgpu::TextureFormat, premultiplied: bool, size: (u32, u32)) -> Self {
+    fn with_target(context: &Context, atlas: Arc<Atlas>, target: Target, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
         let limits = context.device.limits();
         let sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
@@ -263,14 +189,12 @@ impl Renderer {
         });
         Self {
             drew: web_time::Instant::now(),
-            reserved: None,
             device: context.device.clone(),
             queue: context.queue.clone(),
-            target,
+            targets: vec![target],
             pipelines: Pipelines::shared(&context.device, &context.queue, &context.pipelines, format, premultiplied),
             format,
             premultiplied,
-            size,
             alignment: u64::from(limits.min_storage_buffer_offset_alignment.max(limits.min_uniform_buffer_offset_alignment)),
             data: Vec::new(),
             buffer: None,
@@ -278,14 +202,10 @@ impl Renderer {
             atlas,
             sampler,
             gamma: GammaParams { gamma_ratios: gamma_ratios(1.8), grayscale_enhanced_contrast: 1.0, pad: [0.0; 3] },
-            backdrop: None,
             tiles: Default::default(),
-            last: Drawn::default(),
-            kept: None,
             spare: Vec::new(),
             instances: None,
             rasters: Default::default(),
-            blurred: Default::default(),
             atlas_groups: Default::default(),
             draws: Default::default(),
             passes: Default::default(),
@@ -299,23 +219,9 @@ impl Renderer {
         }
     }
 
-    /// The window's new size, in device pixels.
-    pub fn update_drawable_size(&mut self, size: Size<DevicePixels>) {
-        let size = extent(size);
-        match &mut self.target {
-            Target::Surface { surface, config } if (config.width, config.height) != size => {
-                (config.width, config.height) = size;
-                self.reserved = None;
-                surface.configure(&self.device, config);
-                self.size = size;
-            }
-            // An image drawn offscreen as a window would be (the fake platform's) is made again at its new size.
-            Target::Offscreen { .. } if self.size != size => {
-                self.target = offscreen_target(&self.device, size);
-                self.size = size;
-            }
-            _ => {}
-        }
+    /// Its target `at`'s new size, in device pixels: its window's, or a panel's part's.
+    pub fn update_drawable_size(&mut self, at: usize, size: Size<DevicePixels>) {
+        self.targets[at].resize(&self.device, extent(size));
     }
 
     /// Its window is going from the screen: it lets go of what it lets go of when idle (`idle`), and of its surface's
@@ -329,24 +235,8 @@ impl Renderer {
     /// it keeps its images; Android's view destroys its surface as it's hidden.
     pub fn put_away(&mut self) {
         self.idle();
-        match &mut self.target {
-            Target::Surface { surface, .. } if cfg!(target_os = "macos") => {
-                if self.reserved.is_none()
-                    && let wgpu::CurrentSurfaceTexture::Success(frame) = surface.get_current_texture()
-                {
-                    self.reserved = Some(frame);
-                }
-            }
-            Target::Surface { surface, config } if cfg!(any(windows, target_os = "ios")) && (config.width, config.height) != (1, 1) => {
-                (config.width, config.height) = (1, 1);
-                surface.configure(&self.device, config);
-                self.size = (1, 1);
-            }
-            Target::Offscreen { .. } if self.size != (1, 1) => {
-                self.target = offscreen_target(&self.device, (1, 1));
-                self.size = (1, 1);
-            }
-            _ => {}
+        for target in &mut self.targets {
+            target.put_away(&self.device);
         }
     }
 
@@ -456,20 +346,15 @@ impl Renderer {
         &self.atlas
     }
 
-    /// The bytes of GPU memory it holds: its surface's images (three, `desired_maximum_frame_latency` 2's), or its
-    /// offscreen texture and readback, and each texture of its own (a frame kept, a backdrop's, a raster, a shadow's
-    /// tile), by kind.
+    /// The bytes of GPU memory it holds: its targets' surfaces' images (three each, `desired_maximum_frame_latency`
+    /// 2's), or its offscreen texture and readback, and each texture of its own (a frame kept, a backdrop's, a raster,
+    /// a shadow's tile), by kind.
     pub fn memory(&self) -> serde_json::Value {
-        let bytes = |texture: &wgpu::Texture| u64::from(texture.width()) * u64::from(texture.height()) * u64::from(texture.format().block_copy_size(None).unwrap_or(4));
-        let surface = match &self.target {
-            Target::Surface { config, .. } => 3 * u64::from(config.width) * u64::from(config.height) * u64::from(config.format.block_copy_size(None).unwrap_or(4)),
-            Target::Offscreen { texture, readback, .. } => bytes(texture) + readback.size(),
-        };
-        let backdrop = self.backdrop.iter().flat_map(|backdrop| backdrop.source.iter().chain(backdrop.levels.iter().flatten().flatten())).map(|(texture, _)| bytes(texture));
-        let blurred = self.blurred.values().map(|(view, _)| bytes(view.texture()));
+        let backdrop = self.targets.iter().flat_map(|target| target.backdrop.iter()).flat_map(|backdrop| backdrop.source.iter().chain(backdrop.levels.iter().flatten().flatten())).map(|(texture, _)| bytes(texture));
+        let blurred = self.targets.iter().flat_map(|target| target.blurred.values()).map(|(view, _)| bytes(view.texture()));
         serde_json::json!({
-            "surface": surface,
-            "kept": self.kept.as_ref().map_or(0, |kept| bytes(&kept.texture)),
+            "surface": self.targets.iter().map(Target::surface_bytes).sum::<u64>(),
+            "kept": self.targets.iter().filter_map(|target| target.kept.as_ref()).map(|kept| bytes(&kept.texture)).sum::<u64>(),
             "spare": self.spare.iter().map(bytes).sum::<u64>(),
             "backdrop": backdrop.chain(blurred).sum::<u64>(),
             "rasters": self.rasters.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
@@ -480,7 +365,7 @@ impl Renderer {
 
     /// How long until it's drawn nothing for a while (`IDLE`), where it holds what it lets go of then (`idle`).
     pub fn idle_in(&self) -> Option<web_time::Duration> {
-        (self.kept.is_some() || !self.spare.is_empty() || self.backdrop.is_some() || !self.blurred.is_empty()).then(|| IDLE.saturating_sub(self.drew.elapsed()))
+        (!self.spare.is_empty() || self.targets.iter().any(Target::holds)).then(|| IDLE.saturating_sub(self.drew.elapsed()))
     }
 
     /// It's drawn nothing for a while (`IDLE`): it lets go of the frame it kept and its backdrops' textures and blurs,
@@ -488,15 +373,17 @@ impl Renderer {
     /// drawn one after another quicker and are made again by the next that need them, as browsers let go of an idle
     /// tab's tiles.
     pub fn idle(&mut self) {
-        self.kept = None;
         self.spare.clear();
-        self.backdrop = None;
-        self.blurred.clear();
+        for target in &mut self.targets {
+            target.idle();
+        }
     }
 
-    /// Lets go of its surface, waiting for what's drawn on it, before its window goes.
+    /// Lets go of its surfaces' images, waiting for what's drawn on them, before its window goes.
     pub fn destroy(&mut self) {
-        self.reserved = None;
+        for target in &mut self.targets {
+            target.reserved = None;
+        }
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
@@ -515,10 +402,11 @@ impl Renderer {
         self.push(bytes)
     }
 
-    /// Draws the box of `scene` whose top left is `origin`, in device pixels, as big as the target.
-    pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
+    /// Draws into each target the box of `scene` as big as it whose top left is its origin of `origins`, in device
+    /// pixels, all in one submit. → whether each was drawn, which isn't so where one had no image to draw on.
+    pub fn draw(&mut self, scene: &Scene, origins: &[[f32; 2]]) -> bool {
         let started = crate::platform::on_cpu();
-        let drawn = self.draw_frame(scene, origin);
+        let drawn = self.draw_frame(scene, origins);
         self.on_cpu.set(self.on_cpu.get() + crate::platform::on_cpu().saturating_sub(started));
         drawn
     }
@@ -531,7 +419,7 @@ impl Renderer {
         self.stamps.as_ref()?.gpu
     }
 
-    /// How long the last frame waited for an image of its surface to draw on, which a display that hasn't shown the
+    /// How long the last frame waited for images of its surfaces to draw on, which a display that hasn't shown the
     /// frames before keeps it waiting for.
     pub fn acquired(&self) -> web_time::Duration {
         self.acquired
@@ -598,29 +486,15 @@ impl Renderer {
         })
     }
 
-    /// The last frame drawn offscreen, as RGBA rows, top first.
-    pub fn read(&mut self) -> Option<(u32, u32, Vec<u8>)> {
-        let Target::Offscreen { texture, readback, row, .. } = &self.target else { return None };
-        let (width, height) = self.size;
-        // Copied out only as it's read, so a frame that isn't costs no copy.
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
-        encoder.copy_texture_to_buffer(
-            texture.as_image_copy(),
-            wgpu::TexelCopyBufferInfo { buffer: readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(*row), rows_per_image: None } },
-            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-        );
-        self.queue.submit([encoder.finish()]);
-        readback.map_async(wgpu::MapMode::Read, .., |_| {});
-        self.device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
-        let mapped = readback.get_mapped_range(..).ok()?;
-        let mut rgba = Vec::with_capacity((width * height * 4) as usize);
-        for line in mapped.chunks(*row as usize).take(height as usize) {
-            rgba.extend_from_slice(&line[..(width * 4) as usize]);
-        }
-        drop(mapped);
-        readback.unmap();
-        Some((width, height, rgba))
+    /// The last frame its target `at` drew offscreen, as RGBA rows, top first.
+    pub fn read(&mut self, at: usize) -> Option<(u32, u32, Vec<u8>)> {
+        self.targets[at].read(&self.device, &self.queue)
     }
+}
+
+/// The bytes of GPU memory `texture` holds.
+fn bytes(texture: &wgpu::Texture) -> u64 {
+    u64::from(texture.width()) * u64::from(texture.height()) * u64::from(texture.format().block_copy_size(None).unwrap_or(4))
 }
 
 fn extent(size: Size<DevicePixels>) -> (u32, u32) {

@@ -298,8 +298,6 @@ type Sender = web::Sender;
 /// child windows, which move, hide and stack with it.
 struct Part {
     native: NativeWindow,
-    /// What draws it, once it has a surface: at once on a computer, as its view's is made on Android.
-    renderer: Option<Renderer>,
     /// Its box of the page, in points.
     bounds: crate::geometry::Bounds<f32>,
     radius: f32,
@@ -308,6 +306,9 @@ struct Part {
 struct Window {
     /// Its native windows, the first the window itself.
     parts: Vec<Part>,
+    /// What draws its parts, each one of its targets, all in one submit, once its first has a surface: at once on a
+    /// computer, as its view's is made on Android (`draws_on`).
+    renderer: Option<Renderer>,
     /// How big its page is laid out, in points: a panel's as its page asks (`resize`), the rest their window's.
     room: Size<Pixels>,
     /// A panel summoned or showing that's to be placed, as it's summoned (`Display::summon`), before its next frame
@@ -479,6 +480,28 @@ fn drawn_on(context: &Context, atlas: Arc<Atlas>, native: &NativeWindow) -> anyh
 #[cfg(feature = "fake")]
 fn drawn_on(context: &Context, atlas: Arc<Atlas>, native: &NativeWindow) -> anyhow::Result<Renderer> {
     Ok(Renderer::offscreen(context, atlas, native.device_size()))
+}
+
+/// `renderer` draws on `native` too, a panel's part: its surface, after those it draws on.
+#[cfg(not(feature = "fake"))]
+fn also_on(renderer: &mut Renderer, context: &Context, native: &NativeWindow) -> anyhow::Result<()> {
+    renderer.add(context, native.surface()?, native.device_size(), native.transparent())
+}
+
+/// `renderer` draws on `native` too on the fake platform: an image offscreen.
+#[cfg(feature = "fake")]
+fn also_on(renderer: &mut Renderer, context: &Context, native: &NativeWindow) -> anyhow::Result<()> {
+    renderer.add_offscreen(context, native.device_size());
+    Ok(())
+}
+
+/// What draws on `parts`, a window's: one renderer, each part one of its targets.
+fn draws_on(context: &Context, atlas: Arc<Atlas>, parts: &[Part]) -> anyhow::Result<Renderer> {
+    let mut renderer = drawn_on(context, atlas, &parts[0].native)?;
+    for part in &parts[1..] {
+        also_on(&mut renderer, context, &part.native)?;
+    }
+    Ok(renderer)
 }
 
 /// `bounds` with its edges on whole points, as a window's frame is.

@@ -77,7 +77,10 @@ impl Windows {
             fit(screen, &native, id, room, options.root, options.title_row, self.pressure);
         }
         let rendering = web_time::Instant::now();
-        let renderer = self.renderer(&native)?;
+        let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
+        let parts = vec![Part { native, bounds: whole, radius: options.panel.unwrap_or(0.0) }];
+        let renderer = self.renderer(&parts)?;
+        let native = &parts[0].native;
         // Where a window's opening went, which a page's own (`Opening` in clients/app/src/native.rs) has as one step.
         eprintln!("{} opened in {} ms: the system's window {} ms, its renderer {} ms", options.title, asked.elapsed().as_millis(), windowed.as_millis(), rendering.elapsed().as_millis());
         let opened = now();
@@ -85,11 +88,11 @@ impl Windows {
         let picture = options.snapshot.as_deref().filter(|_| pending || screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));
         let screen_failed = screen.is_err() && !pending;
         let panel = options.panel.is_some();
-        let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
         self.windows.insert(
             id,
             Window {
-                parts: vec![Part { native, renderer, bounds: whole, radius: options.panel.unwrap_or(0.0) }],
+                parts,
+                renderer,
                 room: options.size,
                 placing: false,
                 opened,
@@ -237,23 +240,23 @@ impl Windows {
         }
     }
 
-    /// What draws `native`, where it has a surface to draw on yet, the app isn't in the background, and the pipelines
-    /// it draws with are compiled: until they are, it has none, so the windows' thread never waits for them, and is
-    /// given one as they are (`compiled`).
-    pub(super) fn renderer(&self, native: &NativeWindow) -> anyhow::Result<Option<Renderer>> {
-        if self.background || !native.has_surface() || !drawable(&self.context, native) {
+    /// What draws a window's `parts`, where its first has a surface to draw on yet, the app isn't in the background,
+    /// and the pipelines it draws with are compiled: until they are, it has none, so the windows' thread never waits
+    /// for them, and is given one as they are (`compiled`).
+    pub(super) fn renderer(&self, parts: &[Part]) -> anyhow::Result<Option<Renderer>> {
+        if self.background || !parts[0].native.has_surface() || !drawable(&self.context, &parts[0].native) {
             return Ok(None);
         }
-        drawn_on(&self.context, self.atlas.clone(), native).map(Some)
+        draws_on(&self.context, self.atlas.clone(), parts).map(Some)
     }
 
     /// The pipelines a kind of window draws with are compiled (`Context::prepare`): each window waiting for them has
     /// its renderer now, and is drawn.
     #[cfg(not(target_arch = "wasm32"))]
     pub(crate) fn compiled(&mut self) {
-        let waiting: Vec<WindowId> = self.windows.iter().filter(|(_, window)| window.parts[0].renderer.is_none()).map(|(id, _)| *id).collect();
+        let waiting: Vec<WindowId> = self.windows.iter().filter(|(_, window)| window.renderer.is_none()).map(|(id, _)| *id).collect();
         for id in waiting {
-            let made = match self.renderer(&self.windows[&id].parts[0].native) {
+            let made = match self.renderer(&self.windows[&id].parts) {
                 Ok(made) => made,
                 Err(error) => {
                     log::error!("native window {id} can't draw: {error:#}");
@@ -261,7 +264,7 @@ impl Windows {
                 }
             };
             if let Some(window) = self.windows.get_mut(&id) {
-                window.parts[0].renderer = made;
+                window.renderer = made;
                 window.dirty = true;
             }
         }

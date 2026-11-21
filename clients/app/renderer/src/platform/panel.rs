@@ -52,7 +52,7 @@ impl Windows {
         window.dirty = true;
         // Its surfaces let go of their images, or on a Mac its next frame's taken while it's still on the screen, so
         // it's drawn at once as it's summoned (`Renderer::put_away`).
-        for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
+        if let Some(renderer) = window.renderer.as_mut() {
             renderer.put_away();
         }
         if let Some(frames) = window.timing.end(self.display.refresh()) {
@@ -72,7 +72,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else { return };
         window.hidden = hidden;
         if hidden {
-            for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
+            if let Some(renderer) = window.renderer.as_mut() {
                 renderer.put_away();
             }
             self.display.put_away(&window.parts[0].native, false);
@@ -109,7 +109,7 @@ impl Windows {
     pub fn close(&mut self, id: WindowId) {
         self.keep_snapshot(id);
         if let Some(mut window) = self.windows.remove(&id) {
-            self.let_go(window.parts);
+            self.let_go(window.renderer.take(), window.parts);
             (window.on_event)(Event::Closed);
         }
     }
@@ -127,19 +127,19 @@ impl Windows {
         let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
         let mut scene = crate::render::scene::Scene::default();
         screen.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut scene);
-        renderer.draw(&scene, [0.0, 0.0]);
-        if let Some((width, height, rgba)) = renderer.read() {
+        renderer.draw(&scene, &[[0.0, 0.0]]);
+        if let Some((width, height, rgba)) = renderer.read(0) {
             snapshot::keep(stem, width, height, rgba);
         }
         renderer.destroy();
     }
 
-    /// Lets go of a window's parts: their renderers, then their native windows, the children first.
-    pub(super) fn let_go(&self, parts: Vec<Part>) {
-        for mut part in parts.into_iter().rev() {
-            if let Some(mut renderer) = part.renderer.take() {
-                renderer.destroy();
-            }
+    /// Lets go of a window's parts: its renderer, then their native windows, the children first.
+    pub(super) fn let_go(&self, renderer: Option<Renderer>, parts: Vec<Part>) {
+        if let Some(mut renderer) = renderer {
+            renderer.destroy();
+        }
+        for part in parts.into_iter().rev() {
             self.display.close(&part.native);
         }
     }

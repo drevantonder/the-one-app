@@ -1,9 +1,9 @@
 use super::*;
 
 impl Windows {
-    /// Every window's renderers, each part's that has one.
+    /// Every window's renderer, each that has one.
     pub(super) fn renderers(&self) -> impl Iterator<Item = &Renderer> {
-        self.windows.values().flat_map(|window| window.parts.iter().filter_map(|part| part.renderer.as_ref()))
+        self.windows.values().filter_map(|window| window.renderer.as_ref())
     }
 
     /// How long until any window's screen has something to do by itself, a window waiting to show has waited long
@@ -67,13 +67,11 @@ impl Windows {
             Err(error) => return log::error!("no GPU to draw with again yet: {error:#}"),
         };
         for window in self.windows.values_mut() {
-            for part in &mut window.parts {
-                part.renderer = None;
-                if !self.background && part.native.has_surface() {
-                    match drawn_on(&context, atlas.clone(), &part.native) {
-                        Ok(renderer) => part.renderer = Some(renderer),
-                        Err(error) => log::error!("a native window can't draw: {error:#}"),
-                    }
+            window.renderer = None;
+            if !self.background && window.parts.iter().all(|part| part.native.has_surface()) {
+                match draws_on(&context, atlas.clone(), &window.parts) {
+                    Ok(renderer) => window.renderer = Some(renderer),
+                    Err(error) => log::error!("a native window can't draw: {error:#}"),
                 }
             }
             if let Ok(screen) = &mut window.screen {
@@ -112,10 +110,10 @@ impl Windows {
             self.input(id, part, input);
         }
         for window in self.windows.values_mut() {
-            for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
-                if renderer.idle_in().is_some_and(|due| due.is_zero()) {
-                    renderer.idle();
-                }
+            if let Some(renderer) = window.renderer.as_mut()
+                && renderer.idle_in().is_some_and(|due| due.is_zero())
+            {
+                renderer.idle();
             }
         }
         #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
@@ -248,7 +246,7 @@ impl Windows {
                 // Not before it can be drawn, so it never shows with nothing drawn on it: as its pipelines compile
                 // (`compiled`); and a panel, which nothing covers and which is drawn once put away and then summoned
                 // with that frame, not before its page has heard back, or has waited long enough.
-                if (window.panel && starting) || (window.parts[0].native.has_surface() && window.parts[0].renderer.is_none() && !self.background) {
+                if (window.panel && starting) || (window.parts[0].native.has_surface() && window.renderer.is_none() && !self.background) {
                     continue;
                 }
                 window.shown = true;
@@ -283,14 +281,14 @@ impl Windows {
             if window.panel && !window.visible {
                 if std::mem::take(&mut window.dirty)
                     && let Ok(screen) = &mut window.screen
-                    && window.parts[0].renderer.is_some()
+                    && window.renderer.is_some()
                 {
                     window.unshown |= screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
                     // Drawn once, so its surfaces have had a frame; after that it's painted alone, and the image it
                     // took as it went (`put_away`) is kept for the frame it's summoned with.
                     if !window.drawn {
                         let glass = screen.glass().to_vec();
-                        window.arrange(&self.display, &self.context, &self.atlas, &glass);
+                        window.arrange(&self.display, &self.context, &glass);
                         (window.drawn, window.live) = (true, true);
                         (window.on_event)(Event::Drawn);
                         (window.on_event)(Event::Live);
@@ -306,7 +304,7 @@ impl Windows {
             if ticking && window.presented && window.summoned.is_none() {
                 continue;
             }
-            if !window.dirty || window.parts[0].renderer.is_none() || window.working() {
+            if !window.dirty || window.renderer.is_none() || window.working() {
                 if window.timing.idle()
                     && let Some(frames) = window.timing.end(self.display.refresh())
                 {
@@ -363,7 +361,7 @@ impl Windows {
                     match (&window.picture, &window.screen) {
                         (Some(picture), _) => {
                             if !std::mem::replace(&mut window.pictured, true)
-                                && let Some(renderer) = &mut window.parts[0].renderer
+                                && let Some(renderer) = &mut window.renderer
                             {
                                 renderer.picture(snapshot::RASTER, width, height, picture);
                             }
@@ -400,7 +398,7 @@ impl Windows {
             if !changed && !window.unshown && window.drawn && window.summoned.is_none() && window.missed == 0 {
                 continue;
             }
-            let arranged = window.arrange(&self.display, &self.context, &self.atlas, &glass);
+            let arranged = window.arrange(&self.display, &self.context, &glass);
             if let Some(page) = page {
                 window.scene = page;
             }
@@ -426,13 +424,10 @@ impl Windows {
                 window.timing.input("drag");
             }
             let refresh = self.display.refresh();
-            let drawn = window.parts.iter().filter_map(|part| part.renderer.as_ref());
-            let (acquire, submit, present, gpu) = drawn.fold((std::time::Duration::ZERO, std::time::Duration::ZERO, std::time::Duration::ZERO, None), |(acquire, submit, present, gpu), renderer| {
-                let (all, blur) = gpu.unwrap_or_default();
-                let (submitted, presented) = renderer.submitted();
-                (acquire + renderer.acquired(), submit + submitted, present + presented, renderer.gpu().map(|(part, blurs)| (all + part, blur + blurs)).or(gpu))
-            });
-            let frame = frame_timing::Frame { at: now(), paint: painted - began, draw: painted.elapsed(), acquire, submit, present, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), passes: window.parts.iter().filter_map(|part| part.renderer.as_ref()).map(Renderer::passes).sum(), applied: Default::default(), turned: Default::default() };
+            let renderer = window.renderer.as_ref();
+            let (submit, present) = renderer.map(Renderer::submitted).unwrap_or_default();
+            let (acquire, gpu, passes) = (renderer.map(Renderer::acquired).unwrap_or_default(), renderer.and_then(Renderer::gpu), renderer.map_or(0, Renderer::passes));
+            let frame = frame_timing::Frame { at: now(), paint: painted - began, draw: painted.elapsed(), acquire, submit, present, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), passes, applied: Default::default(), turned: Default::default() };
             let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
                 self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));
@@ -443,7 +438,7 @@ impl Windows {
             // Summoned before it had drawn, it's on the screen now it has, arranged again so its parts show with it.
             if std::mem::take(&mut window.placing) {
                 self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
-                window.arrange(&self.display, &self.context, &self.atlas, &glass);
+                window.arrange(&self.display, &self.context, &glass);
             }
             if !window.drawn {
                 window.drawn = true;

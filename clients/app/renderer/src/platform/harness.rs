@@ -74,7 +74,8 @@ impl Windows {
         self.display.tick(now());
         for id in self.display.summoned() {
             let Some(window) = self.windows.get_mut(&id) else { continue };
-            let drawn = window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()?.read()).any(|(_, _, rgba)| rgba.chunks_exact(4).any(|pixel| pixel[3] > 0));
+            let parts = window.parts.len();
+            let drawn = window.renderer.as_mut().is_some_and(|renderer| (0..parts).filter_map(|at| renderer.read(at)).any(|(_, _, rgba)| rgba.chunks_exact(4).any(|pixel| pixel[3] > 0)));
             if !drawn {
                 self.display.wrong(format!("{} was put on the screen with nothing drawn on it", window.title));
             }
@@ -209,7 +210,8 @@ impl Windows {
     /// What window `id` last presented, as its compositor shows it: its width, height and pixels (`composed`).
     pub fn presented(&mut self, id: WindowId) -> Option<(u32, u32, Vec<u8>)> {
         let window = self.windows.get_mut(&id)?;
-        let drawn = window.parts.iter_mut().map(|part| part.renderer.as_mut().and_then(Renderer::read)).collect();
+        let parts = window.parts.len();
+        let drawn = (0..parts).map(|at| window.renderer.as_mut().and_then(|renderer| renderer.read(at))).collect();
         composed(window, drawn)
     }
 
@@ -228,8 +230,8 @@ impl Windows {
             .map(|part| {
                 let device = if window.panel { Size { width: size(part.bounds.size.width), height: size(part.bounds.size.height) } } else { part.native.device_size() };
                 let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
-                renderer.draw(&scene, [(part.bounds.origin.x * scale).round(), (part.bounds.origin.y * scale).round()]);
-                let read = renderer.read();
+                renderer.draw(&scene, &[[(part.bounds.origin.x * scale).round(), (part.bounds.origin.y * scale).round()]]);
+                let read = renderer.read(0);
                 renderer.destroy();
                 read
             })
@@ -416,7 +418,7 @@ impl Windows {
     /// its GPU waited for, to say its time for the last.
     pub fn cost(&mut self, id: WindowId) -> Option<serde_json::Value> {
         let window = self.windows.get_mut(&id)?;
-        let renderer = window.parts[0].renderer.as_mut()?;
+        let renderer = window.renderer.as_mut()?;
         renderer.finish();
         Some(window.screen.as_mut().ok()?.cost(renderer))
     }

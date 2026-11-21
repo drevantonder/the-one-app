@@ -106,11 +106,11 @@ impl Windows {
             } else {
                 screen.paint(room, scale, text, atlas, &mut scene);
             }
-            renderer.draw(&scene, [0.0, 0.0]);
+            renderer.draw(&scene, &[[0.0, 0.0]]);
             renderer.finish();
             let mut frame = screen.cost(&renderer);
             if snaps {
-                let (width, height, rgba) = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
+                let (width, height, rgba) = renderer.read(0).ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
                 for (name, value) in crate::inspect::png(width, height, rgba)?.as_object().into_iter().flatten() {
                     frame[name] = value.clone();
                 }
@@ -156,7 +156,7 @@ impl Windows {
             .windows
             .values()
             .map(|window| {
-                let renderers: Vec<serde_json::Value> = window.parts.iter().filter_map(|part| part.renderer.as_ref().map(Renderer::memory)).collect();
+                let renderers: Vec<serde_json::Value> = window.renderer.iter().map(Renderer::memory).collect();
                 let screen = window.screen.as_ref().ok();
                 serde_json::json!({
                     "entrypoint": window.tag["entrypoint"],

@@ -510,7 +510,7 @@ impl PrimitiveBatch<'_> {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, Copy)]
 pub(crate) enum PrimitiveBatch<'a> {
     Shadows(&'a [Shadow]),
     Quads(&'a [Quad]),
