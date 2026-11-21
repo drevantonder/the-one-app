@@ -571,9 +571,6 @@ fn launcher(home: std::path::PathBuf, restarted: bool, link: Option<String>, sta
                         windows.close(id)
                     });
                 }
-                if let Some(launcher) = LAUNCHER.lock().expect("nothing panics holding it").as_deref() {
-                    hosts::forget(launcher, None);
-                }
                 decided = false;
                 match told {
                     Told::Behind => crate::spawn(async {

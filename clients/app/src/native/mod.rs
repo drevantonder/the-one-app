@@ -248,6 +248,13 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = own.as_ref().and_then(|page| page.name.clone()).or_else(|| listed.as_ref().and_then(listed_name));
     let name = name.unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
     let launcher = matches!(kind, Kind::Launcher(..));
+    // The launcher's window takes the place of the one it had, which may still be closing (its page updated, Update
+    // Required, or a problem in its place): that one's forgotten now, so this one isn't taken for a second window of it
+    // and told to quit, as the old one's channel ends only once the windows' thread has closed it. A phone's Home Screen
+    // was left with no window and its page none the wiser, black until the app started again (21 Nov).
+    if launcher {
+        crate::hosts::forget(entrypoint, subject);
+    }
 
     // Its window, made at once, and its channel, which its page starts on once it's read (`started`).
     let window: Arc<OnceLock<WindowId>> = Arc::default();

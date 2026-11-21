@@ -63,8 +63,7 @@ pub(super) async fn unopened_launcher(entrypoint: &str, why: String, crashed: bo
 }
 
 /// The launcher's panel `old`, whose page failed as it started, or `crashed` once it had, replaced by one with its
-/// problem box (`unopened_launcher`), which shows if it was showing. The old one goes first, and its client forgets
-/// it, as the new one is the launcher's as its client knows it.
+/// problem box (`unopened_launcher`), which shows if it was showing. The old one goes first.
 #[cfg(desktop)]
 pub(super) fn replace_launcher(entrypoint: String, why: String, crashed: bool, old: Option<WindowId>) {
     let (showing_to, showing) = tokio::sync::oneshot::channel();
@@ -74,7 +73,6 @@ pub(super) fn replace_launcher(entrypoint: String, why: String, crashed: bool, o
             windows.close(old);
         });
     }
-    crate::hosts::forget(&entrypoint, None);
     crate::spawn(async move {
         let showing = showing.await.unwrap_or(false);
         computer::native(unopened_launcher(&entrypoint, why, crashed).await);
@@ -102,8 +100,6 @@ pub(crate) async fn launcher_instead(instead: Instead) -> Option<WindowId> {
         Instead::SignIn => SIGN_IN.trim_start_matches('/').to_owned(),
         Instead::Behind => UPDATE.trim_start_matches('/').to_owned(),
     };
-    // In place of the one it had, if it had one, which goes.
-    crate::hosts::forget(&entrypoint, None);
     let (opened_to, opened) = tokio::sync::oneshot::channel();
     match window(Instant::now(), &entrypoint, None, &entrypoint, Kind::Launcher(Some(opened_to), Some(instead))).await {
         Ok(_) => opened.await.ok().flatten(),
