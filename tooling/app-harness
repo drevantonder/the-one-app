@@ -21,7 +21,9 @@
 #            opens again in its place, and has a window a moment later.
 #   blank    an app's window opened while the server holds every request, so its page can't be read: still blank
 #            5 s on, it says so, and Telemetry hears it once the server answers, with the step its opening reached.
-#   open     the app started as an update starts it, its windows to open again, on the Surface's costs
+#   loading  an app's window opened while the server holds every request, so its page can't be read: the app's
+#            background as soon as it's listed, never black, and a second on its loading state, a spinner over "Loading".
+#   open    the app started as an update starts it, its windows to open again, on the Surface's costs
 #            (`measured.surface.open` in core/ui/devices.json): each window is made before the pipelines it draws with
 #            could have been compiled, so it waited for none being compiled, and none of its page's start.
 #
@@ -31,19 +33,19 @@
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|updated|blank|open]…"
+usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|updated|blank|loading|open]…"
 folder= seed=1 checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
-    start | reopen | stale | cached | restart | updated | blank | open) checks+=("$1") ;;
+    start | reopen | stale | cached | restart | updated | blank | loading | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen stale cached restart updated blank open)
+((${#checks[@]})) || checks=(start reopen stale cached restart updated blank loading open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -298,6 +300,56 @@ blanked() {
   ONE_SUBJECT=network "$one" telemetry errors --hours 1 | jq -r '.errors[] | select(.message | test("after it was on screen")) | "        Telemetry: \(.message)"' | head -1
 }
 
+# Window `$1` as it's drawn now, a PNG at `$2`.
+snap() { "$one" inspector snap --window "$1" >"$2"; }
+
+# The network's bucket, where an app's files are, by the port its edge says it's on (`tooling/network`).
+bucket() {
+  local port
+  port=$(grep -oP 'bucket=127\.0\.0\.1:\K[0-9]+' "$net/edge.env")
+  ss -Hltnp "sport = :$port" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
+}
+
+# An app's window opened while the bucket holds every request, its page one the client hasn't kept, so it can't be
+# read, while the server, which the inspector answers through, goes on: as soon as the inspector lists it, it's the
+# app's background with nothing on it, never black, and a second on, its loading state, a spinner over "Loading", in
+# its middle. A phone's first start showed black for 5 s and more as its page was read, as a window whose page isn't
+# there drew nothing (21 Nov).
+loading() {
+  stop_app
+  rm -rf "$ONE_HOME/cache"
+  start_app || return 1
+  # The inspector answers once, so its code is read before the bucket holds it too.
+  windows >/dev/null
+  held=$(bucket)
+  [[ -n $held ]] || { echo "        no bucket" && return 1; }
+  kill -STOP "$held"
+  "$folder/app/one" one:telemetry
+  local window shown=0
+  within 20 '[[ -n $(open_window telemetry) ]]' && window=$(open_window telemetry) &&
+    snap "$window" "$folder/loading-first.png" && sleep 1 && snap "$window" "$folder/loading.png" && shown=1
+  kill -CONT "$held"
+  held=
+  ((shown)) || { echo "        Telemetry's window wasn't listed, or wasn't drawn, within 20 s" && return 1; }
+  python3 - "$folder/loading-first.png" "$folder/loading.png" <<'PY'
+import sys
+from PIL import Image
+# Its background, as its bottom's middle is, and how many pixels of its middle differ from it.
+def look(path):
+    image = Image.open(path).convert("RGB")
+    width, height = image.size
+    background = image.getpixel((width // 2, height - 4))
+    middle = image.crop((width // 4, height // 3, 3 * width // 4, 2 * height // 3))
+    return background, sum(1 for pixel in middle.getdata() if sum(abs(a - b) for a, b in zip(pixel, background)) > 60)
+(background, _), (_, marked) = look(sys.argv[1]), look(sys.argv[2])
+print(f"        as it was listed, its background {background}; a second on, {marked} pixels marked in its middle")
+failed = (["black as it was listed"] if max(background) < 40 else []) + (["nothing in its middle a second on"] if marked < 50 else [])
+for why in failed:
+    print(f"        {why}")
+sys.exit(1 if failed else 0)
+PY
+}
+
 # The app started as an update starts it, with Telemetry and Settings to open again beside the launcher, each made as
 # the Surface makes one (its system's window and renderer, and the pipelines a kind of window draws with, which the
 # first window after a start waits for): each window is made before those pipelines could have been compiled. One
@@ -330,6 +382,7 @@ for name in "${checks[@]}"; do
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;
     updated) check "updated: the Home Screen updated while it's open opens again in its place, again and again" updated ;;
     blank) check "blank: a window still blank 5 s after it opened says so, and Telemetry hears it" blanked ;;
+    loading) check "loading: a window whose page can't be read is the app's background, then its loading state" loading ;;
     open) check "open: on the Surface's costs, each window opened again is made before its pipelines could compile" opened ;;
   esac
 done
