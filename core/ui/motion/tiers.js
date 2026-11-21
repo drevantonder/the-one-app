@@ -1,6 +1,6 @@
 // The devices frames are judged against (devices.json), and how many frames each would drop.
 import { readFileSync } from "node:fs"
-import { here, ssh } from "./options.js"
+import { flag, here, ssh } from "./options.js"
 
 /// The devices frames are judged against, and what this machine's CPU scores, as devices.json says.
 export const devices = JSON.parse(readFileSync(here("devices.json"), "utf8"))
@@ -8,6 +8,8 @@ export const cpuName = process.platform === "darwin" ? Bun.spawnSync(["sysctl", 
 export const hostScore = Object.entries(devices.hosts).find(([name]) => cpuName.includes(name))?.[1]
 export const device = ssh && devices.tiers.find((tier) => tier.measured === ssh)
 if (ssh && !device) throw new Error(`No tier in devices.json is measured on ${ssh}`)
+/// Whether its CPU times are a shipped build's, which a tier's CPU is judged by.
+const shipped = flag("--release")
 
 
 /// What each tier with `hz` frames a second would take for each of `frames`, played at one device pixel a point: its
@@ -41,8 +43,9 @@ export function judge(frames, hz, waits = true) {
           const shaded = gpu ? ["quads", "shadows", "sprites", "backdrops", "rasters", "copied"].reduce((sum, kind) => sum + (work[kind] / 1e6) * pixels * gpu.costs[kind], 0) : 0
           const gpuMs = gpu ? (shaded + (work.uploaded / 1e6) * pixels * gpu.costs.uploaded + gpu.constant) * (anchor.gpu / tier.gpu) + frame.draws * gpu.costs.draws * (tier.draws ?? 1) * (anchor.cpu / tier.cpu) : 0
           // The thread that paints a frame then draws it for the GPU; its JS runs on a thread of its own beside, and a
-          // frame waits for whichever's longer.
-          const [cpuMs, jsMs] = hostScore ? [frame.paint_ms + (frame.draw_ms ?? 0), waits ? frame.script_ms ?? 0 : 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
+          // frame waits for whichever's longer. A debug build's are several times a shipped one's (the Windows wheel's
+          // painting 4 ms here, 1 in a release build), so they're judged only with --release.
+          const [cpuMs, jsMs] = hostScore && shipped ? [frame.paint_ms + (frame.draw_ms ?? 0), waits ? frame.script_ms ?? 0 : 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
           const ms = Math.max(gpuMs, cpuMs, jsMs)
           return { ms, by: ms === gpuMs ? "GPU" : ms === jsMs ? "JS" : "CPU" }
         })

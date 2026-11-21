@@ -71,7 +71,7 @@ if (import.meta.main) {
   // `--watch` plays what it builds again as it changes.
   if (!flag("--watch")) setHarness(copied(ssh ? undefined : harness, out) ?? harness)
   // A debug build's CPU is several times a shipped one's.
-  if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's: --release for a shipped build's")
+  if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's, so devices are judged by their GPU alone: --release judges their CPU and JS too")
   if (!hostScore && !ssh) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
   const started = performance.now()
   if (checking) {
