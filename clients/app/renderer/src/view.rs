@@ -73,6 +73,18 @@ pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
     Ok(vec![ttf])
 }
 
+/// The monospace the harness's text and the web's draw code in, as a device draws it in its system's (Menlo, Consolas,
+/// DejaVu Sans Mono): a browser lets a page's canvas draw its own faces but not read them, so it's bundled, and the
+/// harness has this same file, so both draw the same glyphs (fonts/DejaVuSansMono-LICENSE.txt).
+#[cfg(any(feature = "fake", target_arch = "wasm32"))]
+pub(crate) const MONOSPACE: (&str, &[u8]) = ("DejaVu Sans Mono", include_bytes!("../fonts/DejaVuSansMono.woff2"));
+
+/// The monospace as TrueType, which the text system reads.
+#[cfg(any(feature = "fake", target_arch = "wasm32"))]
+pub(crate) fn monospace() -> anyhow::Result<Vec<u8>> {
+    wuff::decompress_woff2(MONOSPACE.1).map_err(|error| anyhow::anyhow!("{} didn't decode: {error:?}", MONOSPACE.0))
+}
+
 /// How long a scroll stops before what's under a still pointer is hovered again, as Blink's fake mouse move after a
 /// scroll waits (`MouseEventManager`'s 100 ms).
 const HOVER_AFTER_SCROLL: f64 = 100.0;

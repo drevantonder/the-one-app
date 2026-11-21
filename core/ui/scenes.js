@@ -83,12 +83,12 @@ async function scenesOf(target, built) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch, timeZone = "UTC", errors, safeArea, wait = 0 } = whole(scene)
+      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch, timeZone = "UTC", errors, safeArea, wait = 0, checks } = whole(scene)
       const at = whole(scene).page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")
       const [page, link] = at.split("#")
       const eased = Object.values(whole(scene).motions ?? {}).find((motion) => motion.eases && motion.gesture?.trace)
       const wheel = eased && JSON.parse(readFileSync(join(target, "client", eased.gesture.trace), "utf8")).find((event) => event.kind === "wheel")
-      return { ...phone({ name, page, link, uses, answers, taps, size, touch: sized ? undefined : touch, timeZone, errors, safeArea: sized ? undefined : safeArea }), wheel, wait }
+      return { ...phone({ name, page, link, uses, answers, taps, size, touch: sized ? undefined : touch, timeZone, errors, safeArea: sized ? undefined : safeArea, checks }), wheel, wait }
     })
   }
   // The gallery lists its own, drawn at `#scenes` by the native harness (motion.js).
@@ -267,6 +267,14 @@ async function web(browser, serve, key, scene, folder) {
       }, EDGE)
     : { words: [], names: [] }
   if (drawn) writeFileSync(join(folder, "web-text.txt"), words.join("\n") + "\n")
+  // The texts a scene's checks say are code (`expect.monospace`) are as wide a character as each other in its ARIA tree
+  // too, as the native check has it: the web draws them in the same face, bundled with it, and not the browser's own.
+  const code = [...new Set(Object.values(scene.checks ?? {}).flat().flatMap((step) => step?.expect?.monospace ?? []))]
+  const advances = drawn && code.length ? await frame.evaluate((texts) => texts.map((text) => [...document.querySelectorAll("#semantics span")].find((node) => node.textContent === text)?.getBoundingClientRect().width / [...text].length), code) : []
+  if (advances.length && (advances.some((advance) => !advance) || Math.max(...advances) - Math.min(...advances) > 0.05)) {
+    problems.push(`its code's characters are ${advances.map((advance, at) => `${advance?.toFixed(2) ?? "not drawn"} px (${code[at]})`).join(", ")} wide: not one monospace face`)
+    process.exitCode = 1
+  }
   const jumped = drawn && scene.wheel && (await notched(page, frame, scene.wheel))
   if (jumped?.note) problems.push(jumped.note)
   else if (jumped) {

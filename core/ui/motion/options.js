@@ -33,7 +33,7 @@ export const capped = (command) => (Bun.which("systemd-run") ? ["systemd-run", "
 
 /// The faces the harness falls back to where its own font hasn't a character, this machine's, which a device it's sent
 /// to is sent beside it (renderer's `fake::fallback_fonts`).
-export const FACES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
+export const FACES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
 
 /// Why a capped harness was stopped, by its exit status, if it was.
 export const stopped = (status) => ({ 137: `it used more than ${MEMORY}B of memory, and was stopped`, 124: `it ran for ${MINUTES} minutes, and was stopped` })[status]

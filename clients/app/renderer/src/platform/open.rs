@@ -19,10 +19,13 @@ impl Windows {
             let mut fonts = crate::fonts()?;
             #[cfg(feature = "fake")]
             fonts.extend(fake::fallback_fonts()?);
+            // Code is in our own monospace where the host has no system fonts to give one (a browser's, a harness's).
+            #[cfg(any(feature = "fake", target_arch = "wasm32"))]
+            fonts.push(crate::view::monospace()?);
             #[allow(unused_mut)]
             let mut text = TextSystem::new(crate::FONT, fonts, !cfg!(feature = "fake"));
-            #[cfg(feature = "fake")]
-            text.monospace(fake::MONOSPACE);
+            #[cfg(any(feature = "fake", target_arch = "wasm32"))]
+            text.monospace(crate::view::MONOSPACE.0);
             Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), showed: now(), wanted: false, ticked: None, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {
