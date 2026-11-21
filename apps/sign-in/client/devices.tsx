@@ -7,8 +7,7 @@
 // update it's taking as it moves on (`OneCore.Release`). This device becoming a server, or stopping being one, says
 // each stage.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Button, call, changed, client, confirm, type Element, Empty, Icon, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
-import { on } from "./mine.tsx"
+import { Badge, Button, call, changed, client, confirm, date, type Element, Empty, Icon, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
 
 /** A build a machine is on, as `builds` answers it. */
 interface Built {
@@ -163,9 +162,9 @@ function about(thing: Thing) {
   const under = underway(thing)
   if (under) return <><Spinner /> {under}</>
   const what = {
-    app: () => presence(thing) ?? `Approved ${on(thing.added!)}`,
-    assistant: () => `An assistant, approved ${on(thing.added!)}`,
-    browser: () => (thing.here ? "This device" : `A browser, signed in ${on(thing.added!)}`),
+    app: () => presence(thing) ?? `Approved ${date(thing.added!)}`,
+    assistant: () => `An assistant, approved ${date(thing.added!)}`,
+    browser: () => (thing.here ? "This device" : `A browser, signed in ${date(thing.added!)}`),
     server: () => presence(thing),
   }[thing.kind ?? "server"]()
   const checked = thing.server_update_status === "checked" && updates.checked.row

@@ -571,6 +571,7 @@ export declare function showRecoveryKey(options?: Subject): Promise<boolean>
 export declare function useRecoveryKey(options?: Subject): Promise<boolean>
 export declare function go(change: () => void, options?: { back?: boolean }): void
 export declare function share(text: string): Promise<"shared" | "copied" | undefined>
+export declare function date(at: string | number | Date): string
 export declare function seen(at: string | number | Date): string
 export declare function since(at: string | number | Date, style?: "long" | "narrow"): string
 export declare function size(bytes: number): string

@@ -228,7 +228,28 @@
   },
   "Passkeys": {
     "like": "Server",
-    "component": "passkeys"
+    "component": "passkeys",
+    "checks": {
+      "Each passkey's Remove is at the row's end, in one column": [
+        {
+          "expect": {
+            "aligned": {
+              "of": {
+                "role": "button",
+                "text": "Remove"
+              }
+            }
+          }
+        }
+      ],
+      "A date is never broken inside": [
+        {
+          "expect": {
+            "unbroken": "[A-Z][a-z]{2} \\d{1,2}, \\d{4}"
+          }
+        }
+      ]
+    }
   },
   "Passkeys error": {
     "like": "Passkeys",
@@ -239,7 +260,8 @@
     },
     "errors": [
       "Couldn't reach it"
-    ]
+    ],
+    "checks": {}
   },
   "Passkeys, servers waiting": {
     "like": "Passkeys",

@@ -6,8 +6,8 @@
 // them are the servers waiting for a key that a passkey hands over, their person's own or a group's or the
 // network's they own, each with Use Passkey, which opens the sign-in page to do it (`unlock_with_passkey`).
 import { createEffect, createMemo, Errored, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, List, open, Problem, Row, Screen, Section, Skeleton, toast, visible } from "ui"
-import { on, Remove } from "./mine.tsx"
+import { Button, call, changed, confirm, date, Empty, List, open, Problem, Row, Screen, Section, Skeleton, toast, visible } from "ui"
+import { Remove } from "./mine.tsx"
 
 /** A passkey, as `sign-in_devices` answers it. */
 interface Passkey {
@@ -65,7 +65,7 @@ async function allow(passkey: Passkey) {
   const when = new Date(passkey.added).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
   const question = {
     heading: "Let it unlock your encrypted data?",
-    text: `${passkey.name}, added ${on(passkey.added)} at ${when}. The sign-in page showed a code as you set it up: allow it only if that code is ${passkey.code}. Whoever uses it can open everything encrypted for you.`,
+    text: `${passkey.name}, added ${date(passkey.added)} at ${when}. The sign-in page showed a code as you set it up: allow it only if that code is ${passkey.code}. Whoever uses it can open everything encrypted for you.`,
     action: "Allow",
   }
   if (!(await confirm(question))) return
@@ -141,15 +141,17 @@ export default function SignInAndSecurity() {
             return (
               <Row
                 heading={passkey().name}
-                text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${on(passkey().added)}`}`}
+                text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${date(passkey().added)}`}`}
                 action={
-                  passkey().prf_key === null ? (
-                    <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
-                  ) : waiting(passkey()) && holds() ? (
-                    <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
-                  ) : undefined
+                  <>
+                    {passkey().prf_key === null ? (
+                      <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
+                    ) : waiting(passkey()) && holds() ? (
+                      <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
+                    ) : undefined}
+                    <Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />
+                  </>
                 }
-                end={<Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />}
               />
             )
           }}
