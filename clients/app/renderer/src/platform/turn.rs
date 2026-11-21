@@ -42,7 +42,7 @@ impl Windows {
     /// for one (`requestAnimationFrame`).
     pub(super) fn framing(&self) -> bool {
         self.check.as_ref().is_some_and(conformance::Check::moving)
-            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.slide.is_some() || window.pull.as_ref().is_some_and(rail::Pull::springing) || matches!(window.cover, Cover::Fading(..)) || window.screen.as_ref().is_ok_and(Screen::framing)))
+            || self.windows.values().any(|window| window.on_screen() && (window.moving || (window.dirty && window.working()) || window.slide.is_some() || window.pull.as_ref().is_some_and(rail::Pull::springing) || matches!(window.cover, Cover::Fading(..)) || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
@@ -306,7 +306,7 @@ impl Windows {
             if ticking && window.presented && window.summoned.is_none() {
                 continue;
             }
-            if !window.dirty || window.parts[0].renderer.is_none() {
+            if !window.dirty || window.parts[0].renderer.is_none() || window.working() {
                 if window.timing.idle()
                     && let Some(frames) = window.timing.end(self.display.refresh())
                 {

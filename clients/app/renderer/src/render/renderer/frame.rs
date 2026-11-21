@@ -226,6 +226,14 @@ impl Renderer {
         self.belt.finish_and_recall_on_submit(&encoder);
         let submitting = web_time::Instant::now();
         self.queue.submit([encoder.finish()]);
+        // The browser says when (a promise); natively the surface's next image waits for it, and wgpu would say only as
+        // it's polled.
+        #[cfg(target_arch = "wasm32")]
+        {
+            self.working.store(true, std::sync::atomic::Ordering::Release);
+            let working = self.working.clone();
+            self.queue.on_submitted_work_done(move || working.store(false, std::sync::atomic::Ordering::Release));
+        }
         self.submitted = submitting.elapsed();
         if let Some(stamps) = &mut self.stamps {
             stamps.submitted();

@@ -42,6 +42,11 @@ pub(super) fn fit(screen: &mut Screen, native: &NativeWindow, id: WindowId, room
 }
 
 impl Window {
+    /// Whether a part's GPU hasn't finished the frame it drew last (`Renderer::working`): its next waits.
+    pub(super) fn working(&self) -> bool {
+        self.parts.iter().any(|part| part.renderer.as_ref().is_some_and(crate::render::renderer::Renderer::working))
+    }
+
     /// Whether it's on screen: shown, not hidden, and for a panel, summoned.
     pub(super) fn on_screen(&self) -> bool {
         self.shown && !self.hidden && (!self.panel || self.visible)
