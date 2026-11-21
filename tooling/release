@@ -505,6 +505,10 @@ if ((${#servers[@]})); then
   wait "$nifs" || { echo "The servers' NIFs weren't built." >&2 && exit 1; }
   wait "$ui" || { echo "The UI library wasn't built." >&2 && exit 1; }
   wait "$codemode" || { echo "Code mode's interpreter wasn't bundled." >&2 && exit 1; }
+  # The network's edge as this build has it, which one of a network's servers deploys once they're all on it
+  # (`core/edge/updater/updater.ts`). It builds the UI library again, so it's built once that has.
+  (cd core/edge && bun install --frozen-lockfile >/dev/null && bun edge.js build "$out/edge" >/dev/null) ||
+    { echo "The edge wasn't built." >&2 && exit 1; }
 fi
 
 packing=() code=()
@@ -590,10 +594,12 @@ for kind in "${servers[@]}"; do
     sed -i "s/^EMU=beam\$/EMU=\"$emu\"/" "$erts/erl" "$erts/erl.src" "$erts/start_erl.src"
   fi
 
-  # What it ships with: the UI library's build, which it builds apps against and serves, and the Bun it builds apps
-  # with. What its NIFs were built from is beside them, for `tooling/nifs` to find a Mac's again.
+  # What it ships with: the UI library's build, which it builds apps against and serves, the network's edge, which it
+  # deploys, and the Bun it builds apps with. What its NIFs were built from is beside them, for `tooling/nifs` to find
+  # a Mac's again.
   [[ ! -e $target/nifs/$kind ]] || cp "$target/nifs/$kind" "$release/nifs"
   cp -R core/ui/dist "$release/ui"
+  cp -R "$out/edge" "$release/edge"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
   [[ $kind != windows-* ]] || echo "$mingit_url $mingit_sum" >"$release/git"
 
@@ -613,14 +619,14 @@ for kind in "${servers[@]}"; do
   echo "${runtime:-$build}" >"$release/runtime"
   if [[ -z $runtime ]]; then
     echo "$inputs" >"$out/server-runtime-$kind.inputs"
-    (cd "$release" && find . -type f ! -path './releases/*' ! -path './ui/*' \
+    (cd "$release" && find . -type f ! -path './releases/*' ! -path './ui/*' ! -path './edge/*' \
       \( ! -path './lib/one_core-*' -o -path './lib/one_core-*/priv/native/*' \) -print0 |
       tar -czf "$out/server-runtime-$kind.tar.gz" --null --no-recursion -T -) &
     packing+=($!)
   fi
   # One Core's own code is the same for every kind, so it's packed from the first.
   ((${#code[@]})) || {
-    tar -czf "$out/server-code.tar.gz" -C "$release" --exclude='./lib/one_core-*/priv/native' ./releases ./ui $(cd "$release" && echo ./lib/one_core-*) &
+    tar -czf "$out/server-code.tar.gz" -C "$release" --exclude='./lib/one_core-*/priv/native' ./releases ./ui ./edge $(cd "$release" && echo ./lib/one_core-*) &
     code=($!) && packing+=($!)
   }
 done
