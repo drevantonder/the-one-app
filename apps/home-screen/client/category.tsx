@@ -35,6 +35,11 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
       return () => (shut(), keys())
     },
   )
+  // Emptied while it's open, every app in it uninstalled, it closes, as an iPhone's folder does.
+  createEffect(
+    () => props.open && !category(),
+    (emptied) => void (emptied && close()),
+  )
   const area = () => props.within ?? { x: 0, y: 0, width: windowWidth(), height: viewport().height }
   // Where its apps start: under its title, in from the area's side.
   const inset = () => (props.within ? { top: 24, inline: 24, bottom: 24 } : { top: room().safe.top + 108, inline: 24 + room().safe.left, bottom: 32 + room().safe.bottom })
