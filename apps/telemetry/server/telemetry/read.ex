@@ -31,7 +31,9 @@ defmodule Telemetry.Read do
           whose: whose(span, shown),
           server: span["server"],
           from: from(span) || clients[span["traceId"]] || span["server"],
-          span: true
+          span: true,
+          code: nil,
+          stack: nil
         }
       end
 
@@ -47,7 +49,9 @@ defmodule Telemetry.Read do
           whose: nil,
           server: log["server"],
           from: from(log) || log["server"],
-          span: false
+          span: false,
+          code: code(log["attributes"]),
+          stack: log["attributes"]["exception.stacktrace"]
         }
       end
 
@@ -67,7 +71,9 @@ defmodule Telemetry.Read do
         server: latest.server,
         from: latest.from,
         whose: latest.whose,
-        span: latest.span
+        span: latest.span,
+        code: latest.code,
+        stack: latest.stack
       }
     end)
     |> Enum.sort_by(& &1.at, :desc)
@@ -267,6 +273,11 @@ defmodule Telemetry.Read do
 
   # Where a log line is from, as a person reads it: an app's page or a client that failed, or the server that logged
   # it.
+  # Where an exception threw, as OpenTelemetry's `code` attributes say it: a page's, in its app's source.
+  defp code(%{"code.file.path" => file, "code.line.number" => line}) when is_binary(file), do: "#{file}:#{line}"
+  defp code(%{"code.file.path" => file}) when is_binary(file), do: file
+  defp code(_attributes), do: nil
+
   defp logged(%{"eventName" => "exception", "attributes" => %{"one.app" => app}}), do: "#{app} page"
   defp logged(%{"eventName" => name}) when is_binary(name) and name != "", do: name
   defp logged(%{"severity" => "WARN"}), do: "Warning"

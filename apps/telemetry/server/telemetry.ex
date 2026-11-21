@@ -75,9 +75,11 @@ defmodule Telemetry do
         server: %{type: ["string", "null"]},
         from: %{type: ["string", "null"], description: "The client it's from, or where no client asked, the server or the edge it happened on"},
         whose: %{type: ["string", "null"], description: "Whose call it was, where you may see that"},
-        span: %{type: "boolean", description: "Whether it's a span, or a log line"}
+        span: %{type: "boolean", description: "Whether it's a span, or a log line"},
+        code: %{type: ["string", "null"], description: "Where the newest one threw, `file:line`, in its app's source for a page's error"},
+        stack: %{type: ["string", "null"], description: "The newest one's stack, in its app's source for a page's error"}
       },
-      required: ~w(where message count at took trace server from whose span)
+      required: ~w(where message count at took trace server from whose span code stack)
     }
 
     slow = %{
