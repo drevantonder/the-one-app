@@ -412,18 +412,20 @@ bucket() {
 # read, while the server, which the inspector answers through, goes on: as soon as the inspector lists it, it's the
 # app's background with nothing on it, never black, and a second on, its loading state, a spinner over "Loading", in
 # its middle. A phone's first start showed black for 5 s and more as its page was read, as a window whose page isn't
-# there drew nothing (21 Nov).
+# there drew nothing (21 Nov). The client keeps every app's files whole in the background as it lists them
+# (`keep_whole` in core/client), so once the launcher answers and Telemetry's are kept, the bucket holds, and then
+# Telemetry's go, everything else kept: nothing can read them again before its window asks. Its server loses the
+# device's windows some 2 s into the hold (`inspector windows` waits 20 s, then lists none), so a window listed later
+# than that isn't pictured, and the check fails.
 loading() {
-  stop_app
-  rm -rf "$ONE_HOME/cache"
-  start_app || return 1
-  # The launcher answers the inspector, so its page and the inspector's code are read before the bucket holds them too:
-  # held as the launcher's page is read, it doesn't open, and the link to Telemetry waits for it.
+  [[ -n $app ]] || start_app || return 1
   within 30 '"$one" inspector tree --window "$(open_window home-screen)" >/dev/null 2>&1' || { echo "        the launcher didn't answer within 30 s" && return 1; }
-  windows >/dev/null
+  within 60 'grep -rqF "\"uri\":\"ui://telemetry/" "$ONE_HOME/cache"' || { echo "        the client didn't keep Telemetry's files within a minute" && return 1; }
+  [[ -z $(open_window telemetry) ]] || "$one" inspector close --window "$(open_window telemetry)" >/dev/null
   held=$(bucket)
   [[ -n $held ]] || { echo "        no bucket" && return 1; }
   kill -STOP "$held"
+  grep -rlZF '"uri":"ui://telemetry/' "$ONE_HOME/cache" | xargs -0r rm -f
   "$folder/app/one" one:telemetry
   local window shown=0
   within 20 '[[ -n $(open_window telemetry) ]]' && window=$(open_window telemetry) &&
