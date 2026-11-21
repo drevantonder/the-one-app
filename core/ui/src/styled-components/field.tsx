@@ -12,7 +12,7 @@ import { Room } from "./screen.tsx"
 import { messages } from "../words.ts"
 import { createField, createRadioGroup, createToggle, Field as Context, named, useField, type FieldProps, type RadioGroupProps, type ToggleProps } from "../headless-components/field.ts"
 import { styles, type Styles } from "../styles.ts"
-import { tokens } from "../tokens.ts"
+import { pixels, tokens } from "../tokens.ts"
 
 /** How wide a field's room is at least for its label to go beside it, in CSS pixels: the label's and a field's. */
 const BESIDE = 30 * 16
@@ -26,6 +26,10 @@ const look = styles({
   beside: { flexDirection: "row", alignItems: "flex-start", gap: tokens.grid[3], maxWidth: tokens.length.readable },
   besideLabel: { flexShrink: 0, width: tokens.length.formLabel, paddingTop: tokens.grid[2], textAlign: "end", fontWeight: tokens.weight.regular, color: tokens.colour.secondaryLabel },
   control: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: tokens.grid[1.5] },
+  // In a column as wide as a screen's, the label and what it names split the column at its middle, as macOS's System
+  // Settings' do, so a few radios or a switch are in the middle of the pane and not at the label's end.
+  halfLabel: { width: "auto", flexGrow: 1, flexBasis: 0 },
+  halfControl: { flexBasis: 0 },
   dim: { opacity: 0.5 },
   message: { font: tokens.type.small, color: tokens.colour.secondaryLabel },
   wrong: { color: tokens.colour.red },
@@ -110,13 +114,14 @@ export function Field(props: FieldProps & { children?: JSX.Element }) {
   // Its label beside what it names on a computer, where there's room for both: in an alert it's above it.
   const room = useContext(Room)
   const beside = () => !touch() && !!props.label && room() >= BESIDE
+  const halves = () => beside() && room() >= pixels(tokens.length.readable)
   return (
     <Context value={createField(props)}>
       <View style={[look.field, beside() && look.beside]}>
         <Show when={props.label}>
-          <Text style={[look.label, beside() && look.besideLabel, props.disabled && look.dim]}>{props.label}</Text>
+          <Text style={[look.label, beside() && look.besideLabel, halves() && look.halfLabel, props.disabled && look.dim]}>{props.label}</Text>
         </Show>
-        <View style={look.control}>
+        <View style={[look.control, halves() && look.halfControl]}>
           {props.children}
           <Show when={props.error || props.hint}>
             <Text style={[look.message, !!props.error && look.wrong]}>{props.error || props.hint}</Text>

@@ -1,5 +1,5 @@
 import { createSignal } from "solid-js"
-import { Checkbox, Field, Input, RadioGroup, type Scenes, Search, Select, styles, Switch, Text, Textarea, tokens, View } from "ui"
+import { Checkbox, Field, Input, RadioGroup, type Scenes, Screen, Search, Select, styles, Switch, Text, Textarea, tokens, View } from "ui"
 
 const look = styles({
   form: { gap: tokens.grid[4] },
@@ -155,6 +155,25 @@ const kept = { textCapitalization: "TextCapitalization.none", autocorrect: false
 const sentences = { textCapitalization: "TextCapitalization.sentences", autocorrect: true }
 
 export default {
+  // A screen's form on a computer splits at its column's middle, as macOS's System Settings' does, so short controls
+  // (a few radios) sit in the middle of the pane and not at the label's end: the label ends where the controls
+  // begin, 6 pt either side of the window's middle, in a 672 pt column.
+  "Fields/A form beside its labels": {
+    alone: true,
+    layout: "fullscreen",
+    size: [1100, 720],
+    render: () => (
+      <Screen heading="Appearance">
+        <Field label="Colour Mode" hint="For every app on this device.">
+          <RadioGroup value="a" options={[{ value: "a", label: "As this device is" }, { value: "b", label: "Light" }, { value: "c", label: "Dark" }]} />
+        </Field>
+        <Field label="Name">
+          <Input placeholder="Your name" />
+        </Field>
+      </Screen>
+    ),
+    checks: { "Its label ends at the middle of the window": [{ expect: { at: { of: "Colour Mode", x: 214, width: 330 } } }, { expect: { at: { of: "Light", x: 556 } } }] },
+  },
   // What people expect of a select, from the UI SDK's own tests (tests/specs/select.spec.ts at the commit select.ts
   // names).
   "Fields/A select chosen by its keys": { render: () => <Picked />, taps: [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Enter" }] },
