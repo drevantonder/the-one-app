@@ -19,6 +19,12 @@ is tried with one of them faulted (`local-network`'s Faults).
 A failing check is chased until you know why, and reported. Never skip it, loosen it, or commit "a small fix" on a
 guess you haven't reproduced.
 
+## Types
+
+A change to `clients/web/host.js` or the window's page (`clients/app/page/`, `host.d.ts` types what both are given)
+runs `bunx --package typescript@7.0.2 tsc -p .` in `clients/web` and in `clients/app/page` (after `bun install` in
+`clients/web` and in `core/ui`), which must print nothing: fix the type, never `any` or `@ts-ignore`.
+
 ## State machines
 
 Changing a pure state machine (a function from a state and an event to the next state), such as the Home Screen's

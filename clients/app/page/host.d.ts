@@ -69,8 +69,8 @@ export interface Resource {
   mimeType?: string
   /** An app entrypoint's icon, as a `data:` address. */
   icons?: { src: string }[]
-  /** An app entrypoint's category, and whether its app is trusted. */
-  _meta?: { category?: string; trusted?: boolean }
+  /** An app entrypoint's category, whether its app is trusted, and the newest renderer it needs (`runtimeVersion`), where it's drawn natively. */
+  _meta?: { category?: string; trusted?: boolean; runtimeVersion?: number }
 }
 
 /**
@@ -116,6 +116,8 @@ export interface Context {
   message?: string
   /** Whether a server refused this client for being behind it, until one talks with it again. */
   behind?: boolean
+  /** Whether the launcher stopped working once it had opened. */
+  crashed?: boolean
 }
 
 /** What moves the window's move between its launcher and its apps (`move-machine.js`'s `moveMachine`): an app to show,
@@ -143,7 +145,7 @@ export type Moved =
   | { type: "unchecked"; why: string }
   | { type: "unnative"; why: string }
   | { type: "drawn"; key: string }
-  | { type: "failed"; key: string; why: string }
+  | { type: "failed"; key: string; why: string; crashed?: boolean }
   | { type: "load"; view: View }
   | { type: "page"; key: string; paged: Paged }
   | { type: "away" }
@@ -158,7 +160,7 @@ export type Moved =
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
   /** Where the device is with its network as the window opens, whether its network answers, whether a phone hears taps on notifications, whether each app opens in a window of its own (a computer's), which app this window is if it's an app's own, where the window's title bar is over the page, which keeps it clear, if it's known yet (`title_bar` says it as it changes), and the Colour Mode chosen on the device, if one has been. */
-  start(): { state: State; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: TitleBar; theme?: "light" | "dark" | null; unnative?: string | null }
+  start(): { state: State; taps?: boolean; testflight?: boolean; runtimeVersion?: number; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: TitleBar; theme?: "light" | "dark" | null; unnative?: string | null }
   /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
@@ -167,7 +169,7 @@ export interface Commands {
   client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: Push; settings?: boolean; computerUse?: unknown }
   upload(file: ArrayBuffer, options: { headers: { app: string } }): { upload: string }
   /** Asks the network again now, which didn't answer. */
-  retry(): Promise<void>
+  retry(): void
   /** Signs this device out, once it's removed from its person's devices. */
   sign_out(): void
   /** Has a phone whose push failed try again, saying where it is once that try has ended, or a browser turn its notifications on, as its person taps to. */
@@ -189,8 +191,20 @@ export interface Commands {
   /** Light or dark for the window's own bars, or with `null`, as the device is. */
   theme(args: { theme: "light" | "dark" | null }): void
   listen(): void
-  /** Opens an app in a window of its own, at `link`, or brings it forward there if it's open. */
-  open_window(args: { entrypoint: string; subject: string | undefined; link: string; icon?: [number, number, number, number] }): void
+  /** Opens an app in a window of its own, at `link`, or brings it forward there if it's open, and on a phone says whether its native window opened, from its icon at `icon` where it was opened from one. */
+  open_window(args: { entrypoint: string; subject: string | undefined; link: string; icon?: [number, number, number, number] }): boolean
+  /** Opens the launcher natively, as a phone's root window, and says whether it did. */
+  open_launcher(args: { entrypoint: string }): boolean
+  /** Says whether the native launcher shows, which it doesn't while an app is over it. */
+  launcher_shown(args: { shown: boolean }): void
+  /** Registers the push token a phone's push service gave. */
+  push_token(args: { token: string }): void
+  /** Tries the network again now. */
+  reconnect(): void
+  /** Opens the app's own page in an iPhone's Settings. */
+  settings(): void
+  /** Puts a computer's launcher panel away. */
+  hide(): void
   /** Brings the Home Screen's window forward. */
   front(): void
   /** Makes a computer's launcher panel as tall as `height`, in points, or its tallest without, its top where it is. */
@@ -213,6 +227,10 @@ export type Invoke = <Command extends keyof Commands>(command: Command, ...args:
 export interface Events {
   /** A notification from an app's entrypoint was tapped: the app's name. */
   open: string
+  /** The native launcher closed (`native: false`), because it didn't open or crashed once it had, saying why, or because its servers are ahead (`behind`); or whether something is open over it (`over`). */
+  launcher: { native?: boolean; behind?: boolean; why?: string; crashed?: boolean; over?: boolean }
+  /** The native launcher opens an app (`link`, for `subject`), or only starts it (`behind`), out of the icon at `from`. */
+  go: { link: string; subject: string | null; behind: boolean; from: Rect | null }
   /** What a server says changed: an open app's key, or `client` for the files listed. */
   changed: string
   /** The open apps loaded against a version of an app, or a build of the UI library, a server says is gone, as their addresses name them. */
@@ -243,7 +261,7 @@ declare global {
   /** Tauri's API, which the app gives its window's page (`withGlobalTauri`). */
   interface Window {
     __TAURI__: {
-      core: { invoke: Invoke; addPluginListener(app: string, event: string, handler: (payload: unknown) => void): Promise<unknown> }
+      core: { invoke: Invoke; addPluginListener<Payload>(app: string, event: string, handler: (payload: Payload) => unknown): Promise<unknown> }
       event: { listen: Listen }
     }
     /** The device's own back (`gestures.js`). */

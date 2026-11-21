@@ -520,7 +520,7 @@ const commands = {
 
 /// Light or dark for the browser's own bars, as its `theme-color` (index.html) names the page's background in each:
 /// the chosen one's, or with `null` each as the device is.
-const themeColors = [...document.querySelectorAll('meta[name="theme-color"]')].map((meta) => [meta, meta.media])
+const themeColors = [.../** @type {NodeListOf<HTMLMetaElement>} */ (document.querySelectorAll('meta[name="theme-color"]'))].map((meta) => /** @type {const} */ ([meta, meta.media]))
 /** @type {typeof import("../app/page/host.js").setTheme} */
 export const setTheme = (theme) => {
   for (const [meta, media] of themeColors) meta.media = theme ? (media.includes(theme) ? "all" : "not all") : media

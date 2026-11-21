@@ -100,7 +100,7 @@ export const onScreen = (view) => !document.hidden && shown.getSnapshot().hasTag
 
 /// Where an app's page is, with the Colour Mode chosen on this device (`theme`), which the UI library puts the page in
 /// before it draws (its `colour-mode.js`), so a dark choice on a light device never shows white while it loads.
-/** @param {Pick<View, "host" | "entrypoint">} view */
+/** @param {Pick<View, "host" | "entrypoint" | "subject">} view */
 export const located = (view) => {
   const theme = chosen()
   return theme ? `${address(view)}?theme=${theme}` : address(view)
@@ -336,6 +336,7 @@ export function go(link, subject, behind, from) {
     if ((needs.get(page) ?? 0) > runtimeVersion) return failed(NEWER), true
     unopened = undefined
     notes()
+    /** @type {[number, number, number, number] | undefined} */
     const icon = from && [from.x, from.y, from.width, from.height]
     invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page, icon }).then((opened) => opened || failed(NEWER), failed)
     return true
