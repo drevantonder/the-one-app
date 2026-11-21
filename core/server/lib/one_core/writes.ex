@@ -5,8 +5,8 @@ defmodule OneCore.Writes do
   read, `idempotencyKey`, and says the same key each time it asks that call again, of this server or another. The
   server that runs it claims the key first, in the bucket, `<whoever it runs for>/writes/<key>`, with a write that's
   made only where there's nothing (`OneCore.Bucket.write/2`), just before its tool runs, so a server stuck before then
-  holds nothing. Another server asked it again answers what the first answered, kept for a day, or says it's still
-  running and where.
+  holds nothing. Another server asked it again answers what the first answered, kept for a day, once it's done: while
+  it runs, it waits for it (`@awaited`).
 
   A server passing a call on passes its key on (`OneCore.Call`). One that holds its claim names the server it passes
   it to (`passing/1`), which takes the claim over before it runs it, and takes it back once it gives up on that server
@@ -18,8 +18,8 @@ defmodule OneCore.Writes do
   A call from no device, as one over the web, has only that it's done kept, and its client reads again what it did.
 
   A key is `<milliseconds since 1970 when it was made>-<random>`, so what's past its day goes by its name alone.
-  A server that claims a write and then gets stuck still holds it, as Stripe's does: it's said to be running there
-  until that server comes back.
+  A server that claims a write and then gets stuck still holds it, as Stripe's does: a call waiting for it is told
+  it's still being done there, once its wait is over, until that server comes back.
 
   A client asks a write again (`resent`) only of a server that speaks the protocol from which servers keep to keys,
   by saying it speaks only that one, and a server runs it only where every server that could have been asked it
@@ -34,9 +34,16 @@ defmodule OneCore.Writes do
   # How long what a write answered is kept, in milliseconds.
   @kept :timer.hours(24)
 
+  # How long a call waits for the server running its write to answer it, in milliseconds, before it says it's still
+  # being done there: well within the minute an MCP client waits for an answer (the TypeScript SDK's
+  # `DEFAULT_REQUEST_TIMEOUT_MSEC`), past the few seconds a busy server takes. The bucket says nothing when a claim
+  # changes, so it's read again every `@looks`, as a client asks after a task (`OneCore.Tasks`).
+  @awaited 30_000
+  @looks 250
+
   @doc """
-  The JSON-RPC error a write asked again is answered where it isn't run there: it's running elsewhere, or isn't to be
-  asked again. A client or a server that asked it of another too waits for the first (`core/client/src/rpc.rs`).
+  The JSON-RPC error a write asked again is answered where it isn't run there: it's still being done elsewhere once
+  the wait for it is over (`@awaited`), or isn't to be asked again. A client or a server that asked it of another too waits for the first (`core/client/src/rpc.rs`).
   """
   def not_run, do: -32004
 
@@ -64,8 +71,8 @@ defmodule OneCore.Writes do
   @doc """
   Claims the write this process's call is, where its request says a key and its tool `tool` doesn't only read, just
   before it runs, as `name` with `inputs` (as asked, before any hook changed them) for `{actor, subject}`. Gives `:run`
-  where it runs here, `{:done, result}` with what it answered where it ran already, or `{:not_run, why}` where it
-  isn't to run here: it's running elsewhere, or the key isn't one, or was used for another call. That's a JSON-RPC
+  where it runs here, `{:done, result}` with what it answered where it ran already or once it's done where it runs,
+  or `{:not_run, why}` where it isn't to run here: it's still being done elsewhere, or the key isn't one, or was used for another call. That's a JSON-RPC
   error, which a client that asked it again tells from an answer (`OneCore.Mcp`).
   """
   def claim(tool, name, inputs, {actor, subject}) do
@@ -109,8 +116,8 @@ defmodule OneCore.Writes do
             :changed -> existing(path, write, asked, actor)
           end
 
-        %{"server" => server} ->
-          {:not_run, running(server)}
+        _running ->
+          awaited(path)
       end
     else
       :absent -> {:not_run, "That idempotency key is past its day: a client gives each write a key of its own"}
@@ -118,9 +125,23 @@ defmodule OneCore.Writes do
     end
   end
 
-  defp running(server) do
-    "This is still running on #{Servers.name(server) || "the server"} that was asked it first, so it isn't run here " <>
-      "too. Its answer comes from there."
+  # What the server running the write claimed at `path` answered it, `{:done, result}`, once it's done, or
+  # `{:not_run, why}` where it isn't by `until`: a write is never said to have failed for being slow where it ran.
+  defp awaited(path, until \\ System.monotonic_time(:millisecond) + @awaited) do
+    with {:ok, data, _tag} <- Bucket.read(path),
+         %{"status" => "running", "server" => server} <- JSON.decode!(data) do
+      if System.monotonic_time(:millisecond) < until do
+        Process.sleep(@looks)
+        awaited(path, until)
+      else
+        {:not_run,
+         "This is still being done on #{Servers.name(server) || "another server"}, which is slow to answer just now. " <>
+           "It's done only once, so look again in a moment to see it, rather than doing it again."}
+      end
+    else
+      %{"status" => "done"} = record -> {:done, done(record["sealed"])}
+      _absent -> {:not_run, "That idempotency key is past its day: a client gives each write a key of its own"}
+    end
   end
 
   # What a write that ran answered, as MCP's `tools/call` answers it: encrypted to the device that asked, in `_meta`,
@@ -156,21 +177,20 @@ defmodule OneCore.Writes do
 
   @doc """
   Takes back this process's write from the server it was passed to, which didn't answer: `:ok` where this server holds
-  it, or none does, or where that server took it over meanwhile, `{:done, result}` with what it answered or
-  `{:not_run, why}` while it runs it, which ends the call.
+  it, or none does, or where that server took it over meanwhile, what it answered once it's done (`claim/4`), which
+  ends the call.
   """
   def kept do
     me = Server.key()
 
     case held(&Map.put(&1, "to", nil)) do
-      {:ok, %{"status" => "done"} = record} -> {:done, done(record["sealed"])}
-      {:ok, %{"server" => server}} when server != me -> {:not_run, running(server)}
+      {path, %{"server" => server, "status" => status}} when server != me or status == "done" -> awaited(path)
       _ours_or_none -> :ok
     end
   end
 
-  # Changes the claim this process's write holds, by `change`, where it's this server's: gives `{:ok, record}` with it
-  # as it is after, or `nil` where there's none.
+  # Changes the claim this process's write holds, by `change`, where it's this server's: gives its path and it as it is
+  # after, or `nil` where there's none.
   defp held(change) do
     with {_id, %{write: %{} = write}} <- State.current(),
          path when is_binary(path) <- path(write.subject, write.key),
@@ -179,8 +199,8 @@ defmodule OneCore.Writes do
       changed = change.(record)
 
       cond do
-        record["server"] != Server.key() or record["status"] != "running" -> {:ok, record}
-        Bucket.replace(path, JSON.encode!(changed), tag) == :ok -> {:ok, changed}
+        record["server"] != Server.key() or record["status"] != "running" -> {path, record}
+        Bucket.replace(path, JSON.encode!(changed), tag) == :ok -> {path, changed}
         true -> held(change)
       end
     else

@@ -538,7 +538,7 @@ defmodule OneCore.Call do
     {method, params} = passed(ask, principal, forwarded)
     again = again?(method, params, subject, [server])
     # A write may be begun by the server by then, which what says it isn't there doesn't say it hasn't: one that is
-    # kept to its idempotency key is answered as running there, though this server took over meanwhile.
+    # kept to its idempotency key is answered from there, though this server took over meanwhile.
     gone = if reads?(method, params, subject), do: gone
 
     response =

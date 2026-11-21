@@ -83,7 +83,7 @@ defmodule Database do
   # The relay is asked as the holder is, not after it gave up, and its saying the holder doesn't answer ends the wait
   # for it, of a read or a hook, once `@ping` has passed: a frozen holder's first call waited 10 s, one after the other,
   # and then the slower of the two. A write isn't given up on then, as the holder may have begun it, and the server
-  # that took the lease then answers that it's still running there.
+  # that took the lease then answers what the holder answers it (`OneCore.Writes`).
   # A server that isn't up takes no lease, so the call fails here, for whoever asked to ask another, as it does where
   # this server is the one out of reach. Whoever asked is told only that the app couldn't be reached: which server
   # holds what, and how long it waited, is for whoever reads this server's log.
