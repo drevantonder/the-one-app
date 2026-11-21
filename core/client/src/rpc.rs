@@ -10,6 +10,8 @@ use serde_json::{Value, json};
 
 use std::time::Duration;
 
+use iroh::SecretKey;
+
 use crate::{Client, BUILD, PROTOCOL, telemetry, resolve, state::{State, Connection}, transport::{Reached, RequestError}};
 
 /// The `progressToken` a request carries, with which MCP asks for progress notifications while it runs.
@@ -102,11 +104,58 @@ pub(crate) const UNANSWERED: &str = "No server is answering. Check this device i
 /// The JSON-RPC error a server answers a device that's nobody's (`OneCore.User`).
 pub(crate) const NOBODY: i64 = -32003;
 
-/// How long a request that only reads waits for its server's answer before it's asked of another server too, the
-/// first answer of the two being its answer, as gRPC's hedging policy and "The Tail at Scale" hedge what's safe to
-/// ask twice. Most reads are answered within a second, and a server that's connected but stuck says it's still
-/// running what it was asked however long, as a busy one does (`Client::elsewhere`).
+/// How long a request waits for its server's answer before it's asked of another server too, the first answer of the
+/// two being its answer, as gRPC's hedging policy and "The Tail at Scale" hedge what's safe to ask twice: a read, and
+/// a write by its idempotency key (`idempotent`). Most are answered within a second, and a server that's connected but
+/// stuck says it's still running what it was asked however long, as a busy one does (`Client::elsewhere`).
 const HEDGE: Duration = Duration::from_secs(3);
+
+/// The protocol from which servers keep to idempotency keys (`OneCore.Writes`), which alone a write asked again says it
+/// speaks, so a server from before refuses it rather than run it again.
+const KEYS: u64 = 2;
+
+/// Has `request`, a write, say an idempotency key, as Stripe's API and the IETF's `Idempotency-Key` have one, unless it
+/// says one already: the time it's made, which says when it's past its day, and 128 random bits. Gives it, and the same
+/// request as it's asked again of another server, which says so and speaks only the protocol that keeps to keys.
+fn idempotent(request: &mut Value) -> (String, Vec<u8>) {
+    let meta = &mut request["params"]["_meta"];
+    if !meta["idempotencyKey"].is_string() {
+        let made = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap_or_default().as_millis();
+        let random = data_encoding::BASE64URL_NOPAD.encode(&fastrand::u128(..).to_be_bytes());
+        meta["idempotencyKey"] = json!(format!("{made:013}-{random}"));
+    }
+    let key = meta["idempotencyKey"].as_str().expect("it was made one").to_owned();
+    let mut again = request.clone();
+    again["params"]["_meta"]["resent"] = json!(true);
+    again["params"]["_meta"]["protocol"] = json!({"oldest": KEYS, "newest": KEYS});
+    (key, again.to_string().into_bytes())
+}
+
+/// What a server answered a write it found was done already, which it kept encrypted to this device: the answer it
+/// gave then, as a JSON-RPC response to this request (`OneCore.Writes`). Anything else as it is.
+fn opened(key: &SecretKey, idempotency: &str, response: Vec<u8>) -> Vec<u8> {
+    let Ok(mut answer) = serde_json::from_slice::<Value>(&response) else { return response };
+    let Some(sealed) = answer["result"]["_meta"]["sealed"].as_str() else { return response };
+    let about = format!("one/writes/1/answer\n{idempotency}");
+    let Some(then) = data_encoding::BASE64.decode(sealed.as_bytes()).ok()
+        .and_then(|sealed| crate::sealed::open(key, &about, &sealed).ok())
+        .and_then(|then| serde_json::from_slice::<Value>(&then).ok())
+    else {
+        return response;
+    };
+    let answer = answer.as_object_mut().expect("it's a response");
+    answer.remove("result");
+    for (part, value) in then.as_object().into_iter().flatten() {
+        answer.insert(part.clone(), value.clone());
+    }
+    Value::Object(answer.clone()).to_string().into_bytes()
+}
+
+/// Whether `response` is a JSON-RPC error: what a server answers a write asked again that it didn't run, as one
+/// still running where it was first asked, or a server that speaks no protocol keeping to keys.
+fn error(response: &[u8]) -> bool {
+    serde_json::from_slice::<Value>(response).is_ok_and(|response| response["error"].is_object())
+}
 
 impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
@@ -135,7 +184,8 @@ impl Client {
         }
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
-        let (message, lists, reads, span, said): (std::borrow::Cow<[u8]>, bool, bool, Option<opentelemetry_sdk::trace::Span>, Option<Value>) =
+        #[allow(clippy::type_complexity)]
+        let (message, lists, reads, span, said, write): (std::borrow::Cow<[u8]>, bool, bool, Option<opentelemetry_sdk::trace::Span>, Option<Value>, Option<(String, Vec<u8>)>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
                     if request.get("id").is_some() && request["params"]["_meta"]["progressToken"].is_null() {
@@ -146,9 +196,11 @@ impl Client {
                     let reads = self.reads(&request).await?;
                     let span = request.get("id").is_some().then(|| self.span(&mut request));
                     self.say(&mut request);
-                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", reads, span, Some(request))
+                    let write = (request["method"] == "tools/call" && request.get("id").is_some() && !reads)
+                        .then(|| idempotent(&mut request));
+                    (request.to_string().into_bytes().into(), request["method"] == "tools/list", reads, span, Some(request), write)
                 }
-                _ => (message.into(), false, false, None, None),
+                _ => (message.into(), false, false, None, None, None),
             };
         let reached = std::sync::Mutex::new("none");
         // A server that went away after it was asked is asked again elsewhere only for what only reads: anything
@@ -168,9 +220,10 @@ impl Client {
                     }
                     _ => message.clone(),
                 };
-                let asked = match reads {
-                    true => self.hedged(&open, &sending, &notified).await,
-                    false => open.ask(&sending, &notified).await,
+                let asked = match (reads, &write) {
+                    (true, _) => self.hedged(&open, &sending, None, &notified).await,
+                    (false, Some((_key, again))) => self.hedged(&open, &sending, Some(again), &notified).await,
+                    (false, None) => open.ask(&sending, &notified).await,
                 };
                 match asked {
                     Ok(response) => return Ok(response),
@@ -187,7 +240,10 @@ impl Client {
                 false => bail!(UNANSWERED),
             }
         };
-        let response = request.await;
+        let response = match (request.await, &write) {
+            (Ok(response), Some((key, _again))) => Ok(opened(&self.key, key, response)),
+            (response, _) => response,
+        };
         // Refused for being behind, it's behind; answered what only a server it talks with answers, it isn't.
         self.moved(|now| {
             now.with(match &response {
@@ -234,9 +290,11 @@ impl Client {
         }
     }
 
-    /// What `open`'s server answers `message`, which only reads, or if it hasn't within `HEDGE`, what another server
-    /// answers it, if first, which what's asked from then on is asked of. Either one's failing leaves the other's.
-    async fn hedged(&self, open: &Arc<Reached>, message: &[u8], notified: &impl Fn(&[u8])) -> Result<Vec<u8>, RequestError> {
+    /// What `open`'s server answers `message`, or if it hasn't within `HEDGE`, what another server answers it, if
+    /// first, which what's asked from then on is asked of. Either one's failing leaves the other's. A read is asked
+    /// the same of both. A write is asked of the other `again`, as it's asked again by its idempotency key, and an
+    /// error that one answers is it not running it there, so the first is waited for.
+    async fn hedged(&self, open: &Arc<Reached>, message: &[u8], again: Option<&[u8]>, notified: &impl Fn(&[u8])) -> Result<Vec<u8>, RequestError> {
         let first = open.ask(message, notified);
         tokio::pin!(first);
         let other = tokio::select! {
@@ -244,16 +302,16 @@ impl Client {
             other = async { tokio::time::sleep(HEDGE).await; self.elsewhere(open).await } => other,
         };
         let Some(other) = other else { return first.await };
-        let second = other.ask(message, notified);
+        let second = other.ask(again.unwrap_or(message), notified);
         tokio::pin!(second);
         tokio::select! {
             answered = &mut first => match answered { Ok(answer) => Ok(answer), Err(_) => second.await },
             answered = &mut second => match answered {
-                Ok(answer) => {
+                Ok(answer) if again.is_none() || !error(&answer) => {
                     self.instead(open, other.clone()).await;
                     Ok(answer)
                 }
-                Err(_) => first.await,
+                _ => first.await,
             },
         }
     }
