@@ -498,7 +498,8 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * overhanging its icon is drawn whole; what's named in the middle of the window across, within a point
  * (`centred`); nothing named so wider than `most` points (`widest`: `{ of, most }`); what's named standing off what's
  * around it by at least `least`:1, WCAG's contrast between the colour just outside its start and its first 4 points in,
- * where a control's ring or a card's edge is (`contrast`: `{ of, least }`); and what a phone's system is asked to show of
+ * where a control's ring or a card's edge is (`contrast`: `{ of, least }`); each text named drawn where the inspector's rect for it
+ * is, its glyphs inside the rect, whatever moves, grows or turns it (`located`); and what a phone's system is asked to show of
  * a finger's selection: its menu for text with these items, inside the safe area, or none (`textMenu`:
  * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
  * or not (`magnifier`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and at most `js`
@@ -506,7 +507,7 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * grows past it, whether `settle` says it's `settled`, and where something is drawn (`at`: `{ of, x, y, width }`, each
  * given in points, within one), so what comes in above it is seen not to push it, and a bar's glass is seen to reach the
  * window's edges. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unbroken?: string; monospace?: string[]; unclipped?: Tap; bleeds?: Tap; aligned?: { of: Tap; at?: "start" | "end" }; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unbroken?: string; monospace?: string[]; unclipped?: Tap; bleeds?: Tap; aligned?: { of: Tap; at?: "start" | "end" }; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; located?: Tap[]; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
@@ -517,7 +518,7 @@ export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; st
  * on too, their JS, painting and GPU as that device would take them. `opensFrom`: what `follow` names is first drawn from
  * where this is, its top and its middle there (within a point), as an iPhone's folder grows out of its square and its
  * apps out of the square's. `shows`: what it names is drawn from the frame what `follow` names has landed, as a folder's
- * apps are handed back to its square as they get there. `sized`: the badge at the corner of what `follow` names is as wide in every frame as in the first, as a badge isn't scaled with its app. `apart`: no two icons of what it names cover each other by more than a tenth, in any frame, as apps flying to their places don't cross over each other. `holds`: what it names is drawn in every frame while what `follow` names is on its way, as a folder's apps are drawn flying, not handed over before. `onward`: what `follow` names never goes back against its way in any frame. `reducedMotion`: played with the
+ * apps are handed back to its square as they get there. `sized`: the badge at the corner of what `follow` names is as wide in every frame as in the first, as a badge isn't scaled with its app. `located`: the glyphs of what `follow` names are inside its rect in every frame, as the inspector's rect for a text is where it's drawn however it's moved, grown or turned. `apart`: no two icons of what it names cover each other by more than a tenth, in any frame, as apps flying to their places don't cross over each other. `holds`: what it names is drawn in every frame while what `follow` names is on its way, as a folder's apps are drawn flying, not handed over before. `onward`: what `follow` names never goes back against its way in any frame. `reducedMotion`: played with the
  * system's Reduce Motion on. `once`: what it names is never seen
  * twice in a frame, whether a screen reader reads it or not, as a large title and its bar's small one are cross-faded.
  * `eases`: what each turn of a mouse's wheel moves goes over several frames, never as far as a turn in one, and never
@@ -525,7 +526,7 @@ export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; st
  * However it's played, what it takes out is gone once it settles, and what a press lets go moves on from where the
  * finger last showed it, no frame as it's let go jumping further than the finger moved in a refresh or the frame after
  * goes on, as UIScrollView's deceleration and SwiftUI's spring do. */
-export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean; keeps?: string; opensFrom?: Tap; once?: Tap; shows?: Tap; holds?: Tap; apart?: Tap; sized?: boolean; reducedMotion?: boolean; onward?: boolean; eases?: boolean }
+export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean; keeps?: string; opensFrom?: Tap; once?: Tap; shows?: Tap; holds?: Tap; apart?: Tap; sized?: boolean; located?: boolean; reducedMotion?: boolean; onward?: boolean; eases?: boolean }
 /** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
  * a short quick flick; dragged with `pauses` of a fifth of a second along the way; a sheet pulled down and let go; or
  * each stretch it moves (`moves`, a stretch with neither `dx` nor `dy` holding still), held at the end unless `lift`. */

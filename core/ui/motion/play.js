@@ -7,7 +7,7 @@ import { build, pageFolder } from "./pages.js"
 import { device, devices, hostScore, judge } from "./tiers.js"
 import { presentThere, run, scenesOf } from "./harness.js"
 import { finger, ios, moves, selector, travel } from "./gesture.js"
-import { apart, contactSheet, curve, differs, filmstrip, rect } from "./output.js"
+import { apart, contactSheet, curve, differs, filmstrip, rect, strayInk } from "./output.js"
 
 
 /// A motion played at `hz` on a scene: its frames, filmstrip and curve kept in `folder`. → what it says, and its row in
@@ -170,6 +170,13 @@ async function play(built, scene, name, motion, hz, folder) {
     const off = widths.find((one) => Math.abs(one.width - first.width) > 1.5)
     if (!first) failed.push("no badge is drawn at the corner of what it follows")
     else if (off) failed.push(`its badge is ${off.width.toFixed(1)} pt wide at frame ${off.n + 1} (${frames[off.n].at} ms), ${first.width.toFixed(1)} in the first it's drawn in`)
+  }
+  // The glyphs of what `follow` names are inside its rect in every frame it's drawn in, as the inspector's rect is where it's drawn
+  // however it's moved, grown or turned on its way.
+  if (motion.located) {
+    const stray = frames.flatMap((frame, n) => (frame.rect && frame.png ? [{ n, why: strayInk(frame.png, scene.size[0], frame.rect) }] : [])).find((one) => one.why)
+    if (!frames.some((frame) => frame.rect)) failed.push("what it follows is never drawn")
+    else if (stray) failed.push(`at frame ${stray.n + 1} (${frames[stray.n].at} ms) ${stray.why}`)
   }
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a

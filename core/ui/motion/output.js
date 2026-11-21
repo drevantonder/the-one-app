@@ -71,6 +71,27 @@ export function apart(frames, values, before) {
 /// A rect as it's said: where, and how big.
 export const rect = ({ x, y, width, height }) => `${Math.round(x)}, ${Math.round(y)} ${Math.round(width)} × ${Math.round(height)}`
 
+/// Where a text's glyphs are drawn against where its `box` says: the pixels of a picture (`png`, of a window `points` wide) in
+/// `box` (a point out) that aren't the colour just outside its top left, as the box they fill. → why they're not where
+/// `box` is, or nothing where they are: none, or a box that's much smaller than it or off its middle.
+export function strayInk(png, points, box) {
+  const { data, width, height } = PNG.sync.read(Buffer.from(png, "base64"))
+  const scale = width / points
+  const [left, right, top, bottom] = [box.x - 1, box.x + box.width + 1, box.y - 1, box.y + box.height + 1].map((point) => Math.round(point * scale))
+  const page = (Math.max(top, 0) * width + Math.max(left, 0)) * 4
+  let [x0, x1, y0, y1] = [Infinity, -Infinity, Infinity, -Infinity]
+  for (let y = Math.max(top, 0); y < Math.min(bottom, height); y++)
+    for (let x = Math.max(left, 0); x < Math.min(right, width); x++) {
+      const at = (y * width + x) * 4
+      if (Math.abs(data[at] - data[page]) + Math.abs(data[at + 1] - data[page + 1]) + Math.abs(data[at + 2] - data[page + 2]) > 120) [x0, x1, y0, y1] = [Math.min(x0, x), Math.max(x1, x), Math.min(y0, y), Math.max(y1, y)]
+    }
+  if (x1 < x0) return `no glyphs are drawn in ${rect(box)}`
+  const ink = { x: x0 / scale, y: y0 / scale, width: (x1 - x0 + 1) / scale, height: (y1 - y0 + 1) / scale }
+  const [along, across] = box.width >= box.height ? [ink.width / box.width, ink.height / box.height] : [ink.height / box.height, ink.width / box.width]
+  const off = Math.max(Math.abs(ink.x + ink.width / 2 - box.x - box.width / 2) - box.width * 0.15, Math.abs(ink.y + ink.height / 2 - box.y - box.height / 2) - box.height * 0.15)
+  return along < 0.6 || across < 0.35 || off > 1 ? `it's drawn at ${rect(box)} but its glyphs fill ${rect(ink)}` : undefined
+}
+
 /// How much of two pictures differs, from 0 to 1, where they're the same size, with where in `diff`.
 export function differs(one, other, diff) {
   const [a, b] = [one, other].map((file) => PNG.sync.read(readFileSync(file)))
