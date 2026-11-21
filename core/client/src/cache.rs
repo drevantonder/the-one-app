@@ -105,8 +105,13 @@ impl Client {
         })
     }
 
-    /// Keeps `answer` as what `method` was last answered with.
+    /// Keeps `answer` as what `method` was last answered with. A tool's error isn't kept, as HTTP's `stale-if-error`
+    /// has it: it says why it failed then, so a view opened later shows what was answered before it, and asks again,
+    /// where it showed a day-old "couldn't be reached" as if it were now.
     pub(crate) fn keep(&self, method: &str, params: &Value, response: &Value) -> Result<()> {
+        if response["isError"] == true {
+            return Ok(());
+        }
         write(&self.cache_file(method, params), response.to_string().as_bytes())
     }
 
