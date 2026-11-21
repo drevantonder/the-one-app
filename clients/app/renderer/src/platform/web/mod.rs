@@ -687,7 +687,7 @@ fn bgra(size: Size<u32>, mut pixels: Vec<u8>) -> crate::view::Decoded {
 /// that still covers what of the box it fills.
 pub(crate) async fn decode(src: &str, device: Size<u32>) -> Option<crate::view::Decoded> {
     let image = web_sys::HtmlImageElement::new().ok()?;
-    image.set_src(src);
+    image.set_src(&allo(src).unwrap_or_else(|| src.to_owned()));
     wasm_bindgen_futures::JsFuture::from(image.decode()).await.ok()?;
     let svg = src.starts_with("data:image/svg+xml");
     let size = if svg {
@@ -713,6 +713,23 @@ pub(crate) async fn decode(src: &str, device: Size<u32>) -> Option<crate::view::
         context.draw_image_with_html_image_element_and_dw_and_dh(&image, 0.0, 0.0, width, height).ok()?;
     }
     Some(bgra(size, context.get_image_data(0.0, 0.0, width, height).ok()?.data().0))
+}
+
+/// An SVG's text in Allo, as a native host draws it (`view::paint::svg`), where the browser would draw its
+/// `system-ui` and `sans-serif` in its own face: the typeface given it as a `data:` address, the only kind an SVG
+/// drawn as a picture may load. → the SVG again as a `data:` address, if it has text.
+fn allo(src: &str) -> Option<String> {
+    let (head, body) = src.strip_prefix("data:image/svg+xml")?.split_once(',')?;
+    let svg = if head.ends_with(";base64") { String::from_utf8(data_encoding::BASE64.decode(body.as_bytes()).ok()?).ok()? } else { String::from(js_sys::decode_uri_component(body).ok()?) };
+    if !svg.contains("<text") {
+        return None;
+    }
+    let opened = svg.find("<svg")? + svg[svg.find("<svg")?..].find('>')? + 1;
+    thread_local! {
+        static FACE: String = format!("<style>@font-face{{font-family:Allo;font-weight:1 1000;src:url(data:font/woff2;base64,{})}}</style>", data_encoding::BASE64.encode(crate::view::ALLO));
+    }
+    let svg = FACE.with(|face| format!("{}{face}{}", &svg[..opened], &svg[opened..])).replace("system-ui", "Allo").replace("sans-serif", "Allo");
+    Some(format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())))
 }
 
 /// A picture a page names by an address, fetched as one of its app's files by the browser, which the screen then has

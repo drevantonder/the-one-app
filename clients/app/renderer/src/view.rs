@@ -61,9 +61,12 @@ pub(crate) use pump::files_told;
 /// file has, which a stylesheet's `@font-face` calls "Allo".
 pub const FONT: &str = "Allo Variable";
 
-/// The typeface, from the UI library's WOFF2, as TrueType, which the text system reads.
+/// The typeface, the UI library's WOFF2.
+pub(crate) const ALLO: &[u8] = include_bytes!("../../../../core/ui/src/Allo-Variable.woff2");
+
+/// The typeface as TrueType, which the text system reads.
 pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
-    let ttf = wuff::decompress_woff2(include_bytes!("../../../../core/ui/src/Allo-Variable.woff2"))
+    let ttf = wuff::decompress_woff2(ALLO)
         .map_err(|error| anyhow::anyhow!("Allo didn't decode: {error:?}"))?;
     Ok(vec![ttf])
 }
