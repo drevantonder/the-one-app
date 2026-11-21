@@ -518,7 +518,7 @@ fn launcher(home: std::path::PathBuf, restarted: bool, link: Option<String>, sta
             // One from before the latest `prepare` is the device as it was: it goes.
             Event::UserEvent(Told::Native(id, _, from)) if from != PREPARED.load(std::sync::atomic::Ordering::Relaxed) => {
                 if let Some(id) = id {
-                    on_native(move |windows| windows.close(id));
+                    on_native(move |windows| crate::native::close_window(windows, id));
                 }
             }
             Event::UserEvent(Told::Native(id, showing, _)) => {
@@ -568,7 +568,7 @@ fn launcher(home: std::path::PathBuf, restarted: bool, link: Option<String>, sta
                         if windows.showing(id) {
                             tell(Told::Summon);
                         }
-                        windows.close(id)
+                        crate::native::close_window(windows, id)
                     });
                 }
                 decided = false;

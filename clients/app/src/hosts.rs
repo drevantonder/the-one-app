@@ -419,12 +419,12 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         // On a phone, another app an app opens opens as a link the page follows.
         #[cfg(mobile)]
         "open_window" => Ok(done(app().shell.emit("open", json!(text("link").unwrap_or_default())))),
-        // The Home Screen, from an app's own window.
+        // The Home Screen, from an app's own window: on a phone under every app's window, which close, and not
+        // itself, which closing every window did, black until the app started again.
         #[cfg(desktop)]
         "front" => Ok(done(computer::summon())),
-        // On a phone, the Home Screen is under every app's window.
         #[cfg(mobile)]
-        "front" => Ok(done(close_all())),
+        "front" => Ok(done(crate::native::computer::summon())),
         // Escape on the launcher, or its page done with it (`leave`).
         #[cfg(desktop)]
         "hide" => Ok(done(computer::hide(true))),

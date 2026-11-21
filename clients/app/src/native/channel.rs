@@ -227,7 +227,7 @@ pub(super) fn respond(
                     if let Ok(native) = Native::get() {
                         native.run(move |windows| {
                             if let Some(id) = window.get() {
-                                windows.close(*id);
+                                close_window(windows, *id);
                             }
                         });
                     }
@@ -388,7 +388,7 @@ pub(super) fn channel(
                             eprintln!("{entrypoint} didn't load again in its window, which opens again: {error:#}");
                             native.run(move |windows| {
                                 if let Some(id) = window.get() {
-                                    windows.close(*id);
+                                    close_window(windows, *id);
                                 }
                                 if let Err(error) = crate::hosts::reopen(entrypoint, subject, link) {
                                     eprintln!("{error}");
@@ -506,7 +506,7 @@ pub(super) fn channel(
         let window = window.clone();
         native.run(move |windows| {
             if let Some(id) = window.get() {
-                windows.close(*id);
+                close_window(windows, *id);
             }
         });
     });

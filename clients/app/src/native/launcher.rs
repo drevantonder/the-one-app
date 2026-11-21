@@ -10,12 +10,46 @@ pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
     let started = Instant::now();
     let (opened_to, opened) = tokio::sync::oneshot::channel();
     let why = match window(started, entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to), None)).await {
-        Ok(true) => return opened.await.ok().flatten(),
+        Ok(true) => return opened_launcher(opened.await.ok().flatten(), entrypoint),
         Ok(false) => "this One App doesn't draw its page: it needs a newer One App".to_owned(),
         Err(error) => format!("{error:#}"),
     };
     reported(entrypoint, started, &why);
     unopened_launcher(entrypoint, why, false).await
+}
+
+/// The launcher's window and its page, once it's open (`launcher`, `launcher_instead`), a computer's and a phone's alike.
+/// Whatever of the app's closes it forgets it first (`close_window`), so one that closes any other way, as an agent's
+/// inspector or its system closes a phone's, opens again in its place (`launcher_closed`), where a phone's page, told
+/// nothing, showed black until the app started again.
+static LAUNCHER: Mutex<Option<(WindowId, String)>> = Mutex::new(None);
+
+/// The launcher is open in window `id`, if it opened, showing `entrypoint`'s page. → it.
+fn opened_launcher(id: Option<WindowId>, entrypoint: &str) -> Option<WindowId> {
+    if let Some(id) = id {
+        *LAUNCHER.lock().expect("nothing panics holding it") = Some((id, entrypoint.to_owned()));
+    }
+    id
+}
+
+/// The launcher's window and its page, while it's open.
+pub(crate) fn launcher_window() -> Option<(WindowId, String)> {
+    LAUNCHER.lock().expect("nothing panics holding it").clone()
+}
+
+/// Closes window `id` on the windows' thread, as the app does: forgotten first where it's the launcher's.
+pub(crate) fn close_window(windows: &mut renderer::platform::Windows, id: WindowId) {
+    LAUNCHER.lock().expect("nothing panics holding it").take_if(|(launcher, _)| *launcher == id);
+    windows.close(id);
+}
+
+/// The launcher's window `id` closed: where nothing of the app's closed it, it opens again in its place, as it does as
+/// its page is updated, and a phone's page says so where it can't (`computer::reload_native`).
+pub(super) fn launcher_closed(id: WindowId) {
+    if launcher_window().is_some_and(|(launcher, _)| launcher == id) {
+        eprintln!("the launcher's window closed, as nothing of the app's asked: it opens again");
+        computer::reload_native();
+    }
 }
 
 /// A phone's launcher that isn't drawn natively is its page's.
@@ -70,7 +104,7 @@ pub(super) fn replace_launcher(entrypoint: String, why: String, crashed: bool, o
     if let (Some(old), Ok(native)) = (old, Native::get()) {
         native.run(move |windows| {
             let _ = showing_to.send(windows.showing(old));
-            windows.close(old);
+            close_window(windows, old);
         });
     }
     crate::spawn(async move {
@@ -102,7 +136,7 @@ pub(crate) async fn launcher_instead(instead: Instead) -> Option<WindowId> {
     };
     let (opened_to, opened) = tokio::sync::oneshot::channel();
     match window(Instant::now(), &entrypoint, None, &entrypoint, Kind::Launcher(Some(opened_to), Some(instead))).await {
-        Ok(_) => opened.await.ok().flatten(),
+        Ok(_) => opened_launcher(opened.await.ok().flatten(), &entrypoint),
         Err(error) => {
             eprintln!("the launcher's {entrypoint} didn't open: {error:#}");
             None

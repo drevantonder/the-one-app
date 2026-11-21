@@ -81,7 +81,7 @@ fn close(shown: &Arc<OnceLock<WindowId>>) {
     if let Ok(native) = Native::get() {
         native.run(move |windows| {
             if let Some(id) = shown.get().copied() {
-                windows.close(id);
+                close_window(windows, id);
             }
         });
     }
@@ -445,9 +445,13 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 #[cfg(desktop)]
                 computer::quit();
             }
-            // Closed before it was done, the recovery key wasn't seen or used.
+            // Closed before it was done, the recovery key wasn't seen or used. The launcher's closed as nothing of the
+            // app's asked opens again.
             Event::Closed => {
                 crate::memory::changed();
+                if let Some(id) = shown.get().copied().filter(|_| launcher) {
+                    launcher_closed(id);
+                }
                 if let Some(told) = sheet.as_ref().and_then(|sheet| sheet.done.lock().expect("nothing panics holding it").take()) {
                     let _ = told.send(false);
                 }
@@ -577,7 +581,7 @@ fn attach(window: &Arc<OnceLock<WindowId>>, screen: impl FnOnce() -> anyhow::Res
                 None
             }
             Err(error) => {
-                windows.close(id);
+                close_window(windows, id);
                 Some(format!("{error:#}"))
             }
         };
@@ -731,8 +735,6 @@ const BAR: (f64, f64) = (0.0, 0.0);
 /// put away. Its launcher is its root window, where it's drawn natively (`launcher`), or else its page's.
 #[cfg(mobile)]
 pub(crate) mod computer {
-    use std::sync::Mutex;
-
     pub struct Size {
         pub width: f64,
         pub height: f64,
@@ -741,20 +743,15 @@ pub(crate) mod computer {
     pub const CORNER: f64 = 0.0;
     pub const NAME: &str = "";
 
-    /// The launcher's root window, while it's drawn natively, and its page.
-    static LAUNCHER: Mutex<Option<(renderer::platform::WindowId, String)>> = Mutex::new(None);
-
-    /// Opens the launcher's page `entrypoint` as the root window, under every app's. → whether it did; if not, its
-    /// page shows the web launcher.
+    /// Opens the launcher's page `entrypoint` as the root window, under every app's (`super::launcher_window`). →
+    /// whether it did; if not, its page shows the web launcher.
     pub async fn open(entrypoint: String) -> bool {
-        let Some(id) = super::launcher(&entrypoint).await else { return false };
-        *LAUNCHER.lock().expect("nothing panics holding it") = Some((id, entrypoint));
-        true
+        super::launcher(&entrypoint).await.is_some()
     }
 
     /// Hides the launcher's root window while the page shows an app over it, which it draws itself, or shows it.
     pub fn shown(shown: bool) {
-        let Some((id, _)) = *LAUNCHER.lock().expect("nothing panics holding it") else { return };
+        let Some((id, _)) = super::launcher_window() else { return };
         if let Ok(native) = renderer::platform::Native::get() {
             native.run(move |windows| windows.hide(id, !shown));
         }
@@ -762,7 +759,7 @@ pub(crate) mod computer {
 
     /// Home: every app's window closes, and the launcher's stays.
     pub fn summon() {
-        let launcher = LAUNCHER.lock().expect("nothing panics holding it").as_ref().map(|(_, entrypoint)| format!("|{entrypoint}"));
+        let launcher = super::launcher_window().map(|(_, entrypoint)| format!("|{entrypoint}"));
         crate::hosts::close_all_but(launcher.as_deref());
     }
 
@@ -800,9 +797,9 @@ pub(crate) mod computer {
 
     /// Closes the launcher's window. → its page.
     fn close() -> Option<String> {
-        let (id, entrypoint) = LAUNCHER.lock().expect("nothing panics holding it").take()?;
+        let (id, entrypoint) = super::launcher_window()?;
         if let Ok(native) = renderer::platform::Native::get() {
-            native.run(move |windows| windows.close(id));
+            native.run(move |windows| super::close_window(windows, id));
         }
         Some(entrypoint)
     }
