@@ -150,12 +150,27 @@
     canvas.addEventListener("pointerup", (event) => (pointer("up")(event), renderer.flush()))
     canvas.addEventListener("pointerleave", pointer("leave"))
     canvas.addEventListener("pointercancel", pointer("cancel"))
-    // A wheel's lines and pages, in CSS pixels, as a browser scrolls them; one that says lines (Firefox's) turned by
-    // notches, an event each.
+    // A wheel's lines and pages, in CSS pixels, as a browser scrolls them. A mouse wheel's notch is told as one, an event
+    // each, which eases what it scrolls (`Screen::wheel`): one in lines (Firefox's), or in pixels where the browser
+    // gives a notch's legacy 120 (`wheelDelta`, as Chrome and Safari do, marking no notch otherwise), or where it gives
+    // none, where this event and the one before moved by whole pixels, as smooth-scroll libraries tell a wheel from a
+    // trackpad, whose deltas have fractions.
     const unit = [1, 16, innerHeight]
-    const notch = (event, by) => (event.deltaMode === WheelEvent.DOM_DELTA_LINE ? Math.sign(by) : 0)
+    let whole = false
+    const notch = (/** @type {WheelEvent} */ event, /** @type {number} */ by, /** @type {number | undefined} */ legacy) =>
+      by && (event.deltaMode === WheelEvent.DOM_DELTA_LINE || (event.deltaMode === WheelEvent.DOM_DELTA_PIXEL && (legacy ? legacy % 120 === 0 : whole && Number.isInteger(by)))) ? Math.sign(by) : 0
     // A wheel over a video turns the screen's, not the page.
-    canvas.addEventListener("wheel", (event) => (event.preventDefault(), streams.wheel(event, unit[event.deltaMode]) || renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode], notch(event, event.deltaX), notch(event, event.deltaY))), { passive: false })
+    canvas.addEventListener(
+      "wheel",
+      (event) => {
+        event.preventDefault()
+        const legacy = /** @type {any} */ (event)
+        const [x, y] = [notch(event, event.deltaX, legacy.wheelDeltaX), notch(event, event.deltaY, legacy.wheelDeltaY)]
+        whole = Number.isInteger(event.deltaX) && Number.isInteger(event.deltaY)
+        streams.wheel(event, unit[event.deltaMode]) || renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode], x, y)
+      },
+      { passive: false },
+    )
     // A key is the page's first, as a Mac's are (`platform::mac`): one that types nothing, or with ⌘ or Ctrl held.
     // What types something goes to the field being typed in, and every key while its input method composes, and so do
     // copy, cut and paste, so they're the browser's own clipboard's.
