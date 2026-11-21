@@ -459,9 +459,10 @@ impl Screen {
         }
         // Where each node that listens for `layout` is, as its layout settles and whenever its size changes, and again
         // as it shows after it wasn't drawn, as a browser's ResizeObserver tells an element shown after `display: none`
-        // (a menu's items, kept unseen while it's closed, measured as it opens).
-        let rects = &self.rects;
-        self.laid_out.retain(|id, _| rects.get(id).is_some());
+        // (a menu's items, kept unseen while it's closed, measured as it opens), and as it starts listening again, as
+        // a ResizeObserver tells what it's just been asked to observe.
+        let (rects, tree) = (&self.rects, &self.tree);
+        self.laid_out.retain(|id, _| rects.get(id).is_some() && tree.nodes.get(id).is_some_and(|node| node.listens("layout")));
         let listening: Vec<(Id, Rect)> = self
             .tree
             .laid_out()
