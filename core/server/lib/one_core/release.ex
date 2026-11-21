@@ -111,7 +111,9 @@ defmodule OneCore.Release do
     "program_name" => nil,
     "program" => nil,
     "next_program" => nil,
-    "went_back" => nil
+    "went_back" => nil,
+    "deploys_edge" => false,
+    "edge_went_back" => nil
   }
 
   # What a line the program keeping it running said is, a `Told`.
@@ -187,9 +189,13 @@ defmodule OneCore.Release do
   to the clients watching this server (`notifications/one/update`), and what this server is to do of it said to the
   program keeping it running: to prepare the latest pair, its build and
   `one`, where it isn't on it or preparing it, and to go where it has checked the pair the network takes, now or once
-  it's quiet.
+  it's quiet. `deploys_edge` says whether an app here deploys the network's edge (the hook `edge`), which is said at
+  the edge with the rest; `:deploy_edge` is given where this server is to deploy its build's edge, once until it says
+  how that went (`edge_deployed/2`), and `:ok` otherwise.
   """
-  def instructed(update) do
+  def instructed(update, deploys_edge) do
+    told(%{"deploys_edge" => deploys_edge})
+
     if update != network() do
       :persistent_term.put({__MODULE__, :network}, update)
       # The apps watching this server hear it too, as each takes a newer build of itself, or of its page, by itself.
@@ -230,6 +236,32 @@ defmodule OneCore.Release do
       _ ->
         :ok
     end
+
+    if update["servers"][Server.key()] == "deploy_edge" and not :persistent_term.get({__MODULE__, :edge}, false) do
+      :persistent_term.put({__MODULE__, :edge}, true)
+      :deploy_edge
+    else
+      :ok
+    end
+  end
+
+  @doc """
+  The network's edge as this server's build has it, which `bun core/edge/edge.js build` made and `server-code`
+  carries: the folder `deploy.js` deploys it from, or `nil` for a server with none, as one run from source.
+  """
+  def edge do
+    folder = Path.join(to_string(:code.root_dir()), "edge")
+    if File.exists?(Path.join(folder, "deploy.js")), do: folder
+  end
+
+  @doc """
+  Says how deploying the edge of `build` went (the hook `edge`): `:ok`, or `{:error, why}`, which the network's update
+  says of this server until a deploy of it goes. It's told again to deploy it as the update tries again.
+  """
+  def edge_deployed(build, result) do
+    :persistent_term.erase({__MODULE__, :edge})
+    told(%{"edge_went_back" => with({:error, why} <- result, do: %{"build" => build, "why" => why}, else: (:ok -> nil))})
+    :ok
   end
 
   @doc """

@@ -97,5 +97,7 @@ async function back(/** @type {string} */ failed) {
     console.error(`Rolling ${name} back to ${before[name].version}`);
     await wrangler("rollback", before[name].version, "--name", name, "--message", failed.slice(0, 100), "--yes");
   }
+  // Said last, as why it went back (`apps/software-update`).
+  console.error(failed);
   process.exit(1);
 }

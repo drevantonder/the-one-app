@@ -254,6 +254,14 @@ defmodule OneCore.App.Manifest do
      An app that can wake it, as one that holds its push token, does, and answers `%{"woken" => true}`: One Core
      then waits for its app to connect. `nil` is no part.
      """},
+    {"edge", :observe,
+     """
+     The network's edge is on an older build than its servers, and this server, on theirs, is to deploy its build's
+     edge (`core/edge/updater/updater.ts`). It's observed by the apps installed for the network, and it's about the
+     `build`. An app that deploys the edge deploys `OneCore.Release.edge/0`, this server's build of it, with
+     `deploy.js` beside it, and says how that went with `OneCore.Release.edge_deployed/2`. A server says it deploys the
+     edge (`deploys_edge`) while an app hooks into this.
+     """},
     {"started", :observe,
      """
      This server started: its apps are running and it answers. It's observed by the apps installed for the network,
