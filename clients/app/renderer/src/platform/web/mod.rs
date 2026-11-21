@@ -211,7 +211,7 @@ fn soon() {
     }
 }
 
-/// A turn of the windows' loop, as a native one's (`platform::start`): the jobs that came, then what the display said
+/// A turn of the windows' loop, as a native one's (`platform::native::start`): the jobs that came, then what the display said
 /// and what's due (`Windows::turn`), then what the screen sent the page, and the timer for its next.
 fn turn() {
     SOON.set(false);
