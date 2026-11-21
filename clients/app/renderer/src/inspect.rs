@@ -42,11 +42,11 @@
 //! - `replay` (a selector, or a point, where a press goes down; `moves`, each `{dx, dy, ms}`, a stretch with neither
 //!   holding still; `lift`, true unless given; `hz`, the display's frames a second, 60 unless given; `input_hz`, its
 //!   moves a second, `hz` unless given; `after`, ms to keep drawing past its end, 2000 unless given, stopping once
-//!   nothing moves; `track`, a selector of a node to follow; `count`, a selector of nodes to count; `shows` and `holds`, ones whose nodes are counted the same way; `snap`: true for
+//!   nothing moves; `track`, a selector of a node to follow; `count`, a selector of nodes to count; `shows` and `holds`, ones whose nodes are counted the same way; `apart`, one whose nodes' rects are listed; `snap`: true for
 //!   each frame's picture) → `{hz, budget_ms, over, frames, time, paused}`: the press played as `drag` plays it, each
 //!   move at its own time, and every frame of the display drawn as the window draws one, each with what `profile`'s
 //!   says, `at` (ms since it went down), where `track` was drawn (`x`, `y`), how many nodes `count` matches a person
-//!   sees (`count`, `shows` and `holds`: drawn at all opaque, some of it in the window) and how far what scrolls under its start shows
+//!   sees (`count`, `shows` and `holds`: drawn at all opaque, some of it in the window), where each of `apart`'s is drawn (`apart`), and how far what scrolls under its start shows
 //!   scrolled (`scroll`, with its stretch past an end); `over` counts the frames whose painting took longer than `budget_ms`, a frame's time at `hz`.
 //!   With `frame_ms`, a frame is drawn only that often, as a device others load draws them, each a late one that
 //!   presses it as a window's do (each frame's `pressure`); `leaving` is how much it took out is still drawn going at

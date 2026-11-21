@@ -880,6 +880,13 @@
         "once": {
           "role": "button",
           "name": "Weather"
+        },
+        "apart": {
+          "role": "button",
+          "within": {
+            "role": "dialog",
+            "name": "Utilities"
+          }
         }
       },
       "Open a category with less motion": {
@@ -2576,6 +2583,13 @@
         "once": {
           "role": "button",
           "name": "Weather"
+        },
+        "apart": {
+          "role": "button",
+          "within": {
+            "role": "dialog",
+            "name": "Utilities"
+          }
         }
       }
     }
@@ -2756,6 +2770,13 @@
         "holds": {
           "role": "button",
           "name": "Notes",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        },
+        "apart": {
+          "role": "button",
           "within": {
             "role": "dialog",
             "name": "Productivity"

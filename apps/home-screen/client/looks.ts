@@ -136,7 +136,7 @@ export const looks = styles({
   // Its apps are handed from its square to it at once as it opens, and back once they've flown into the square again
   // (`smooth` within half a point of it, 800 ms on), so each app is drawn once, never in both. A host that doesn't wait
   // hands them back as it starts to close. With less motion they jump, so `handed` waits nothing.
-  handed: { transitionProperty: ["opacity"], transitionDelay: 800 },
+  handedAfter: (ms: number) => ({ transitionProperty: ["opacity"], transitionDelay: ms }),
   handing: { transitionDelay: 0 },
   unseen: { opacity: 0 },
   inOpened: { position: "absolute", top: 0, start: 0 },
@@ -145,6 +145,8 @@ export const looks = styles({
   flies: { transitionProperty: ["scale", "translateX", "translateY"], transition: tokens.motion.smooth },
   // Over its app, across its middle, for what flies with it unscaled.
   badged: { position: "absolute", top: 0, start: 0, end: 0, alignItems: "center", pointerEvents: "none" },
+  // Each of its apps leaves its square, and comes back, after the ones before it.
+  after: (ms: number) => ({ transitionDelay: ms }),
   scaledAt: (scale: number, translateX: number, translateY: number) => ({ scale, translateX, translateY }),
   // Its name and its apps' come in once its apps have nearly got where they go, and go first as it closes.
   named: { opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle, transitionDelay: 250 },

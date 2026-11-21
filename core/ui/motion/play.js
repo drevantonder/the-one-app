@@ -37,7 +37,7 @@ async function play(built, scene, name, motion, hz, folder) {
   }
   // Where what it opens should first be drawn: what `opensFrom` names, before the press.
   const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
-  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.holds ? { holds: { ...selector(motion.holds), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
+  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.holds ? { holds: { ...selector(motion.holds), includeHidden: true } } : {}), ...(motion.apart ? { apart: { ...selector(motion.apart), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
   const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
@@ -140,6 +140,15 @@ async function play(built, scene, name, motion, hz, folder) {
     const hidden = first < 0 ? -1 : frames.findIndex((frame, n) => n >= first && n <= last && frame.holds === 0)
     if (first < 0) failed.push("what it follows doesn't move")
     else if (hidden >= 0) failed.push(`${JSON.stringify(motion.holds)} isn't drawn at frame ${hidden + 1} (${frames[hidden].at} ms), while what moves is on its way (frames ${first + 1} to ${last + 1})`)
+  }
+  // No two icons of what `apart` names (apps, each box's middle three fifths across, at its top, as wide as that) cover each
+  // other by more than a tenth of the smaller, in any frame: apps flying from one place to another don't cross over each other.
+  if (motion.apart) {
+    const icon = (box) => ({ x: box.x + box.width * 0.2, y: box.y, width: box.width * 0.6, height: box.width * 0.6 })
+    const covers = (a, b) => (Math.max(0, Math.min(a.x + a.width, b.x + b.width) - Math.max(a.x, b.x)) * Math.max(0, Math.min(a.y + a.height, b.y + b.height) - Math.max(a.y, b.y))) / Math.min(a.width * a.height, b.width * b.height)
+    let worst = { by: 0 }
+    frames.forEach((frame, n) => (frame.apart ?? []).map(icon).forEach((a, i, all) => all.slice(i + 1).forEach((b) => covers(a, b) > worst.by && (worst = { by: covers(a, b), n, a, b }))))
+    if (worst.by > 0.1) failed.push(`two of ${JSON.stringify(motion.apart)} cover each other by ${Math.round(worst.by * 100)}% at frame ${worst.n + 1} (${frames[worst.n].at} ms): ${rect(worst.a)} and ${rect(worst.b)}`)
   }
   // The red of a badge beside what `follow` names (an app) is as wide in every frame as in the first, as an iPhone's badge isn't
   // scaled with its app: read from the frames' pictures, the box of the red pixels in the app's top right corner.

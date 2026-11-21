@@ -6,7 +6,7 @@ import { home, room, tapping, windowWidth } from "./store.ts"
 import { type Owner, badgeOf, opens, press } from "./owners.ts"
 import { holds } from "./holds.ts"
 import { Count, Tile } from "./tiles.tsx"
-import { handed, openedCategory, places } from "./library.tsx"
+import { handed, openedCategory, places, wait } from "./library.tsx"
 
 /// How large an opened category's apps' icons are, how wide each is with its name, and the gap between them across,
 /// as `sizes.found` and `looks.openedApps` have them.
@@ -15,7 +15,7 @@ const [ICON, APP, APART] = [60, 76, 12]
 /// A category opened over its App Library, as an iPhone's is: the whole screen (in the launcher, its card), its name as
 /// a large title over all its apps in a grid, as Home's, which scrolls, over the App Library blurred and dimmed. Each of
 /// its apps flies out of its own icon in its square there and back into it, as an iOS folder's do, wherever the square
-/// is, the blur and the dim with them, on one spring the renderer draws, turning back from wherever they've got to:
+/// is, the blur and the dim with them, on one spring the renderer draws, each a little after the one before it (`wait`) so none crosses another, turning back from wherever they've got to:
 /// closed, each is as large as that icon and on it, and the square's are handed over to it as it opens and back once
 /// they're in the square again, so each app is drawn once. Its name and its apps' come in as they arrive, and go first.
 /// Tapping beside its apps, Escape or the device's own back closes it at once, however far it's got: what's still moving
@@ -85,7 +85,7 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
       {/* What's behind blurs and dims through a veil. */}
       <Pressable aria-hidden="true" onPress={close} style={[looks.cover, looks.frosted, looks.veils, !props.open && looks.unveiled, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height)]} />
       <View role="dialog" aria-label={category()?.category} style={[looks.opening, props.within && looks.round, looks.at(area().x, area().y, area().width, area().height)]}>
-        <View style={[looks.inOpened, handed(), props.open ? looks.handing : looks.unseen]}>
+        <View style={[looks.inOpened, handed(category()?.entrypoints.length ?? 1), props.open ? looks.handing : looks.unseen]}>
           <ScrollView style={[looks.openedArea, !props.open && looks.inert, looks.sized(area().width, area().height)]}>
             <Pressable onPress={beside} onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, all: event.currentTarget.getBoundingClientRect() }))} style={[looks.opened, props.within && looks.centred, looks.libraryPadding(inset().inline, inset().top, inset().bottom), looks.atLeast(area().height)]}>
               <Text role="heading" aria-level={2} style={[looks.categoryTitle, named(), column()]}>
@@ -98,9 +98,9 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
                     const held = holds(() => ({ item: opens(entrypoint()), listed: entrypoint(), page: 0, index: -1, from: "library" }), () => true)
                     return (
                       <View style={looks.slots} onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, apps: { ...laid.apps, [index()]: event.currentTarget.getBoundingClientRect() } }))}>
-                        <Tile name={entrypoint().name} icon={entrypoint().icon} size={ICON} scale={1} style={[measured() && looks.flies, flown(index())]} nameStyle={named()} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} counted={false} holds={held} onPress={(behind, from) => press(entrypoint(), props.owner, behind, from)} />
+                        <Tile name={entrypoint().name} icon={entrypoint().icon} size={ICON} scale={1} style={[measured() && [looks.flies, looks.after(wait(index()))], flown(index())]} nameStyle={named()} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} counted={false} holds={held} onPress={(behind, from) => press(entrypoint(), props.owner, behind, from)} />
                         <View aria-hidden="true" style={looks.badged}>
-                          <View style={[looks.slots, looks.square(ICON), measured() && looks.flies, flownBadge(index())]}>
+                          <View style={[looks.slots, looks.square(ICON), measured() && [looks.flies, looks.after(wait(index()))], flownBadge(index())]}>
                             <Count count={badgeOf(entrypoint() as Entrypoint, props.owner)} />
                           </View>
                         </View>

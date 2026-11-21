@@ -896,7 +896,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
         _ => None,
     };
-    let (mut track, count, shows, holds) = (query("track"), query("count"), query("shows"), query("holds"));
+    let (mut track, count, shows, holds, apart) = (query("track"), query("count"), query("shows"), query("holds"), query("apart"));
     // The nodes of what a selector matches that a person sees: drawn at all opaque, some of it in the window.
     let seen = |windows: &mut Windows, query: &Value| -> Vec<Value> {
         let found = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"].as_array().cloned()).unwrap_or_default();
@@ -1000,6 +1000,11 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             if let Some(query) = query {
                 frame[name] = json!(seen(windows, query).len());
             }
+        }
+        // Where each of what `apart` matches that a person sees is drawn, as the frame on the screen drew it, as `track` has it.
+        if let Some(query) = &apart {
+            let nodes = seen(windows, query);
+            frame["apart"] = json!(nodes.iter().filter_map(|node| windows.with(id, |screen| screen.shown_rect(node["node"].as_u64()?)).flatten()).map(|rect| rect.json()).collect::<Vec<_>>());
         }
         if let Some(scrolled) = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten() {
             frame["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});
