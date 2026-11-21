@@ -128,6 +128,7 @@ export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
 /// so a quick load shows nothing in between: each row as tall as a list's row with a heading and a line of text, so
 /// the list takes its place without moving what's around it. It's what `<Loading fallback>` shows.
 export function Skeleton(props: { rows?: number }) {
+  const middle = useContext(Middle)
   const style = useContext(ListStyle)
   const flat = () => !touch() && style === "plain"
   const grouped = () => !touch() && style === "insetGrouped"
@@ -135,7 +136,7 @@ export function Skeleton(props: { rows?: number }) {
   const [late, setLate] = createSignal(false)
   setTimeout(() => setLate(true), 100)
   return (
-    <View role="status" aria-busy="true" aria-label={messages.loading} style={look.state}>
+    <View role="status" aria-busy="true" aria-label={messages.loading} style={[look.state, middle() && look.centred]}>
       <View style={[look.skeleton, late() && look.late]}>
         {Array.from({ length: props.rows ?? 3 }, (_, i) => (
           <View style={[look.line, flat() && look.flatLine, grouped() && look.groupedLine, sidebar() && look.sidebarLine, i > 0 && look.next]}>

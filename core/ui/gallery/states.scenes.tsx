@@ -13,4 +13,11 @@ export default {
       <Skeleton rows={2} />
     </View>
   ),
+  // Where a computer's window is wider than a column, loading is in the column's middle, as the states are and as the
+  // rows that replace it will be.
+  "States/Loading on a computer": {
+    size: [1280, 800],
+    render: () => <Skeleton rows={2} />,
+    checks: { "A skeleton is in the middle of the window": [{ expect: { centred: { role: "status", name: "Loading" } } }] },
+  },
 } satisfies Scenes
