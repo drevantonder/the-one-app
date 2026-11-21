@@ -17,6 +17,8 @@
 #            what its client kept.
 #   restart  updates in a row (the program's file changes), each with a second start near the hand-over: one app,
 #            whose launcher answers, and one window of each app, at the end of each.
+#   updated  the Home Screen's page updated while it's open, a few times in a row, as a release deploys it: each time it
+#            opens again in its place, and has a window a moment later.
 #   blank    an app's window opened while the server holds every request, so its page can't be read: still blank
 #            5 s on, it says so, and Telemetry hears it once the server answers, with the step its opening reached.
 #   open     the app started as an update starts it, its windows to open again, on the Surface's costs
@@ -29,19 +31,19 @@
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|blank|open]…"
+usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|updated|blank|open]…"
 folder= seed=1 checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
-    start | reopen | stale | cached | restart | blank | open) checks+=("$1") ;;
+    start | reopen | stale | cached | restart | updated | blank | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen stale cached restart blank open)
+((${#checks[@]})) || checks=(start reopen stale cached restart updated blank open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -254,6 +256,23 @@ restarted() {
   done
 }
 
+# The Home Screen's page updated while it's open, three times, as a release deploys it: each time its window opens
+# again in the old one's place, which is closed on the windows' thread, as busy as the seed has it, while the new one
+# says it's there. A moment later it has a window, where a phone's new one was taken for a second window of the old,
+# still closing, and told to quit, and its page, told nothing, showed black until the app started again (21 Nov).
+updated() {
+  local round
+  [[ -n $app ]] || start_app || return 1
+  rm -rf "$folder/home-screen" && cp -r "$root/apps/home-screen" "$folder/home-screen"
+  for round in 1 2 3; do
+    echo "// a version of its own: $seed $round $(date +%s%N)" >>"$(find "$folder/home-screen/client" -maxdepth 1 -name '*.tsx' | head -1)"
+    ONE_SUBJECT=network "$one" deploy --name home-screen --files-from "$folder/home-screen" >/dev/null
+    sleep 3
+    [[ -n $(open_window home-screen) ]] || { echo "        update $round: no Home Screen window 3 s after its page was updated: $(windows | tr '\n' ' ')" && return 1; }
+    one_each || { echo "        after update $round" && return 1; }
+  done
+}
+
 # An app's window opened while the server holds every request (stopped, as one is that's restarting), its page one
 # the client hasn't kept (Telemetry's, with what the client kept gone as the app starts), so it can't be read: still
 # blank 5 s after it opened, it says so (`Event::Blank`) where Andre's iPhone's blank windows said nothing (20 Nov), and
@@ -309,6 +328,7 @@ for name in "${checks[@]}"; do
     stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;
+    updated) check "updated: the Home Screen updated while it's open opens again in its place, again and again" updated ;;
     blank) check "blank: a window still blank 5 s after it opened says so, and Telemetry hears it" blanked ;;
     open) check "open: on the Surface's costs, each window opened again is made before its pipelines could compile" opened ;;
   esac
