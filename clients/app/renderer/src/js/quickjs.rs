@@ -39,7 +39,16 @@ const INTL: &str = include_str!("../intl.js");
 
 /// The Web APIs that are LLRT's, as its own runtime adds them to a context.
 fn web(ctx: &Ctx) -> rquickjs::Result<()> {
+    // LLRT's exceptions put an accessor for `stack` on `Error.prototype` that answers a DOMException's alone, as it
+    // takes QuickJS to give every other error a `stack` of its own. QuickJS-NG keeps an error's stack behind its own
+    // accessor there instead, so every error's stack read "" and a page's error said nowhere where it was thrown
+    // (21 Nov). It's both: a DOMException's, and QuickJS's for the rest.
+    let quickjs: Object = ctx.eval("Object.getOwnPropertyDescriptor(Error.prototype, 'stack')")?;
     llrt_exceptions::init(ctx)?;
+    ctx.eval::<Function, _>(
+        "(quickjs) => { const dom = Object.getOwnPropertyDescriptor(Error.prototype, 'stack'); Object.defineProperty(Error.prototype, 'stack', { configurable: true, get() { return (this instanceof DOMException ? dom : quickjs).get.call(this) }, set(stack) { (this instanceof DOMException ? dom : quickjs).set.call(this, stack) } }) }",
+    )?
+    .call::<_, ()>((quickjs,))?;
     llrt_url::init(ctx)?;
     llrt_util::init(ctx)?;
     llrt_stream_web::init(ctx)?;
