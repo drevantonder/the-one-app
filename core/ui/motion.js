@@ -333,11 +333,11 @@ async function presentThere(at, folder, scene, events) {
   return { said: said.filter((line) => line.trim().startsWith("{")).map((line) => JSON.parse(line)), stderr, failed: exit.trim() !== "0" }
 }
 
-/// Whether `scene`'s window is a panel: a computer's launcher is drawn as one (a Mac's, its glass the system's), as its
-/// client says it is.
+/// Whether `scene`'s window is a panel: a computer's launcher is drawn as one on every computer, its glass the system's
+/// (`native::launcher`), as its client says it is.
 const panelled = (scene) => {
   const client = scene.answers?.["one/client"]
-  return Boolean(client?.launcher && client?.mac)
+  return Boolean(client?.launcher)
 }
 
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
