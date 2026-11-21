@@ -8,6 +8,9 @@ defmodule OneCore.Iroh do
   @doc "The signature of `message` by the key kept in `key_file`."
   def sign(_key_file, _message), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc "`data` encrypted to the machine whose key is `to`, for what `about` says, which it's bound to (`client::sealed`)."
+  def seal(_to, _about, _data), do: :erlang.nif_error(:nif_not_loaded)
+
   @doc """
   What the program keeping this server running told it in `line` (`client::serve::Told`, which says each message),
   as the JSON it's read as: `{:ok, json}`, or `{:error, why}` for a line that isn't one.

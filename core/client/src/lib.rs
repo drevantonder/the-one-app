@@ -14,6 +14,7 @@ mod auth;
 mod cache;
 mod resolve;
 mod rpc;
+pub mod sealed;
 pub mod serve;
 mod state;
 pub mod system;

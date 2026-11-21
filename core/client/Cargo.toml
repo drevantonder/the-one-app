@@ -14,6 +14,9 @@ futures-util = { version = "0.3", default-features = false, features = ["alloc"]
 gethostname = "1"
 # Reading a folder as git would keep it, leaving out what its .gitignore files do, with no git needed.
 ignore = "0.4"
+# Encrypting to a machine's key (RFC 9180), as Encryption does: what a server answered a write, to the device
+# that asked (`src/sealed.rs`).
+hpke = { version = "0.15", default-features = false, features = ["alloc", "getrandom", "x25519", "chacha"] }
 # Reading the edge's clock from its `Date`, by which this device corrects its own (`ask` in `src/lib.rs`).
 httpdate = "1"
 iroh.workspace = true

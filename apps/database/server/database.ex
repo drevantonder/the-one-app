@@ -49,7 +49,7 @@ defmodule Database do
   @waited 1_000
 
   # How long, in milliseconds, the server holding the lease has to run a call passed on to it that's safe to ask
-  # again, a hook or a tool that only reads, before it's taken as gone. One that's there but stuck keeps the call
+  # again, a hook, a tool that only reads or a write by its idempotency key (`OneCore.Writes`), before it's taken as gone. One that's there but stuck keeps the call
   # open, saying it's still running it, and a hook gives up at 10 s (`OneCore.Hooks`): so every hook passed to a
   # stuck holder gave up before anything took the lease back, and the next did the same. A holder that's up runs one
   # in well under a second, and this and `@witness` leave a hook time to take the lease over and answer.

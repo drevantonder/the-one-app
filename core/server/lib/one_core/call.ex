@@ -25,7 +25,7 @@ defmodule OneCore.Call do
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
   what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
-  alias OneCore.{Artifact, Bucket, Hooks, Apps, Server, Servers, Tasks, User}
+  alias OneCore.{Artifact, Bucket, Hooks, Apps, Server, Servers, Tasks, User, Writes}
   alias OneCore.Call.State
   alias OneCore.Apps.{Calls, Version}
 
@@ -459,23 +459,23 @@ defmodule OneCore.Call do
   def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server, within),
     do: asks(ask, {actor, subject}, server, true, within)
 
-  # How long what only reads waits for a server's answer before it's asked of the next as well: most are answered
+  # How long what's safe to ask again waits for a server's answer before it's asked of the next as well: most are answered
   # within a second, and a server that's connected but stuck says it's still running it however long, as a busy one
   # does. The same as a device's client waits (`HEDGE`, `core/client/src/rpc.rs`).
   @hedge 3_000
 
-  # Has one of `servers` run it, with `forwarded` saying how it reached them. What only reads is hedged, as gRPC's
-  # hedging policy hedges what's safe to ask twice: asked of the first, and of the next too whenever none has answered
-  # within `@hedge` or one couldn't run it, the first answer being its answer. Anything else is asked of each in turn,
-  # each waited for as long as it takes, since it may be doing it. `:no_response` if none ran it.
+  # Has one of `servers` run it, with `forwarded` saying how it reached them. What's safe to ask again (`again?/4`) is
+  # hedged, as gRPC's hedging policy hedges what's safe to ask twice: asked of the first, and of the next too whenever
+  # none has answered within `@hedge` or one couldn't run it, the first answer being its answer. Anything else is asked
+  # of each in turn, each waited for as long as it takes, since it may be doing it. `:no_response` if none ran it.
   defp ask_each(ask, {_actor, subject} = principal, servers, forwarded, opts \\ []) do
     {method, params} = passing = passed(ask, principal, forwarded)
 
-    if again?(method, params, subject),
+    if again?(method, params, subject, servers),
       do: hedged([], servers, passing, opts),
-      else: Enum.each(servers, &answered(Server.request(&1, method, params, opts), &1, false))
+      else: Enum.each(servers, &answered(request(&1, method, params, opts), &1, false))
 
-    :no_response
+    given_up()
   end
 
   defp hedged([], [], _ask, _opts), do: :no_response
@@ -514,29 +514,47 @@ defmodule OneCore.Call do
       State.follow(state)
 
       try do
-        {server, Server.request(server, method, params, opts)}
+        {server, request(server, method, params, opts)}
       catch
         kind, reason -> {server, {:raised, kind, reason, __STACKTRACE__}}
       end
     end)
   end
 
-  # Whether a server ran it, or refused it: anything but couldn't, or would pass it on in turn.
-  defp answer?({:error, code, _why}), do: code != Server.forwarding_loop()
+  # Whether a server ran it, or refused it: anything but couldn't, would pass it on in turn, or is a write another
+  # server runs (`OneCore.Writes`).
+  defp answer?({:error, code, _why}), do: code not in [Server.forwarding_loop(), Writes.not_run()]
   defp answer?(response), do: match?({:ok, _}, response) or match?({:raised, _, _, _}, response)
 
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
   defp asks(ask, {_actor, subject} = principal, server, forwarded, within \\ :infinity, opts \\ []) do
     {method, params} = passed(ask, principal, forwarded)
-    again = again?(method, params, subject)
+    again = again?(method, params, subject, [server])
 
     response =
       if within != :infinity and again,
         do: request_within(server, method, params, within),
-        else: Server.request(server, method, params, opts)
+        else: request(server, method, params, opts)
 
-    answered(response, server, again)
+    with :no_response <- answered(response, server, again), do: given_up()
+  end
+
+  # Asks `server`, naming it first as the one a write this server holds is passed to, so it takes it over
+  # (`OneCore.Writes`).
+  defp request(server, method, params, opts \\ []) do
+    if method == "tools/call", do: Writes.passing(server)
+    Server.request(server, method, params, opts)
+  end
+
+  # Nothing that was asked ran it, so a write passed on comes back to this server, unless one took it over meanwhile,
+  # which then ends the call.
+  defp given_up do
+    case Writes.kept() do
+      :ok -> :no_response
+      {:done, result} -> throw({__MODULE__, {:forwarded, result}})
+      {:not_run, why} -> throw({__MODULE__, {:not_run, why}})
+    end
   end
 
   defp passed({method, params}, {actor, subject}, forwarded) do
@@ -544,6 +562,9 @@ defmodule OneCore.Call do
     meta = if client = State.client(), do: Map.put(meta, :client, client), else: meta
     # A call whose caller asked for a task that isn't made yet is made one where it runs, which then answers it.
     meta = if method == "tools/call", do: Map.merge(meta, Tasks.asking()), else: meta
+    # A write's idempotency key goes with it, so it's run once wherever it's asked (`OneCore.Writes`).
+    write = with {_id, row} <- State.current(), do: row[:write]
+    meta = if method == "tools/call" and write, do: Map.put(meta, :idempotencyKey, write.key), else: meta
     {method, Map.update(params, :_meta, meta, &Map.merge(&1, meta))}
   end
 
@@ -573,7 +594,7 @@ defmodule OneCore.Call do
         State.follow(state)
 
         try do
-          {:returned, Server.request(server, method, params)}
+          {:returned, request(server, method, params)}
         catch
           kind, reason -> {kind, reason, __STACKTRACE__}
         end
@@ -587,8 +608,12 @@ defmodule OneCore.Call do
   end
 
   # What a server went away from after it was asked is asked of the next one only where asking twice does no harm:
-  # a hook, which may be asked more than once for one moment, and a tool that only reads.
-  defp again?("hooks/call", _params, _who), do: true
-  defp again?("tools/call", %{name: name}, who), do: Calls.reads?(name, who)
-  defp again?(_method, _params, _who), do: false
+  # a hook, which may be asked more than once for one moment, a tool that only reads, and a write by its idempotency
+  # key, of servers that keep to it (`OneCore.Writes`).
+  defp again?("hooks/call", _params, _who, _servers), do: true
+
+  defp again?("tools/call", %{name: name} = params, who, servers),
+    do: Calls.reads?(name, who) or (is_map_key(params[:_meta], :idempotencyKey) and Enum.all?(servers, &Writes.keeps?/1))
+
+  defp again?(_method, _params, _who, _servers), do: false
 end

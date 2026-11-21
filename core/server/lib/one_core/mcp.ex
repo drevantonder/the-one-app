@@ -48,7 +48,8 @@ defmodule OneCore.Mcp do
     Skills,
     Tasks,
     Tools,
-    User
+    User,
+    Writes
   }
 
   alias OneCore.Call.State
@@ -376,7 +377,11 @@ defmodule OneCore.Mcp do
           rendered(name, call(name, inputs, principal, forwarded, caller, request), principal)
         end
 
-        asked(tool(name, subject), name, run, params, principal, caller)
+        # A write asked again isn't run again, and what it answered is kept for when it is (`OneCore.Writes`).
+        write = Writes.asked(meta(params), from, Process.get(:"$one_request", %{})[:client], subject)
+        outcome = asked(tool(name, subject), name, run, params, principal, caller, write)
+        Writes.answered(write, outcome)
+        outcome
 
       {:error, why} ->
         rendered(name, {:error, why}, principal)
@@ -686,31 +691,31 @@ defmodule OneCore.Mcp do
   # Runs the call of `tool`, named `name`, by `run`. A tool made a task (`task_support`) is one for a person's client
   # that takes tasks, and refused to one that doesn't if it needs one. A script's calls are never tasks, since it
   # waits on each.
-  defp asked(tool, name, run, params, {actor, _subject} = principal, caller) do
+  defp asked(tool, name, run, params, {actor, _subject} = principal, caller, write) do
     case Tasks.support(tool) do
       support when support != nil and is_binary(actor) and caller == nil and not is_map_key(params, :script) ->
         cond do
-          Tasks.capable?(params) and not User.link?(actor) -> Tasks.start(run, name, principal)
+          Tasks.capable?(params) and not User.link?(actor) -> Tasks.start(run, name, principal, write)
           support == :required -> Tasks.required()
-          true -> plainly(run)
+          true -> plainly(run, write)
         end
 
       _never ->
-        plainly(run)
+        plainly(run, write)
     end
   end
 
   # A call that isn't a task, run in the process answering it, which its client cancels by the request's id. One
   # cancelled is answered as MCP has a cancelled request: it's said, and its client has stopped listening. A script's
   # call is in the state its run began for it, which cancels it when the run stops (`OneCore.CodeMode`).
-  defp plainly(run) do
+  defp plainly(run, write) do
     case State.current() do
       {_id, %{state: :asked}} ->
         run.()
 
       _none ->
         asked = Process.get(:"$one_request", %{})
-        id = State.begin(Map.take(asked, [:request, :ask, :client]))
+        id = State.begin(asked |> Map.take([:request, :ask, :client]) |> Map.put(:write, write))
 
         try do
           run.()
@@ -730,6 +735,8 @@ defmodule OneCore.Mcp do
       # know the tool, as while its apps load, so it can't tell whether it only read.
       {:forwarded, result} -> {:ok, result}
       :forwarding_loop -> Server.forwarding_loop(name)
+      # A write asked again that isn't run here (`OneCore.Writes`).
+      {:not_run, why} -> {:error, Writes.not_run(), why}
     end
   end
 

@@ -60,11 +60,12 @@ defmodule OneCore.Tasks do
   def support(tool), do: tool[:task_support]
 
   @doc """
-  Runs `run`, a tool call that gives what MCP's `tools/call` answers, as a task if it's accepted: in a process of its
+  Runs `run`, a tool call that gives what MCP's `tools/call` answers, as the write `write` if it's one
+  (`OneCore.Writes`), as a task if it's accepted: in a process of its
   own, which answers the task here as soon as it is, and keeps its result once it ends. A call that's refused gives
   the protocol error it was refused with, and one passed on to another server that answered, what that one did.
   """
-  def start(run, tool, principal) do
+  def start(run, tool, principal, write) do
     requester = self()
     trace = OpenTelemetry.Ctx.get_current()
     client = Process.get(:"$one_request", %{})[:client]
@@ -72,7 +73,7 @@ defmodule OneCore.Tasks do
     {:ok, runner} =
       Task.Supervisor.start_child(OneCore.Asks, fn ->
         OpenTelemetry.Ctx.attach(trace)
-        id = State.begin(%{requester: requester, principal: principal, tool: tool, client: client})
+        id = State.begin(%{requester: requester, principal: principal, tool: tool, client: client, write: write})
 
         outcome =
           try do

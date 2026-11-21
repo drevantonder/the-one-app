@@ -125,6 +125,16 @@ fn sign(key_file: String, message: Binary) -> Result<String, String> {
     Ok(HEXLOWER.encode(&key.sign(message.as_slice()).to_bytes()))
 }
 
+/// `data` encrypted to the machine whose key is `to`, for what `about` says (`client::sealed`).
+#[rustler::nif]
+fn seal<'a>(env: Env<'a>, to: &str, about: &str, data: Binary) -> Result<Binary<'a>, String> {
+    let to: iroh::PublicKey = to.parse().map_err(|_| format!("{to} isn't a key"))?;
+    let sealed = client::sealed::seal(&to, about, data.as_slice()).map_err(|error| format!("{error:#}"))?;
+    let mut binary = NewBinary::new(env, sealed.len());
+    binary.as_mut_slice().copy_from_slice(&sealed);
+    Ok(binary.into())
+}
+
 /// What `one serve run` told the server in `line`, read as `client::serve::Told` and given as the JSON it's read as,
 /// or why it's not one.
 #[rustler::nif]

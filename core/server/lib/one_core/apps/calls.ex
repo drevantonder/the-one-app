@@ -8,7 +8,7 @@ defmodule OneCore.Apps.Calls do
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Tasks, User}
+  alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Tasks, User, Writes}
   alias OpenTelemetryAPIExperimental.Histogram
   require OpenTelemetry.Tracer, as: Tracer
   require Histogram
@@ -124,10 +124,14 @@ defmodule OneCore.Apps.Calls do
   """
   def tool(tool, about, principal, versions, fun) do
     about = Map.put(about, "task", tool[:task_support] != nil)
+    name = Enum.join(List.wrap(about["app"]) ++ [about["tool"]], "_")
 
     with :ok <- open_to(tool, about, principal),
          :ok <- refused(given(tool.takes, about["inputs"]), -32602),
-         {:ok, about} <- hooked(about, tool.takes, principal) do
+         {:ok, hooked} <- hooked(about, tool.takes, principal),
+         # A write asked before, here or of another server, isn't run again (`OneCore.Writes`).
+         :run <- Writes.claim(tool, name, about["inputs"], principal) do
+      about = hooked
       # It's accepted: a caller that asked for a task is answered it now, and the tool runs.
       State.accepted(State.id(), &Tasks.made/1)
 
@@ -144,6 +148,11 @@ defmodule OneCore.Apps.Calls do
       # A call refused is observed as refused, with why: what it was given is wrong, or who may or a hook said no.
       {:error, why, code} -> refuse(about, principal, code, why)
       {:error, why} -> refuse(about, principal, -32000, why)
+      # What it answered when it ran, as another server's answer is given, or why it doesn't run here.
+      {:done, result} -> {:forwarded, result}
+      {:not_run, why} ->
+        refuse(about, principal, Writes.not_run(), why)
+        {:not_run, why}
     end
   end
 
@@ -235,6 +244,7 @@ defmodule OneCore.Apps.Calls do
           {:ok, _result} -> {nil, false}
           {:refused, why} -> {{:refused, why}, false}
           {:refused, why, _details} -> {{:refused, why}, false}
+          {:not_run, why} -> {{:refused, why}, false}
           {:error, why} -> {why, false}
           {:forwarded, result} -> {passed(result), true}
           # It would have been passed on again, so the server that passed it here observes it.
