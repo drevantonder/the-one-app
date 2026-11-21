@@ -347,6 +347,11 @@ impl Screen {
         }
         let chain = self.under(at);
         self.pointer_event(&chain, "wheel", at, 0, Some((delta, phase, notches)));
+        // A mouse wheel's notch eases, as Windows' apps (WinUI) and Chrome smooth-scroll one; a Mac's moves at once, as
+        // AppKit's does where nothing smooths it, and so does any where motion is reduced.
+        if notches.is_some() && !crate::platform::mac_keys() && !self.reduced_motion {
+            return self.wheel_scroll(at, delta);
+        }
         self.pan(at, delta)
     }
 
@@ -385,25 +390,12 @@ impl Screen {
         if let Some(frame) = self.frame_scroll(at, delta, None) {
             return Some(frame);
         }
-        let chain = self.under(at);
-        let target = chain.iter().copied().find_map(|id| {
-            let (most_y, most_x, along) = self.placed(id)?.scroll?;
-            let now = self.scrolled.get(&id).copied().unwrap_or(point(0.0, 0.0));
-            // A scroll along takes the wheel's turn as along where it doesn't go down, as a row of pages does.
-            let (by, now, most) = if along { (if delta.x != 0.0 { delta.x } else { delta.y }, now.x, most_x) } else { (delta.y, now.y, most_y) };
-            ((by > 0.0 && now < most) || (by < 0.0 && now > 0.0)).then_some((id, by, most, along))
-        })?;
-        let (id, by, most, along) = target;
-        let now = self.scrolled.entry(id).or_insert(point(0.0, 0.0));
-        if along {
-            now.x = (now.x + by).clamp(0.0, most);
-        } else {
-            now.y = (now.y + by).clamp(0.0, most);
+        let (id, from, by, most, along) = self.scrolls(at, delta)?;
+        // Moved by hand as a notch eases it, it goes on from where that was going, at once.
+        if self.coasts.get(&id).is_some_and(|coast| coast.aim.is_some()) {
+            self.coasts.remove(&id);
         }
-        let scrolled = *now;
-        if self.tree.nodes.get(&id).is_some_and(|node| node.listens("scroll")) {
-            self.tell(id, "scroll", json!({"scrollTop": scrolled.y, "scrollLeft": scrolled.x}));
-        }
+        self.scroll_to(id, along, (from + by).clamp(0.0, most));
         Some(id)
     }
 

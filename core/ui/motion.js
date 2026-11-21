@@ -636,6 +636,14 @@ async function play(built, scene, name, motion, hz, folder) {
     if (!from || !first) failed.push(`${from ? "what it follows" : "what it opens from"} isn't there to compare`)
     else if (apart(first, from) > Math.max(1, next ? apart(next, first) : 0)) failed.push(`it's first drawn at ${rect(first)}, not where it opens from, ${rect(from)}`)
   }
+  // What each wheel's turn moves goes over several frames, as Windows' apps and Chrome smooth-scroll a notch: no frame
+  // moves it as far as one turn does by itself.
+  if (motion.eases) {
+    const turn = Math.max(0, ...(events ?? []).filter((event) => event.kind === "wheel").map((event) => Math.max(Math.abs(event.dx ?? 0), Math.abs(event.dy ?? 0))))
+    const jump = values.findIndex((value, n) => n > 0 && Math.abs(value - values[n - 1]) >= turn - 0.5)
+    if (!turn) failed.push("it has no wheel's turns to ease")
+    else if (jump >= 0) failed.push(`it moved ${Math.abs(values[jump] - values[jump - 1]).toFixed(0)} pt at frame ${jump + 1} (${frames[jump].at} ms), as far as a turn of the wheel moves it, all at once`)
+  }
   // What `once` names is never in sight twice in a frame, read or not, as a large title and its bar's are cross-faded.
   const twice = motion.once ? frames.findIndex((frame) => frame.count > 1) : -1
   if (twice >= 0) failed.push(`${frames[twice].count} of ${JSON.stringify(motion.once)} drawn at once at frame ${twice + 1} (${frames[twice].at} ms)`)
