@@ -87,8 +87,11 @@ export async function tellDrawn() {
 /** Whether the window names the app above it, which a first screen's title gives way to (the Screen's). */
 export const [titled, setTitled] = createSignal(false)
 const [connected, setConnected] = createSignal<ReturnType<typeof Page.connection>>("online")
-const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
-const [size, setSize] = createSignal({ width: 0, height: 0 })
+// A host tells its whole context as any of it changes (the device's pressure, say): insets and a size the same as
+// before change nothing, where every node laid out by hand was styled again (8 ms of an App Library's JS on a Ryzen).
+const same = (before: Record<string, number>, after: Record<string, number>) => Object.keys(after).every((key) => before[key] === after[key])
+const [insets, setInsets] = createSignal<{ top: number; right: number; bottom: number; left: number }>({ top: 0, right: 0, bottom: 0, left: 0 }, { equals: same })
+const [size, setSize] = createSignal<{ width: number; height: number }>({ width: 0, height: 0 }, { equals: same })
 const [still, setStill] = createSignal(false)
 const [shown, setShown] = createSignal(true)
 interface Context {
