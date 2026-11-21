@@ -263,7 +263,7 @@ function UsersAndGroups(props: { all: All }) {
   const group = () => props.all.groups.find(({ group }) => group === opened())
   return (
     <>
-      <Split open={!!group()} onClose={() => setOpened()} detail={<Show when={group()}><GroupScreen group={group()!} all={props.all} /></Show>}>
+      <Split open={!!group()} onClose={() => setOpened()} pick="Pick a group to see its members." detail={<Show when={group()}><GroupScreen group={group()!} all={props.all} /></Show>}>
         <Screen heading="People & Groups" back action={props.all.invites ? <Button onPress={() => setInviting(true)}>Invite</Button> : undefined}>
           <Show when={props.all.joined.length}>
             <Section heading="Users">

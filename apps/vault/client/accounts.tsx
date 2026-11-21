@@ -875,6 +875,7 @@ function Vault() {
       <Split
         open={!!item() || secure()}
         onClose={() => (setOpen(), setSecure(false))}
+        pick="Pick an item to see it."
         detail={<Show when={item()} fallback={<Show when={secure()}><SecurityScreen /></Show>}>{(item) => <Detail item={item()} />}</Show>}
       >
         <Screen heading="Vault" back>

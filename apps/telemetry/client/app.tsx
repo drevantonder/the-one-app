@@ -345,8 +345,9 @@ function Telemetry(props: { all: Overview }) {
     <Split
       open={!!opened()}
       onClose={() => setOpen()}
+      pick={failing().length ? "Pick a failure to see what happened." : "Pick a tool to see how long it takes."}
       detail={
-        <Show when={opened()} fallback={<Show when={failing().length || slowest().length}><Empty>{failing().length ? "Pick a failure to see what happened." : "Pick a tool to see how long it takes."}</Empty></Show>}>
+        <Show when={opened()}>
           {(shown) => (
             <Show when={shown().alert} fallback={
               <Show when={shown().failure} fallback={<Slow slow={shown().slow!} />}>

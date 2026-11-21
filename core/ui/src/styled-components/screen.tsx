@@ -9,6 +9,7 @@ import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { ActionBar, type Action } from "./actions.tsx"
 import { ListKeys, ListStyle } from "./list.tsx"
+import { Empty } from "./states.tsx"
 import { Choose, Collect } from "./collect.ts"
 import { negative, styles, type Styles } from "../styles.ts"
 import { pixels, tokens } from "../tokens.ts"
@@ -342,7 +343,9 @@ const open: (() => void)[] = []
 /// `open`. Each side scrolls by itself, and the split is as tall as what it's in. While it's open the device's own
 /// back, Escape, and the detail's Back button close it, or beside its list, where a detail has none, the list's: it
 /// calls `onClose`, and the app sets `open` false. Its list side's lists are one to the keyboard (`ListKeys`).
-export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; children?: JSX.Element }) {
+/// Beside its list with nothing open, its detail side says `pick` ("Pick a repo to see its code."), as Mail says "No
+/// Message Selected", where the app has a list to pick from: it's left out where there's none.
+export function Split(props: { open?: boolean; onClose?: () => void; pick?: string; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
   const history = useContext(Went)
   const edge = useContext(Edge)
@@ -395,7 +398,11 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
           <Leave value={close}>
             <History value={beside() ? history() : null}>
             <InDetail value={beside}>
-              <Middle value={beside}>{props.detail}</Middle>
+              <Middle value={beside}>
+                <Show when={beside() && !props.open && props.pick} fallback={props.detail}>
+                  <Empty>{props.pick}</Empty>
+                </Show>
+              </Middle>
             </InDetail>
             </History>
           </Leave>

@@ -421,10 +421,11 @@ function Settings() {
     <Split
       open={!!open()}
       onClose={() => setOpen()}
+      pick="Choose a section."
       detail={
         <ListStyle value="insetGrouped">
           <History value={beside() ? history() : null}>
-            <Show when={shown()} keyed fallback={<Empty>Choose a section.</Empty>}>{(id) => <Detail id={id} />}</Show>
+            <Show when={shown()} keyed>{(id) => <Detail id={id} />}</Show>
           </History>
         </ListStyle>
       }

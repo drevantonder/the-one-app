@@ -376,7 +376,7 @@ function Things(props: { all: All; groups?: Groups }) {
   )
   const said = () => props.all.update && softwareUpdate(props.all.update)
   return (
-    <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} groups={props.groups} /></Show>}>
+    <Split open={!!opened()} onClose={() => setOpen()} pick="Pick a device to see it." detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} groups={props.groups} /></Show>}>
       <Screen heading="Devices" back>
         <Section heading="Your Devices">
           <Show when={props.all.devices.length} fallback={<Empty>No devices yet.</Empty>}>

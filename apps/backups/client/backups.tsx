@@ -313,7 +313,7 @@ function Backups(props: { all: All }) {
   const schedule = (every: string) => every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
   return (
     <>
-      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
+      <Split open={!!opened()} onClose={() => setOpen()} pick="Pick a destination to see its backups." detail={<Show when={opened()}><Opened destination={opened()!} /></Show>}>
         <Screen heading="Backups" back action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onPress={now}>Back Up Now</Button></Show>}>
           <Show when={destinations().length} fallback={<Empty action={<Button onPress={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List each={destinations()} keyed={(destination) => destination.name}>

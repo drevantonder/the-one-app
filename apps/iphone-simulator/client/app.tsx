@@ -107,7 +107,7 @@ function App() {
   return (
     <Errored fallback={(error, reset) => <Problem heading="Couldn't list your simulators" text={error() as Error} action={<Button variant="outline" onPress={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
-        <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={simulators().length}><Empty>Pick a simulator to use it.</Empty></Show>}><Detail simulator={opened()!} /></Show>}>
+        <Split open={!!opened()} onClose={() => setOpen()} pick="Pick a simulator to use it." detail={<Show when={opened()}><Detail simulator={opened()!} /></Show>}>
           <Screen heading="iPhone Simulator">
             <Show when={simulators().length} fallback={<Empty>No simulators. Your agents create them as they need them.</Empty>}>
               <List each={simulators()} keyed={(e) => e.name}>

@@ -138,7 +138,7 @@ function Deleted(props: { items: Item[] }) {
   const deleted = () => props.items.filter((item) => item.state === "deleted")
   const opened = () => props.items.find((item) => item.item === open())
   return (
-    <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}>{(item) => <Detail item={item()} />}</Show>}>
+    <Split open={!!opened()} onClose={() => setOpen()} pick="Pick an item to see it." detail={<Show when={opened()}>{(item) => <Detail item={item()} />}</Show>}>
       <Screen heading="Recently Deleted" back>
         <Show when={props.items.length} fallback={<Empty>Nothing was deleted in the last 30 days.</Empty>}>
           <Text style={look.note}>Deleted for good after 30 days.</Text>

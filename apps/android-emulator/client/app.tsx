@@ -104,7 +104,7 @@ function App() {
   return (
     <Errored fallback={(error, reset) => <Problem heading="Couldn't list your emulators" text={error() as Error} action={<Button variant="outline" onPress={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
-        <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={emulators().length}><Empty>Pick an emulator to use it.</Empty></Show>}><Detail emulator={opened()!} /></Show>}>
+        <Split open={!!opened()} onClose={() => setOpen()} pick="Pick an emulator to use it." detail={<Show when={opened()}><Detail emulator={opened()!} /></Show>}>
           <Screen heading="Android Emulator">
             <Show when={emulators().length} fallback={<Empty>No emulators. Your agents create them as they need them.</Empty>}>
               <List each={emulators()} keyed={(e) => e.name}>

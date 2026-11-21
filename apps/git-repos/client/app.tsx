@@ -650,8 +650,9 @@ function App() {
       <Split
         open={!!open()}
         onClose={() => setOpen()}
+        pick="Pick a repo to see its code."
         detail={
-          <Show when={open()} fallback={<Show when={repos().length}><Empty>Pick a repo to see its code.</Empty></Show>}>
+          <Show when={open()}>
             {(repo) => (
               <Errored fallback={(error) => <Problem heading="Can't show this repo" text={error() as Error} />}>
                 <Loading fallback={<Skeleton rows={6} />}>

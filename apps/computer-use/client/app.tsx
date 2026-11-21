@@ -101,7 +101,7 @@ function App() {
         </Screen>
       }
     >
-      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Empty>Pick a screen to watch it.</Empty>}><Detail screen={opened()!} /></Show>}>
+      <Split open={!!opened()} onClose={() => setOpen()} pick="Pick a screen to watch it." detail={<Show when={opened()}><Detail screen={opened()!} /></Show>}>
         <Screen heading="Computer Use">
           <ThisPhone />
           <List each={screens()} keyed={address}>

@@ -80,6 +80,14 @@ export default {
     motions: { "Scrolled under its bar": { from: { x: 195, y: 600 }, gesture: { swipe: [0, -200], speed: 400 }, follow: { role: "heading", name: "Notes" }, once: { role: "heading", name: "Notes" } } },
   },
   "Screens/Settings": { alone: true, layout: "fullscreen", size: [1100, 720], render: () => <View style={look.window}>{settings()}</View> },
+  // A list and nothing open: its detail side says what to do, as Mail's says "No Message Selected", never blank.
+  "Screens/A split with nothing open": {
+    alone: true,
+    layout: "fullscreen",
+    size: [1100, 720],
+    render: () => <View style={look.window}><Split pick="Pick a device to see it." detail={<Screen heading="Alex's Laptop" back><Text>Its page.</Text></Screen>}><Devices /></Split></View>,
+    checks: { "Beside its list it says what to pick": [{ expect: { text: "Pick a device to see it." } }, { expect: { gone: "Its page." } }] },
+  },
   "Screens/A large title": {
     alone: true,
     layout: "fullscreen",
