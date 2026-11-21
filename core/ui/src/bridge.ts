@@ -40,15 +40,16 @@ const keys = new Set<(event: Page.Keyed) => void>()
 
 /// A page's errors are logged to its client (MCP's `notifications/message`), which tells
 /// Telemetry: what threw in a listener or a timer, a promise nothing handled, and what an `<Errored>` boundary caught
-/// and shows, with where it was thrown from its stack.
-const logged = (message: unknown, file?: string, line?: number) =>
-  host?.post({ jsonrpc: "2.0", method: "notifications/message", params: { level: "error", data: { message: String(message), file, line } } })
-addEventListener("error", ({ message, filename, lineno }) => logged(message, filename, lineno))
-addEventListener("unhandledrejection", ({ reason }) => logged(reason?.message ?? reason))
+/// and shows, with where it was thrown from its stack, and the stack, which a native client puts in the source by its
+/// bundles' sourcemaps.
+const logged = (message: unknown, file?: string, line?: number, stack?: string) =>
+  host?.post({ jsonrpc: "2.0", method: "notifications/message", params: { level: "error", data: { message: String(message), file, line, stack } } })
+addEventListener("error", ({ message, filename, lineno, error }) => logged(message, filename, lineno, error?.stack))
+addEventListener("unhandledrejection", ({ reason }) => logged(reason?.message ?? reason, undefined, undefined, reason?.stack))
 configureClientErrors({
   onError(error) {
     const [, file, line] = /([a-z]+:\/\/[^\s()]+?):(\d+):\d+/.exec((error as Error)?.stack ?? "") ?? []
-    logged((error as Error)?.message ?? error, file, line ? Number(line) : undefined)
+    logged((error as Error)?.message ?? error, file, line ? Number(line) : undefined, (error as Error)?.stack)
   },
 })
 
