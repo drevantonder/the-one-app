@@ -1,4 +1,6 @@
 use super::Renderer;
+use super::super::scene::{Backdrop, PrimitiveBatch};
+use crate::geometry::{Bounds, ScaledPixels, point, size};
 use super::params::BlurParams;
 
 /// How many times a backdrop's frame is halved at most: a sixteenth of it, for the widest blur.
@@ -21,9 +23,50 @@ pub(super) struct Blur {
     /// What of the frame it blurs, in its device pixels, left, top, right and bottom: the backdrop and twice the
     /// blur's reach round it (`Renderer::plan_blur`).
     pub(super) region: [u32; 4],
+    /// Its sigma, in device pixels, by which another's blur is drawn through the same textures (`together`).
+    pub(super) sigma: f32,
+    /// The earliest it can be blurred, as a place among the frame's batches, a batch's and a backdrop's of it: past the
+    /// last thing drawn before its backdrop that reaches its region (`ready`).
+    pub(super) ready: (usize, usize),
     pub(super) shrink: (u64, u64),
     pub(super) across: (u64, u64),
     pub(super) down: (u64, u64),
+}
+
+impl Blur {
+    /// Whether `next` can be blurred in the same passes as `blurs`: at the same level, through the same textures, where
+    /// what it blurs is none of theirs or as much blurred.
+    pub(super) fn together(blurs: &[&Blur], next: &Blur) -> bool {
+        let meets = |a: [u32; 4], b: [u32; 4]| a[0] < b[2] && b[0] < a[2] && a[1] < b[3] && b[1] < a[3];
+        blurs.iter().all(|blur| blur.level == next.level && (blur.sigma == next.sigma || !meets(next.region, blur.region)))
+    }
+
+    /// The earliest backdrop `one` of batch `at`'s blur can be taken (`ready`): just past the last thing drawn before
+    /// it that reaches its region, of a target whose top left is `origin` in the scene, as what's drawn after that is
+    /// none of what it blurs.
+    pub(super) fn ready(&mut self, batches: &[PrimitiveBatch<'_>], at: usize, one: usize, origin: [f32; 2]) -> (usize, usize) {
+        let px = ScaledPixels;
+        let [left, top, right, bottom] = self.region.map(|edge| edge as f32);
+        let area = Bounds { origin: point(px(left + origin[0]), px(top + origin[1])), size: size(px(right - left), px(bottom - top)) };
+        let last = |backdrops: &[Backdrop]| backdrops.iter().rposition(|backdrop| backdrop.bounds.intersect(&backdrop.content_mask.bounds).intersects(&area));
+        if let PrimitiveBatch::Backdrops(backdrops) = &batches[at]
+            && let Some(before) = last(&backdrops[..one])
+        {
+            return (at, before + 1);
+        }
+        for earlier in (0..at).rev() {
+            match &batches[earlier] {
+                PrimitiveBatch::Backdrops(backdrops) => {
+                    if let Some(before) = last(backdrops) {
+                        return (earlier, before + 1);
+                    }
+                }
+                batch if batch.reaches(&area) => return (earlier, 1),
+                _ => {}
+            }
+        }
+        (0, 0)
+    }
 }
 
 /// `texture` from its texel at `left`, `top`, for a copy.
@@ -54,12 +97,13 @@ impl Renderer {
         };
         let region = [out(area[0], size.0, false), out(area[1], size.1, false), out(area[2], size.0, true), out(area[3], size.1, true)];
         let (width, height) = halved(size, level);
-        let sigma = sigma / (1 << level) as f32;
+        let shrunk = sigma / (1 << level) as f32;
         let shrink = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / size.0 as f32, 1.0 / size.1 as f32], sigma: 0.0, shrink: step as f32 }));
-        let across = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / width as f32, 0.0], sigma, shrink: 0.0 }));
-        let down = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 1.0 / height as f32], sigma, shrink: 0.0 }));
-        Blur { level, region, shrink, across, down, behind: None }
+        let across = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / width as f32, 0.0], sigma: shrunk, shrink: 0.0 }));
+        let down = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 1.0 / height as f32], sigma: shrunk, shrink: 0.0 }));
+        Blur { level, region, sigma, ready: (0, 0), shrink, across, down, behind: None }
     }
+
 
     /// The blur kept from the frames before of what's behind a backdrop, where what's drawn before it is the same, as
     /// this frame's.
@@ -69,14 +113,18 @@ impl Renderer {
         Some(view.clone())
     }
 
-    /// Blurs what's drawn into `frame` so far, as `blur` says, into the backdrop's textures: shrunk, then blurred
-    /// across into one at its level's size and down into another, each a separable Gaussian's pass. The view of the
-    /// last. Only the textures this blur goes through are made, each the first time one needs it, and the frame is
+    /// Blurs what's drawn into `frame` so far, as each of `blurs` says (all at one level, `together`), into the
+    /// backdrop's textures: shrunk, then blurred across into one at its level's size and down into another, each a
+    /// separable Gaussian's pass, each blur's region drawn in the same three. Each blur's view, kept in a texture of
+    /// its own. Only the textures the blurs go through are made, each the first time one needs it, and the frame is
     /// read as it is where its surface lets a shader read it.
-    pub(super) fn blur_behind(&mut self, encoder: &mut wgpu::CommandEncoder, frame: &wgpu::Texture, view: &wgpu::TextureView, globals: &wgpu::BindGroup, buffer: &wgpu::Buffer, blur: &Blur) -> wgpu::TextureView {
+    pub(super) fn blur_behind(&mut self, encoder: &mut wgpu::CommandEncoder, frame: &wgpu::Texture, view: &wgpu::TextureView, globals: &wgpu::BindGroup, buffer: &wgpu::Buffer, blurs: &[&Blur]) -> Vec<wgpu::TextureView> {
         let size = (frame.width(), frame.height());
+        let level = blurs[0].level;
         let mut work = self.work.get();
-        work.blurred += f64::from(blur.region[2] - blur.region[0]) * f64::from(blur.region[3] - blur.region[1]);
+        for blur in blurs {
+            work.blurred += f64::from(blur.region[2] - blur.region[0]) * f64::from(blur.region[3] - blur.region[1]);
+        }
         self.work.set(work);
         if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size) {
             self.backdrop = Some(BackdropTextures { size, source: None, levels: Default::default() });
@@ -96,9 +144,9 @@ impl Renderer {
             (texture, view)
         };
         let backdrop = self.backdrop.as_mut().expect("made above");
-        for (at, which) in [(blur.level - 1, 0), (blur.level - 1, 1), (blur.level - 1, 2)] {
-            if backdrop.levels[at][which].is_none() {
-                backdrop.levels[at][which] = Some(make(halved(size, at + 1), wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC));
+        for which in 0..3 {
+            if backdrop.levels[level - 1][which].is_none() {
+                backdrop.levels[level - 1][which] = Some(make(halved(size, level), wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC));
             }
         }
         // A Metal drawable or a Direct3D 12 swap chain's buffer isn't one wgpu lets a shader read: what's drawn so
@@ -106,68 +154,78 @@ impl Renderer {
         let readable = frame.usage().contains(wgpu::TextureUsages::TEXTURE_BINDING);
         if !readable {
             let source = backdrop.source.get_or_insert_with(|| make(size, wgpu::TextureUsages::COPY_DST));
-            let (width, height) = (blur.region[2] - blur.region[0], blur.region[3] - blur.region[1]);
-            if width > 0 && height > 0 {
-                let (left, top) = (blur.region[0], blur.region[1]);
-                encoder.copy_texture_to_texture(texel(frame, left, top), texel(&source.0, left, top), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+            for blur in blurs {
+                let (width, height) = (blur.region[2] - blur.region[0], blur.region[3] - blur.region[1]);
+                if width > 0 && height > 0 {
+                    let (left, top) = (blur.region[0], blur.region[1]);
+                    encoder.copy_texture_to_texture(texel(frame, left, top), texel(&source.0, left, top), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+                }
             }
         }
         let backdrop = self.backdrop.as_ref().expect("made above");
-        let level = |at: usize, which: usize| &backdrop.levels[at][which].as_ref().expect("made above").1;
+        let texture_of = |which: usize| &backdrop.levels[level - 1][which].as_ref().expect("made above").1;
         let from = if readable { view } else { &backdrop.source.as_ref().expect("copied above").1 };
-        let (shrunk, across, down) = (level(blur.level - 1, 0), level(blur.level - 1, 1), level(blur.level - 1, 2));
-        // Shrunk to its level in one pass, not halved a pass at a time: each pass costs a command list or two
-        // (`draw_batches`).
-        let passes = [(from, shrunk, blur.shrink, blur.level), (shrunk, across, blur.across, blur.level), (across, down, blur.down, blur.level)];
-        // Each pass draws only the region, at its level, of the texture it draws into.
-        let region = |level: usize, (width, height): (u32, u32)| {
+        let (shrunk, across, down) = (texture_of(0), texture_of(1), texture_of(2));
+        // Each pass draws only each blur's region, at its level, of the texture it draws into.
+        let region = |blur: &Blur, level: usize, (width, height): (u32, u32)| {
             let [left, top, right, bottom] = blur.region.map(|edge| edge >> level);
             let (left, top) = (left.min(width), top.min(height));
             (left, top, right.min(width).saturating_sub(left), bottom.min(height).saturating_sub(top))
         };
-        for (from, into, params, at) in passes {
-            let params = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                label: None,
-                layout: &self.pipelines.layouts.blur_params,
-                entries: &[wgpu::BindGroupEntry {
-                    binding: 0,
-                    resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset: params.0, size: wgpu::BufferSize::new(params.1) }),
-                }],
-            });
+        // Shrunk to its level in one pass, not halved a pass at a time: each pass costs a command list or two
+        // (`draw_batches`).
+        let passes: [(&wgpu::TextureView, &wgpu::TextureView, fn(&Blur) -> (u64, u64)); 3] = [(from, shrunk, |blur| blur.shrink), (shrunk, across, |blur| blur.across), (across, down, |blur| blur.down)];
+        for (from, into, params) in passes {
             let texture = self.texture(from);
             let mut pass = self.pass(encoder, into, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), self.stamps.as_ref().and_then(|stamps| stamps.pass(true)));
-            let (left, top, width, height) = region(at, halved(size, at));
-            if width == 0 || height == 0 {
-                continue;
-            }
-            pass.set_scissor_rect(left, top, width, height);
             pass.set_pipeline(&self.pipelines.backdrops().1);
             pass.set_bind_group(0, globals, &[]);
-            pass.set_bind_group(1, &params, &[]);
             pass.set_bind_group(2, &texture, &[]);
-            pass.draw(0..4, 0..1);
-            self.drew();
+            for blur in blurs {
+                let (left, top, width, height) = region(blur, level, halved(size, level));
+                if width == 0 || height == 0 {
+                    continue;
+                }
+                let params = params(blur);
+                let params = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                    label: None,
+                    layout: &self.pipelines.layouts.blur_params,
+                    entries: &[wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset: params.0, size: wgpu::BufferSize::new(params.1) }),
+                    }],
+                });
+                pass.set_scissor_rect(left, top, width, height);
+                pass.set_bind_group(1, &params, &[]);
+                pass.draw(0..4, 0..1);
+                self.drew();
+            }
         }
-        let Some(behind) = blur.behind else { return down.clone() };
-        // Kept in a texture of its own, as the next backdrop blurs into the same ones.
-        let down = &backdrop.levels[blur.level - 1][2].as_ref().expect("made above").0;
+        // Each kept in a texture of its own, as the next backdrops blur into the same ones.
+        let down = &backdrop.levels[level - 1][2].as_ref().expect("made above").0;
         let (width, height) = (down.width(), down.height());
-        let kept = self.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: self.format,
-            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
-            view_formats: &[],
-        });
-        let (left, top, width, height) = region(blur.level, (width, height));
-        if width > 0 && height > 0 {
-            encoder.copy_texture_to_texture(texel(down, left, top), texel(&kept, left, top), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+        let mut views = Vec::with_capacity(blurs.len());
+        for blur in blurs {
+            let kept = self.device.create_texture(&wgpu::TextureDescriptor {
+                label: None,
+                size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+                mip_level_count: 1,
+                sample_count: 1,
+                dimension: wgpu::TextureDimension::D2,
+                format: self.format,
+                usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+                view_formats: &[],
+            });
+            let (left, top, width, height) = region(blur, level, (width, height));
+            if width > 0 && height > 0 {
+                encoder.copy_texture_to_texture(texel(down, left, top), texel(&kept, left, top), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+            }
+            let view = kept.create_view(&wgpu::TextureViewDescriptor::default());
+            if let Some(behind) = blur.behind {
+                self.blurred.insert(behind, (view.clone(), true));
+            }
+            views.push(view);
         }
-        let view = kept.create_view(&wgpu::TextureViewDescriptor::default());
-        self.blurred.insert(behind, (view.clone(), true));
-        view
+        views
     }
 }

@@ -98,6 +98,7 @@ impl Renderer {
                         (drawn.over, &drawn.batches[..at], earlier, backdrop.blur.0.to_bits(), region.map(f32::to_bits)).hash(&mut hasher);
                         let mut blur = self.plan_blur(size, backdrop.blur.0, region);
                         blur.behind = Some(hasher.finish());
+                        blur.ready = blur.ready(&batches, at, one, origin);
                         blur
                     })
                     .collect(),
@@ -346,6 +347,22 @@ impl Renderer {
         let blurrable = texture.usage().intersects(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
         let mut load = if range.start == 0 { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load };
         let mut run: Vec<(usize, Option<(wgpu::TextureView, usize)>)> = Vec::new();
+        // Each backdrop's blur kept from the frames before, else taken as the first that needs it is drawn, in one go
+        // with each after it that's ready (`Blur::ready`, `Blur::together`): one break in the frame and one blur's three
+        // passes for all of them, where each broke it and took three of its own (a launcher's backdrops over its turning
+        // pages made 13 passes a frame).
+        let mut blurred: std::collections::HashMap<(usize, usize), wgpu::TextureView> = Default::default();
+        let mut fresh: Vec<(usize, usize)> = Vec::new();
+        if blurrable {
+            for at in range.clone() {
+                for (one, blur) in blurs[at].iter().enumerate() {
+                    match self.kept_blur(blur) {
+                        Some(kept) => drop(blurred.insert((at, one), kept)),
+                        None => fresh.push((at, one)),
+                    }
+                }
+            }
+        }
         for at in range {
             let PrimitiveBatch::Backdrops(backdrops) = &batches[at] else {
                 run.push((at, None));
@@ -355,17 +372,24 @@ impl Renderer {
             if !blurrable {
                 continue;
             }
-            for (one, blur) in (0..backdrops.len()).zip(&blurs[at]) {
-                let blurred = match self.kept_blur(blur) {
-                    Some(blurred) => blurred,
-                    None => {
-                        self.draw_run(encoder, view, load, globals, batches, instances, &run);
-                        run.clear();
-                        load = wgpu::LoadOp::Load;
-                        self.blur_behind(encoder, texture, view, globals, buffer, blur)
+            for one in 0..backdrops.len().min(blurs[at].len()) {
+                if !blurred.contains_key(&(at, one)) {
+                    let mut group: Vec<(usize, usize)> = Vec::new();
+                    for &(later, of) in fresh.iter().filter(|place| **place >= (at, one)) {
+                        let blur = &blurs[later][of];
+                        let together: Vec<&Blur> = group.iter().map(|(at, one)| &blurs[*at][*one]).collect();
+                        if (group.is_empty() || blur.ready <= (at, one)) && !blurred.contains_key(&(later, of)) && Blur::together(&together, blur) {
+                            group.push((later, of));
+                        }
                     }
-                };
-                run.push((at, Some((blurred, one))));
+                    self.draw_run(encoder, view, load, globals, batches, instances, &run);
+                    run.clear();
+                    load = wgpu::LoadOp::Load;
+                    let taking: Vec<&Blur> = group.iter().map(|(at, one)| &blurs[*at][*one]).collect();
+                    let views = self.blur_behind(encoder, texture, view, globals, buffer, &taking);
+                    blurred.extend(group.into_iter().zip(views));
+                }
+                run.push((at, Some((blurred[&(at, one)].clone(), one))));
             }
         }
         self.draw_run(encoder, view, load, globals, batches, instances, &run);
