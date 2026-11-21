@@ -780,18 +780,19 @@ const fixable = (item: Item) => item.status?.state === "needs_action" && !!item.
 /// Where a client reads an icon the server gave as `ui://icons/<sha256>/…`: beside this page's own files.
 const src = (icon: string) => icon.replace(/^ui:\/\/([^/]+)\/([^/]+)\//, "../../$1@$2/")
 
-/// A password's or key's grey line: what it is, and who uses it, each app by its icon and name, or agents.
+/// A password's or key's grey line: what it is, and who uses it, each app by its icon and name, or agents. The row draws
+/// it inside a `Text`, so each app's `View` is a run of it and its `gap` does nothing: the spaces are in the words.
 function UsedBy(props: { item: Item }) {
   const apps = () => props.item.access.filter((who) => who !== "agents").map((name) => contents().apps.find((app) => app.name === name) ?? { name, title: name, icon: null })
   const what = () => props.item.fields.find((field) => field.secret)?.name
   return (
     <View style={look.inline}>
-      <Text>{[what() && label(what()!), apps().length ? "used by" : props.item.access.includes("agents") ? "agents may use it" : "used by nothing yet"].filter(Boolean).join(" · ")}</Text>
+      <Text>{[what() && label(what()!), apps().length ? "used by " : props.item.access.includes("agents") ? "agents may use it" : "used by nothing yet"].filter(Boolean).join(" · ")}</Text>
       <For each={apps()}>
         {(app, at) => (
           <View style={look.inline}>
             <Show when={app.icon}>{(icon) => <Image src={src(icon())} alt="" style={look.small} />}</Show>
-            <Text>{`${app.title}${at() < apps().length - 1 ? "," : ""}`}</Text>
+            <Text>{`${app.title}${at() < apps().length - 1 ? ", " : ""}`}</Text>
           </View>
         )}
       </For>

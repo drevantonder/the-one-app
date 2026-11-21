@@ -251,6 +251,54 @@
       }
     }
   },
+  "Apps that use a password": {
+    "like": "Empty",
+    "answers": {
+      "vault_list": {
+        "items": [
+          {
+            "name": "GitHub",
+            "artifact": "vault/github",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "sam-example"
+              },
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.github.com",
+              "github.com"
+            ],
+            "access": [
+              "agents",
+              "backups",
+              "git-repos"
+            ]
+          }
+        ],
+        "requests": [],
+        "apps": [
+          {
+            "name": "backups",
+            "title": "Backups"
+          },
+          {
+            "name": "git-repos",
+            "title": "Git Repos"
+          }
+        ],
+        "types": []
+      }
+    }
+  },
   "Add item": {
     "like": "Empty",
     "taps": [

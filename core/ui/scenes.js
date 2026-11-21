@@ -174,6 +174,14 @@ function internalWords(tree) {
   return tree.split("\n").filter((line) => INTERNAL.test(line) || CODE.test(line) || line.match(/[\w-]+_\w+/g)?.some((word) => tools.has(word))).map((line) => line.trim())
 }
 
+/// What a screen's words may not get wrong in English, whatever the data: a word run into the next, a lowercase one into
+/// a capitalised one ("used byBackups", as a join drops the space between a text and an app's name). Each line of a
+/// scene's semantic tree that has one.
+const RUN_TOGETHER = /\b[a-z]{2,}[A-Z][a-z]{2,}\b/
+function misreadWords(tree) {
+  return tree.split("\n").filter((line) => RUN_TOGETHER.test(line)).map((line) => line.trim())
+}
+
 /// Presses what's named or says `name` on our renderer's canvas, as a person would: found in its ARIA tree
 /// (clients/web/renderer/semantics.js), scrolled into sight where it isn't as a screen reader has the browser do it,
 /// which the renderer reveals as the native harness's tap does (`Screen::reveal`: whole, with 16 points below it),
@@ -585,6 +593,10 @@ for (const target of targets) {
     // A person reads a scene's words: nothing of the build's or the platform's is among them.
     for (const line of drawn.tree === undefined ? [] : internalWords(drawn.tree)) {
       said.push(`  the screen says a word that isn't a person's: ${line}`)
+      process.exitCode = 1
+    }
+    for (const line of drawn.tree === undefined ? [] : misreadWords(drawn.tree)) {
+      said.push(`  the screen's words misread: ${line}`)
       process.exitCode = 1
     }
     // A page that threw while drawing shows `render`'s Problem, whose scene says nothing of the page.
