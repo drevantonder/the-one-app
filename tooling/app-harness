@@ -276,6 +276,7 @@ blanked() {
   grep -o "telemetry's window is blank.*" "$log" | tail -1 | sed 's/^/        /'
   within 120 'ONE_SUBJECT=network "$one" telemetry errors --hours 1 | jq -e "any(.errors[]; .message | test(\"after it was on screen\"))" >/dev/null' ||
     { echo "        Telemetry didn't hear of it within 2 minutes of the server answering" && return 1; }
+  ONE_SUBJECT=network "$one" telemetry errors --hours 1 | jq -r '.errors[] | select(.message | test("after it was on screen")) | "        Telemetry: \(.message)"' | head -1
 }
 
 # The app started as an update starts it, with Telemetry and Settings to open again beside the launcher, each made as
