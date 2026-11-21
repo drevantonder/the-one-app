@@ -9,7 +9,7 @@ defmodule Database do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.34.241"}
+  def requires, do: %{"core" => ">= 0.34.250"}
 
   require Logger
   alias Database.Lease
@@ -60,9 +60,13 @@ defmodule Database do
   @witness 2_000
 
   # How long, in milliseconds, the relay at the network's address gives the holder to answer its ping
-  # (`OneCore.Servers.answers?/2`), which is asked as the holder is and waited for after it. A holder that's up answers
-  # in well under a second, so one that hasn't is no more reached through the relay than by this server, and the
-  # relay's own 5 s only had the call outwait the holder's `@reach`.
+  # (`OneCore.Servers.answers?/2`), which is asked as the holder is. A holder that's up answers it in well under a
+  # second. It's also how long a read or a hook is asked of the holder before the relay's saying it doesn't answer
+  # either ends the wait (`Call.forward_to/4`), where it waited out `@reach`: a holder frozen with its relay connection
+  # open is taken over from in about this, not 4 s. One that is only slow, and didn't answer the relay in this time, is
+  # taken over from too: that costs it its lease, not data, since a server writes only by the conditional write of the
+  # log's next entry, so of two that think they hold it one writes, and the one that took it writes nothing until the
+  # one before has stopped answering from its copy (`Database.Lease`).
   @ping 1_500
 
   # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
@@ -76,8 +80,10 @@ defmodule Database do
   # the others reach it, and one that can't either takes the lease, two servers having failed to reach it, and runs it.
   # Only where none of them answered, or there's none, does this server take the lease itself, as the log lets it
   # (`Database.Lease`), unless the relay at the network's address still reaches a holder that took it from this one.
-  # The relay is asked as the holder is, not after it gave up, so a holder that answers neither has lost the lease once
-  # the slower of the two gave up, where it was both, one after the other: a frozen holder's first call waited 10 s.
+  # The relay is asked as the holder is, not after it gave up, and its saying the holder doesn't answer ends the wait
+  # for it, of a read or a hook, once `@ping` has passed: a frozen holder's first call waited 10 s, one after the other,
+  # and then the slower of the two. A write isn't given up on then, as the holder may have begun it, and the server
+  # that took the lease then answers that it's still running there.
   # A server that isn't up takes no lease, so the call fails here, for whoever asked to ask another, as it does where
   # this server is the one out of reach. Whoever asked is told only that the app couldn't be reached: which server
   # holds what, and how long it waited, is for whoever reads this server's log.
@@ -91,11 +97,11 @@ defmodule Database do
     # A call another server passed here to run, as one whose own copy failed passes its own (`:failed`), or as one
     # that couldn't reach the holder does, is asked of the holder once, for `@witness`, and passed on no further.
     passed = call.forwarded == :to
-    relay = if server && not passed, do: Task.async(fn -> OneCore.Servers.answers?(server, @ping) == true end)
+    relay = if server && not passed, do: Task.async(fn -> OneCore.Servers.answers?(server, @ping) end)
 
     try do
       within = if passed, do: @witness, else: @reach
-      first = if server, do: Call.forward_to(call, server, within)
+      first = if server, do: Call.forward_to(call, server, within, relay && {relay, @ping})
       again = if server && not passed && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
       waited = System.monotonic_time(:millisecond) - began
       whose = OneCore.User.owner(OneCore.Artifact.name(call.own))
@@ -108,7 +114,7 @@ defmodule Database do
         cond do
           cannot_run -> :cannot_run
           passed -> :unanswered
-          Task.await(relay, :infinity) -> :relayed
+          Task.await(relay, :infinity) == true -> :relayed
           true -> :alone
         end
 

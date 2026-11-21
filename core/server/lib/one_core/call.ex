@@ -446,19 +446,24 @@ defmodule OneCore.Call do
 
   With `within`, in milliseconds, a server that hasn't answered within that long what's safe to ask again is taken
   as gone too: one that's there but stuck keeps the call open however long, saying it's still running it. What
-  isn't safe to ask again is waited for as long as it takes, since it may be doing it.
+  isn't safe to ask again is waited for as long as it takes, since it may be doing it. With `{task, grace}` as
+  `gone`, a `task` that gives `false` once something else knows the server isn't there, as the relay does of one
+  that doesn't answer its ping, ends the wait then of a hook or a tool that only reads, unless the server answered by
+  then, but not before it had `grace` ms: the relay says at once that a server isn't connected to it, which a server
+  that answers this one directly may not be. Any other answer of `task` leaves the wait to `within`, and is left for
+  whoever awaits it.
 
   With a list of servers in `server`'s place, one of them runs it, asked as `forward/2` asks them, and `:no_response`
   means none did.
   """
-  def forward_to(call, server, within \\ :infinity)
-  def forward_to(%__MODULE__{forwarded: true}, _server, _within), do: throw({__MODULE__, :forwarding_loop})
+  def forward_to(call, server, within \\ :infinity, gone \\ nil)
+  def forward_to(%__MODULE__{forwarded: true}, _server, _within, _gone), do: throw({__MODULE__, :forwarding_loop})
 
-  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, servers, :infinity) when is_list(servers),
+  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, servers, :infinity, _gone) when is_list(servers),
     do: ask_each(ask, {actor, subject}, servers, true)
 
-  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server, within),
-    do: asks(ask, {actor, subject}, server, true, within)
+  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server, within, gone),
+    do: asks(ask, {actor, subject}, server, true, within, [], gone)
 
   # How long what's safe to ask again waits for a server's answer before it's asked of the next as well: most are answered
   # within a second, and a server that's connected but stuck says it's still running it however long, as a busy one
@@ -529,13 +534,16 @@ defmodule OneCore.Call do
 
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
-  defp asks(ask, {_actor, subject} = principal, server, forwarded, within \\ :infinity, opts \\ []) do
+  defp asks(ask, {_actor, subject} = principal, server, forwarded, within \\ :infinity, opts \\ [], gone \\ nil) do
     {method, params} = passed(ask, principal, forwarded)
     again = again?(method, params, subject, [server])
+    # A write may be begun by the server by then, which what says it isn't there doesn't say it hasn't: one that is
+    # kept to its idempotency key is answered as running there, though this server took over meanwhile.
+    gone = if reads?(method, params, subject), do: gone
 
     response =
       if within != :infinity and again,
-        do: request_within(server, method, params, within),
+        do: request_within(server, method, params, within, gone),
         else: request(server, method, params, opts)
 
     with :no_response <- answered(response, server, again), do: given_up()
@@ -583,9 +591,10 @@ defmodule OneCore.Call do
     end
   end
 
-  # Asks `server` from a process of its own, in this call's trace, and gives it `within` to answer: one that hasn't
-  # is taken as gone after it was asked, and its answer, if it ever comes, goes to nobody.
-  defp request_within(server, method, params, within) do
+  # Asks `server` from a process of its own, in this call's trace, and gives it `within` to answer, or until `gone` says
+  # it isn't there: one that hasn't is taken as gone after it was asked, and its answer, if it ever comes, goes to
+  # nobody.
+  defp request_within(server, method, params, within, gone) do
     trace = OpenTelemetry.Ctx.get_current()
     state = State.id()
 
@@ -601,10 +610,33 @@ defmodule OneCore.Call do
         end
       end)
 
-    case Task.yield(asking, within) || Task.shutdown(asking, :brutal_kill) do
+    case yield(asking, within, gone) || Task.shutdown(asking, :brutal_kill) do
       {:ok, {:returned, response}} -> response
       {:ok, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
       nil -> :stopped
+    end
+  end
+
+  defp yield(asking, within, nil), do: Task.yield(asking, within)
+
+  defp yield(asking, within, {gone, grace}),
+    do: Task.yield(asking, min(grace, within)) || yield(asking, max(within - grace, 0), gone)
+
+  # The task is linked, so one that crashed ends this process too, and a `false` from `gone` is all else that can end
+  # the wait early: it's put back in the mailbox for whoever awaits it, behind no "down" of the task's, which an await
+  # would take for its end, and `asking` looked at once more.
+  defp yield(%Task{ref: asking} = task, within, %Task{ref: gone}) do
+    receive do
+      {^asking, answer} ->
+        Process.demonitor(asking, [:flush])
+        {:ok, answer}
+
+      {^gone, false} = said ->
+        Process.demonitor(gone, [:flush])
+        send(self(), said)
+        Task.yield(task, 0)
+    after
+      within -> nil
     end
   end
 
@@ -617,4 +649,8 @@ defmodule OneCore.Call do
     do: Calls.reads?(name, who) or (is_map_key(params[:_meta], :idempotencyKey) and Enum.all?(servers, &Writes.keeps?/1))
 
   defp again?(_method, _params, _who, _servers), do: false
+
+  defp reads?("hooks/call", _params, _who), do: true
+  defp reads?("tools/call", %{name: name}, who), do: Calls.reads?(name, who)
+  defp reads?(_method, _params, _who), do: false
 end

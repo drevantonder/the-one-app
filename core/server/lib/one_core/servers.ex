@@ -124,14 +124,14 @@ defmodule OneCore.Servers do
   it does before it gives one an outsider's call, and it has `within` milliseconds to answer, at most the 5 seconds
   it gives one an outsider's call. A connection that has gone quiet stays connected there for a while (`presence/1`),
   as a machine that has just gone to sleep does, and this doesn't wait for that. `nil` where the network has no
-  address.
+  address, or where the relay doesn't say (not a 200).
   """
   def answers?(key, within) do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
       params = [keys: key, ping: 1, within: within]
       response = Edge.send!(method: :get, url: at <> path, params: params, headers: Edge.signed(path, ""))
-      response.status == 200 and get_in(response.body, ["presence", key, "answered"]) == true
+      if response.status == 200, do: get_in(response.body, ["presence", key, "answered"]) == true
     end
   end
 
