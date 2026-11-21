@@ -412,7 +412,8 @@ async function signIn() {
     // Someone who signs in with Google does so again, and comes back here to Allow.
     return withGoogle()
   } else await withPasskey()
-  if (flow.flow === "unlock") return unlock(flow.device, flow.scope)
+  // What stops it is a stage of its own, which for a passkey that can't unlock offers to make one that can.
+  if (flow.flow === "unlock") return unlock(flow.device, flow.scope).catch((error: Error) => setStage({ stage: "failed", why: error.message }))
   if (flow.flow === "assistant") {
     // They allowed it and signed in, so the assistant is sent back with what it came for.
     const { url } = await ask<{ url: string }>("/oauth2/consent", { accept: true, oauth_query: flow.request })
