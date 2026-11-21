@@ -42,7 +42,8 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
   // changes, which moves its apps' columns. Till then nothing in it has a transition, so it goes straight to where that
   // puts it, not on its way there as it opens.
   const [laid, setLaid] = createSignal<{ all?: Rect; apps: Record<number, Rect> }>({ apps: {} })
-  createEffect(() => area().width, () => void setLaid({ apps: {} }))
+  const across = createMemo(() => area().width)
+  createEffect(across, () => void setLaid({ apps: {} }))
   const measured = createMemo(() => {
     const { all, apps } = laid()
     const count = category()?.entrypoints.length ?? 0

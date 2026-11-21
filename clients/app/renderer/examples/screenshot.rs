@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
-//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--measure] [--seed <n>]
+//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--reduced-motion] [--panel <corner>] [--measure] [--seed <n>]
 //!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--memory <GB>] [--time-zone <IANA name>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
@@ -91,6 +91,8 @@ fn main() -> anyhow::Result<()> {
     let scale: f32 = flag("--scale").and_then(|scale| scale.parse().ok()).unwrap_or(2.0);
     let dark = args.iter().any(|arg| arg == "--dark");
     let touch = args.iter().any(|arg| arg == "--touch");
+    // The system's Reduce Motion is on, as a person's setting makes it.
+    renderer::platform::fake_reduce(args.iter().any(|arg| arg == "--reduced-motion"));
     let panel: Option<f32> = flag("--panel").and_then(|corner| corner.parse().ok());
     // What the window keeps for itself at each edge, as a phone's status bar and home indicator, or a title bar.
     let safe: Vec<f32> = flag("--safe-area").map(|edges| edges.split(',').filter_map(|edge| edge.parse().ok()).collect()).unwrap_or_default();
@@ -894,7 +896,12 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
         _ => None,
     };
-    let (mut track, count) = (query("track"), query("count"));
+    let (mut track, count, shows) = (query("track"), query("count"), query("shows"));
+    // The nodes of what a selector matches that a person sees: drawn at all opaque, some of it in the window.
+    let seen = |windows: &mut Windows, query: &Value| -> Vec<Value> {
+        let found = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"].as_array().cloned()).unwrap_or_default();
+        found.into_iter().filter(|node| node["opacity"].as_f64().is_some_and(|opacity| opacity > 0.0) && node["seen"].as_f64().is_some_and(|seen| seen > 0.0)).collect()
+    };
     let length: f64 = moves.iter().map(|(_, _, ms)| ms).sum();
     // Where it is `t` ms in.
     let at = |t: f64| {
@@ -985,10 +992,12 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
                 None => frame["gone"] = json!(true),
             }
         }
-        // How many of what `count` matches a person sees: drawn at all opaque, some of it in the window.
+        // How many of what `count` matches a person sees, and the same for `shows`.
         if let Some(query) = &count {
-            let found = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"].as_array().cloned()).unwrap_or_default();
-            frame["count"] = json!(found.iter().filter(|node| node["opacity"].as_f64().is_some_and(|opacity| opacity > 0.0) && node["seen"].as_f64().is_some_and(|seen| seen > 0.0)).count());
+            frame["count"] = json!(seen(windows, query).len());
+        }
+        if let Some(query) = &shows {
+            frame["shows"] = json!(seen(windows, query).len());
         }
         if let Some(scrolled) = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten() {
             frame["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});

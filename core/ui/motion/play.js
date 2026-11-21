@@ -36,9 +36,9 @@ async function play(built, scene, name, motion, hz, folder) {
   }
   // Where what it opens should first be drawn: what `opensFrom` names, before the press.
   const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
-  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
+  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
-  const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
+  const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
   if (ran.failed || !answer?.result) return { said: `  ${hz} Hz: ${answer?.error ?? ran.said.split("\n").at(-1)}` }
   const { frames, budget_ms: budget, over, leaving } = answer.result
@@ -72,12 +72,16 @@ async function play(built, scene, name, motion, hz, folder) {
   const end = events ? (lifted ?? events.at(-1)).ms : stretches.reduce((sum, stretch) => sum + stretch.ms, 0)
   const toward = Math.sign(values.at(-1) - values[0])
   const back = motion.steady ? values.findIndex((value, n) => n > 0 && frames[n].at <= end && (value - values[n - 1]) * toward < -1) : -1
+  // What `onward` follows never goes back against the way it's going, in any frame, as a frame that draws it where it began
+  // for one refresh does.
+  const onward = motion.onward ? values.findIndex((value, n) => n > 1 && (value - values[n - 1]) * Math.sign(values.at(-1) - values[0]) < -1) : -1
+  if (onward >= 0) failed.push(`it went back ${Math.abs(values[onward] - values[onward - 1]).toFixed(0)} pt at frame ${onward + 1} (${frames[onward].at} ms)`)
   if (back >= 0) failed.push(`it went back ${Math.abs(values[back] - values[back - 1]).toFixed(0)} pt at frame ${back + 1} (${frames[back].at} ms)`)
   // A press let go moves on from where the finger last showed it, as UIScrollView's deceleration and SwiftUI's spring
   // do: no frame as it's let go jumps further than the finger moved in a refresh just before, or than the frame after
   // goes on (a fling's first eased step), within a point. Two frames drawn in the refresh it lifts in show only the
   // second, a jump that skips where the finger was.
-  if (!events && lift && way !== "still") {
+  if (!events && lift && way !== "still" && !motion.reducedMotion) {
     const refresh = 1000 / hz
     const at = frames.findIndex((frame) => frame.at >= end)
     const step = (n) => (n > 0 && n < values.length ? Math.abs(values[n] - values[n - 1]) : 0)
@@ -115,6 +119,17 @@ async function play(built, scene, name, motion, hz, folder) {
   // What `once` names is never in sight twice in a frame, read or not, as a large title and its bar's are cross-faded.
   const twice = motion.once ? frames.findIndex((frame) => frame.count > 1) : -1
   if (twice >= 0) failed.push(`${frames[twice].count} of ${JSON.stringify(motion.once)} drawn at once at frame ${twice + 1} (${frames[twice].at} ms)`)
+  // What `shows` names is drawn from the frame what `follow` names has landed (it moves less than half a point from there
+  // on), as a folder's apps are handed back to its square as they get there: a hand-back that waits leaves them drawn
+  // in the layer they flew in, and the square's undrawn, for as long as it waits.
+  if (motion.shows) {
+    const where = frames.map((frame) => frame.rect).filter(Boolean)
+    const last = where.at(-1)
+    const lands = frames.findIndex((frame, n) => frame.rect && frames.slice(n).every((later) => !later.rect || Math.abs(later.rect.x - last.x) < 0.5 && Math.abs(later.rect.y - last.y) < 0.5))
+    const missing = lands < 0 ? -1 : frames.findIndex((frame, n) => n >= lands && frame.shows === 0)
+    if (!last) failed.push("what it follows isn't there to land")
+    else if (missing >= 0) failed.push(`${JSON.stringify(motion.shows)} isn't drawn at frame ${missing + 1} (${frames[missing].at} ms), where what moved landed at frame ${lands + 1} (${frames[lands].at} ms)`)
+  }
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
   // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.

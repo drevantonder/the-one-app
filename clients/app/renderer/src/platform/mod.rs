@@ -453,6 +453,9 @@ pub(crate) fn now() -> web_time::Instant {
 }
 #[cfg(feature = "fake")]
 pub(crate) use fake::now;
+/// The fake platform's Reduce Motion setting.
+#[cfg(feature = "fake")]
+pub use fake::reduce as fake_reduce;
 /// The fake platform's time, in ms on its pages' clock.
 #[cfg(feature = "fake")]
 pub use fake::time as fake_time;

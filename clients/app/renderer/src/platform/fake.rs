@@ -433,8 +433,15 @@ pub fn appear(appearance: crate::Appearance) {
     DARK.store(appearance == crate::Appearance::Dark, std::sync::atomic::Ordering::Relaxed);
 }
 
+static REDUCED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// The system's Reduce Motion setting is on (`--reduced-motion`), as a person's is in their settings.
+pub fn reduce(on: bool) {
+    REDUCED.store(on, std::sync::atomic::Ordering::Relaxed);
+}
+
 pub fn reduced_motion() -> bool {
-    false
+    REDUCED.load(std::sync::atomic::Ordering::Relaxed)
 }
 
 /// The harness's page keeps a clipboard of its own (`editing::Memory`).

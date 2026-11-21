@@ -514,14 +514,16 @@ export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; st
  * core/ui/devices.json whose budget each of its frames keeps, at that tier's rate, the frames a press lands and lifts
  * on too, their JS, painting and GPU as that device would take them. `opensFrom`: what `follow` names is first drawn from
  * where this is, its top and its middle there (within a point), as an iPhone's folder grows out of its square and its
- * apps out of the square's. `once`: what it names is never seen
+ * apps out of the square's. `shows`: what it names is drawn from the frame what `follow` names has landed, as a folder's
+ * apps are handed back to its square as they get there. `onward`: what `follow` names never goes back against its way in any frame. `reducedMotion`: played with the
+ * system's Reduce Motion on. `once`: what it names is never seen
  * twice in a frame, whether a screen reader reads it or not, as a large title and its bar's small one are cross-faded.
  * `eases`: what each turn of a mouse's wheel moves goes over several frames, never as far as a turn in one, and never
  * holds still while the wheel turns, as Windows' apps (WinUI) and Chrome smooth-scroll a notch (a Mac's moves at once).
  * However it's played, what it takes out is gone once it settles, and what a press lets go moves on from where the
  * finger last showed it, no frame as it's let go jumping further than the finger moved in a refresh or the frame after
  * goes on, as UIScrollView's deceleration and SwiftUI's spring do. */
-export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean; keeps?: string; opensFrom?: Tap; once?: Tap; eases?: boolean }
+export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean; keeps?: string; opensFrom?: Tap; once?: Tap; shows?: Tap; reducedMotion?: boolean; onward?: boolean; eases?: boolean }
 /** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
  * a short quick flick; dragged with `pauses` of a fifth of a second along the way; a sheet pulled down and let go; or
  * each stretch it moves (`moves`, a stretch with neither `dx` nor `dy` holding still), held at the end unless `lift`. */

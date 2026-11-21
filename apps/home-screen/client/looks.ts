@@ -135,8 +135,8 @@ export const looks = styles({
   unveiled: { opacity: 0 },
   // Its apps are handed from its square to it at once as it opens, and back once they've flown into the square again
   // (`smooth` within half a point of it, 800 ms on), so each app is drawn once, never in both. A host that doesn't wait
-  // hands them back as it starts to close.
-  handed: { transitionProperty: ["opacity"], transitionDelay: 800 },
+  // hands them back as it starts to close, and with less motion they jump, so there's nothing to wait for.
+  handed: { transitionProperty: ["opacity"], transitionDelay: { default: 800, reducedMotion: 0 } },
   handing: { transitionDelay: 0 },
   unseen: { opacity: 0 },
   inOpened: { position: "absolute", top: 0, start: 0 },

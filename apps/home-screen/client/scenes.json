@@ -881,6 +881,32 @@
           "role": "button",
           "name": "Weather"
         }
+      },
+      "Open a category with less motion": {
+        "from": {
+          "role": "group",
+          "name": "Utilities"
+        },
+        "gesture": {
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
+        },
+        "reducedMotion": true,
+        "follow": {
+          "role": "button",
+          "name": "Weather",
+          "within": {
+            "role": "dialog",
+            "name": "Utilities"
+          }
+        },
+        "once": {
+          "role": "button",
+          "name": "Weather"
+        }
       }
     },
     "answers": {
@@ -1676,9 +1702,27 @@
     },
     "checks": {
       "A badge's full circle is drawn over its icon's top, not cut by the page's clip": [
-        { "expect": { "shown": "Notes" } },
-        { "expect": { "unclipped": { "role": "button", "name": "Tasks" } } },
-        { "expect": { "unclipped": { "role": "button", "name": "Mail" } } }
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "expect": {
+            "unclipped": {
+              "role": "button",
+              "name": "Tasks"
+            }
+          }
+        },
+        {
+          "expect": {
+            "unclipped": {
+              "role": "button",
+              "name": "Mail"
+            }
+          }
+        }
       ],
       "A mouse's wheel turns a page a notch, on to the App Library and back, and never to another owner": [
         {
@@ -2699,6 +2743,49 @@
         "once": {
           "role": "button",
           "name": "Notes"
+        },
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        },
+        "onward": true
+      },
+      "Close it with less motion": {
+        "from": {
+          "x": 300,
+          "y": 700
+        },
+        "gesture": {
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
+        },
+        "reducedMotion": true,
+        "once": {
+          "role": "button",
+          "name": "Notes"
+        },
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        },
+        "shows": {
+          "role": "button",
+          "name": "Notes",
+          "within": {
+            "role": "group",
+            "name": "Productivity"
+          }
         }
       }
     }
