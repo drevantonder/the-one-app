@@ -53,10 +53,14 @@ github &
 on_github=$!
 mac &
 on_mac=$!
+# One that failed is reaped, and waited on again it's `no such job`, so the second wait is for the other alone.
 winner=
-for _ in 1 2; do
-  if wait -n -p done "$on_github" "$on_mac"; then winner=$done && break; fi
+pending=("$on_github" "$on_mac")
+while ((${#pending[@]})); do
+  if wait -n -p done "${pending[@]}"; then winner=$done && break; fi
   echo "$([[ $done == "$on_github" ]] && echo "GitHub" || echo "The Mac") didn't build $file" >&2
+  for at in "${!pending[@]}"; do [[ ${pending[at]} == "$done" ]] && unset "pending[$at]"; done
+  pending=("${pending[@]}")
 done
 if [[ $winner == "$on_github" ]]; then
   kill "$on_mac" 2>/dev/null || true
