@@ -260,7 +260,10 @@ impl Scene {
                 read.insert_at(reads, wave + 1);
                 waves.push((wave, true, order, kind, at));
             } else {
-                drawn.insert_at(area, wave);
+                // What's drawn in the first wave moves nothing after it: only what's later is kept.
+                if wave > 0 {
+                    drawn.insert_at(area, wave);
+                }
                 waves.push((wave, false, order, kind, at));
             }
         }
