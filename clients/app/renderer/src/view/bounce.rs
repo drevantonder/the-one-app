@@ -18,14 +18,22 @@ const BACK: Spring = Spring { stiffness: 228.0, damping: 30.2 };
 const STOPPED: f32 = 20.0;
 const FLUNG: f32 = 200.0;
 
-/// How a mouse wheel's notch eases what it scrolls: SwiftUI's `.spring(duration: 0.12)`, with no bounce, so a notch's
-/// 48 pt has nearly all gone in a tenth of a second, as Windows' apps (WinUI) and Chrome smooth-scroll one.
-const WHEEL: Spring = Spring { stiffness: 2741.6, damping: 104.7 };
+/// How long a mouse wheel's notch eases what it scrolls, in ms: its distance over that time, slow at both ends (a raised
+/// cosine's speed), each notch on its own, so one that comes as another eases adds to where it's going without starting
+/// it again, and a steady hand's notches, each a share of that time apart, add up to a steady speed, as a Mac's smooth
+/// scrolling and Chrome's go. A spring that each notch sent on from where it was went fast then slow at every notch:
+/// 13, 17, 18 pt a frame at 60 Hz, over and over.
+const NOTCH_MS: f64 = 150.0;
+
+/// How much of its way a notch has gone `u` of the way through its time: a raised cosine's speed, summed.
+fn eased(u: f64) -> f64 {
+    let u = u.clamp(0.0, 1.0);
+    u - (std::f64::consts::TAU * u).sin() / std::f64::consts::TAU
+}
 
 /// A scroll's motion of its own, along or down (`along`): held stretched past its end by a finger (`pulled`, how far
-/// the finger's gone past it), springing back from `stretch` at `velocity`, flung at `velocity`, or easing to where a
-/// wheel's notches send it (`aim`: there, and how far from it it is, exactly) at `velocity`; each a second, stepped
-/// last at `stepped` (ms on the screen's clock).
+/// the finger's gone past it), springing back from `stretch` at `velocity`, flung at `velocity`, each a second, stepped
+/// last at `stepped` (ms on the screen's clock), or easing to where a wheel's notches send it (`aim`).
 pub(super) struct Coast {
     along: bool,
     held: bool,
@@ -34,7 +42,14 @@ pub(super) struct Coast {
     stretch: f32,
     velocity: f32,
     stepped: f64,
-    pub(super) aim: Option<(f32, f32)>,
+    pub(super) aim: Option<Aim>,
+}
+
+/// Where a wheel's notches send a scroll (`to`), and each notch still easing there: when it turned (ms on the screen's
+/// clock) and how far it sends it.
+pub(super) struct Aim {
+    to: f32,
+    notches: Vec<(f64, f32)>,
 }
 
 impl Screen {
@@ -134,18 +149,16 @@ impl Screen {
             }
             let seconds = ((now - coast.stepped) / 1000.0).max(0.0);
             coast.stepped = now;
-            if let Some((aim, off)) = coast.aim {
-                let along = coast.along;
-                let (off, velocity) = WHEEL.at(f64::from(off), f64::from(coast.velocity), seconds);
-                let to = if Spring::arrived(off, velocity, 0.5) {
+            if let Some(aim) = &mut coast.aim {
+                // Short of where it's going by what its notches have still to go, on whole points, as a browser's
+                // compositor puts a scroll on whole pixels, so its words are drawn as they were, not rasterized again
+                // at each new fraction of a point.
+                let left: f64 = aim.notches.iter().map(|(turned, by)| f64::from(*by) * (1.0 - eased((now - turned) / NOTCH_MS))).sum();
+                aim.notches.retain(|(turned, _)| now < turned + NOTCH_MS);
+                let (along, to) = (coast.along, aim.to - (left as f32).round());
+                if aim.notches.is_empty() {
                     self.coasts.remove(&id);
-                    aim
-                } else {
-                    (coast.velocity, coast.aim) = (velocity as f32, Some((aim, off as f32)));
-                    // On whole points, as a browser's compositor puts a scroll on whole pixels, so its words are drawn as
-                    // they were, not rasterized again at each new fraction of a point.
-                    aim + (off as f32).round()
-                };
+                }
                 let Some(most) = self.placed(id).and_then(|placed| placed.scroll).map(|(most_y, most_x, _)| if along { most_x } else { most_y }) else {
                     self.coasts.remove(&id);
                     continue;
@@ -192,24 +205,23 @@ impl Screen {
         self.under(at).into_iter().find_map(|id| {
             let (most_y, most_x, along) = self.placed(id)?.scroll?;
             let now = self.scrolled.get(&id).copied().unwrap_or(point(0.0, 0.0));
-            let from = self.coasts.get(&id).and_then(|coast| coast.aim).map_or(if along { now.x } else { now.y }, |(aim, _)| aim);
+            let from = self.coasts.get(&id).and_then(|coast| coast.aim.as_ref()).map_or(if along { now.x } else { now.y }, |aim| aim.to);
             let (by, most) = if along { (if delta.x != 0.0 { delta.x } else { delta.y }, most_x) } else { (delta.y, most_y) };
             ((by > 0.0 && from < most) || (by < 0.0 && from > 0.0)).then_some((id, from, by, most, along))
         })
     }
 
-    /// A mouse wheel's notch turned at `at`, by `delta` points: what scrolls there eases to where it sends it (`WHEEL`),
-    /// a notch that comes meanwhile sending it on from where the one before was going. → what scrolls.
+    /// A mouse wheel's notch turned at `at`, by `delta` points: what scrolls there eases to where it sends it
+    /// (`NOTCH_MS`), from where the notches before were sending it. → what scrolls.
     pub(super) fn wheel_scroll(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
         let (id, from, by, most, along) = self.scrolls(at, delta)?;
-        let aim = (from + by).clamp(0.0, most);
+        let (to, now) = ((from + by).clamp(0.0, most), self.js.clock().now());
         match self.coasts.get_mut(&id) {
-            // Where it is stays where it is: only where it's going moves.
-            Some(Coast { aim: Some((going, off)), .. }) => (*going, *off) = (aim, *going + *off - aim),
-            _ => {
-                let now = self.js.clock().now();
-                self.coasts.insert(id, Coast { along, held: false, flung: false, pulled: 0.0, stretch: 0.0, velocity: 0.0, stepped: now, aim: Some((aim, from - aim)) });
+            Some(Coast { aim: Some(aim), .. }) => {
+                aim.notches.push((now, to - aim.to));
+                aim.to = to;
             }
+            _ => drop(self.coasts.insert(id, Coast { along, held: false, flung: false, pulled: 0.0, stretch: 0.0, velocity: 0.0, stepped: now, aim: Some(Aim { to, notches: vec![(now, to - from)] }) })),
         }
         self.changed();
         Some(id)
