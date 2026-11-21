@@ -920,6 +920,11 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     // With `frame_ms`, each frame takes that long to draw, as on a device others load, which presses it as a window's
     // late frames do.
     windows.set_frame_ms(request.f64("frame_ms").unwrap_or(0.0));
+    // With `link`, `{starts, pauses: [ticks, refreshes]}`, the display's link ticks as a real one does: a Mac's starts
+    // two or three refreshes after it's asked for frames, and a ProMotion display's stops a while as if idle.
+    let link = request.inputs.get("link");
+    let pauses = link.and_then(|link| link["pauses"].as_array()).map(|pauses| (pauses[0].as_u64().unwrap_or(0) as u32, pauses[1].as_u64().unwrap_or(0) as u32));
+    windows.set_link(link.and_then(|link| link["starts"].as_u64()).unwrap_or(0) as u32, pauses);
     let refresh = 1000.0 / hz;
     let begun = renderer::platform::fake_time();
     let (mut next, mut frames, mut drawn) = (0, Vec::new(), windows.frames(id));
@@ -1015,7 +1020,15 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             }
         }
         frames.push(frame);
-        while let Some((_, event)) = samples.get(next).filter(|(t, _)| *t <= tick) {
+        // Halfway to the refresh, so what it draws is after the read, as what the loop's own clock draws a refresh on
+        // from it is after the next: drawn at the read itself, it was read in that refresh's frame. Its time is the
+        // refresh's within a microsecond, as sums of ms land a hair either side of it: a press's move at
+        // 250.00000000000003 ms waited for the next, which drew two moves at once.
+        let due = |(t, _): &&(f64, Value)| *t <= tick + 0.001;
+        if samples.get(next).is_some_and(|sample| due(&sample)) {
+            windows.run((read + JUST_BEFORE / 2.0 - elapsed()).max(0.0));
+        }
+        while let Some((_, event)) = samples.get(next).filter(due) {
             deliver(windows, id, event)?;
             next += 1;
         }
@@ -1030,6 +1043,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     }
     windows.set_refresh(60.0);
     windows.set_frame_ms(0.0);
+    windows.set_link(0, None);
     // What's been taken out but is still drawn going, which `after` should have seen go.
     let leaving = ask(windows, id, json!({"op": "window"})).and_then(|answer| answer["result"]["leaving"].as_u64()).unwrap_or(0);
     let budget = refresh;

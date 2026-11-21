@@ -10,6 +10,11 @@ import { finger, ios, moves, selector, travel } from "./gesture.js"
 import { apart, contactSheet, curve, differs, filmstrip, rect, strayInk } from "./output.js"
 
 
+/// How the display's link ticks at `hz`, as a real one: a Mac's starts three refreshes after it's asked for frames,
+/// and a ProMotion display's (120 Hz, a Mac's or an iPhone's) stops for four once it's ticked eight, as if idle. The
+/// loop's own clock stands in for it meanwhile.
+const link = (hz) => ({ starts: 3, ...(hz > 60 ? { pauses: [8, 4] } : {}) })
+
 /// A motion played at `hz` on a scene: its frames, filmstrip and curve kept in `folder`. → what it says, and its row in
 /// the contact sheet.
 async function play(built, scene, name, motion, hz, folder) {
@@ -37,7 +42,7 @@ async function play(built, scene, name, motion, hz, folder) {
   }
   // Where what it opens should first be drawn: what `opensFrom` names, before the press.
   const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
-  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.holds ? { holds: { ...selector(motion.holds), includeHidden: true } } : {}), ...(motion.apart ? { apart: { ...selector(motion.apart), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
+  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.holds ? { holds: { ...selector(motion.holds), includeHidden: true } } : {}), ...(motion.apart ? { apart: { ...selector(motion.apart), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}), link: link(hz) }
   const started = performance.now()
   const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
@@ -104,19 +109,23 @@ async function play(built, scene, name, motion, hz, folder) {
     else if (apart(first, from) > Math.max(1, next ? apart(next, first) : 0)) failed.push(`it's first drawn at ${rect(first)}, not where it opens from, ${rect(from)}`)
   }
   // What each wheel's turn moves goes over several frames, as Windows' apps and Chrome smooth-scroll a notch: no frame
-  // moves it as far as one turn does by itself, and from the frame it first moves to the last turn, none holds still
-  // more than 2 pt short of where it comes to rest (its end, where it gets there first, which it nears by less than a
-  // point a frame, on whole points), as a spin of the wheel glides on.
+  // moves it as far as one turn does by itself.
   if (motion.eases) {
-    const wheels = (events ?? []).filter((event) => event.kind === "wheel")
-    const turn = Math.max(0, ...wheels.map((event) => Math.max(Math.abs(event.dx ?? 0), Math.abs(event.dy ?? 0))))
+    const turn = Math.max(0, ...(events ?? []).filter((event) => event.kind === "wheel").map((event) => Math.max(Math.abs(event.dx ?? 0), Math.abs(event.dy ?? 0))))
     const jump = values.findIndex((value, n) => n > 0 && Math.abs(value - values[n - 1]) >= turn - 0.5)
-    const moved = values.findIndex((value) => value !== values[0])
-    const held = moved < 0 ? -1 : values.findIndex((value, n) => n > moved && frames[n].at <= wheels.at(-1).ms && value === values[n - 1] && Math.abs(value - values.at(-1)) > 2)
     if (!turn) failed.push("it has no wheel's turns to ease")
     else if (jump >= 0) failed.push(`it moved ${Math.abs(values[jump] - values[jump - 1]).toFixed(0)} pt at frame ${jump + 1} (${frames[jump].at} ms), as far as a turn of the wheel moves it, all at once`)
-    else if (held >= 0) failed.push(`it held still at frame ${held + 1} (${frames[held].at} ms) as the wheel turned`)
   }
+  // From the frame it first moves (by more than half a point: a node put on whole pixels first isn't moving yet), no
+  // refresh shows the frame before it again (within a twentieth of a point) while it's more than 2 pt short of where it
+  // comes to rest (its end, which it nears by less than a point a frame, on whole points): from the refresh after what
+  // moves it is done (a finger lifted, a wheel's last turn), which shows it, and with `eases` as the wheel turns, as a
+  // spin of it glides on. A frame held so is one a refresh missed: the loop's own clock paced slower than the display,
+  // as one at 60 Hz on a 120 Hz display misses every other, or a display link that stopped ticking with nothing
+  // standing in for it. A device others load (`frameMs`) takes several refreshes a frame.
+  const moved = values.findIndex((value) => Math.abs(value - values[0]) > 0.5)
+  const held = moved < 0 || motion.frameMs ? -1 : values.findIndex((value, n) => n > moved && (motion.eases || frames[n].at > end + 1000 / hz + 0.5) && Math.abs(value - values[n - 1]) < 0.05 && Math.abs(value - values.at(-1)) > 2)
+  if (held >= 0) failed.push(`it held still at frame ${held + 1} (${frames[held].at} ms) as it moved`)
   // What `once` names is never in sight twice in a frame, read or not, as a large title and its bar's are cross-faded.
   const twice = motion.once ? frames.findIndex((frame) => frame.count > 1) : -1
   if (twice >= 0) failed.push(`${frames[twice].count} of ${JSON.stringify(motion.once)} drawn at once at frame ${twice + 1} (${frames[twice].at} ms)`)

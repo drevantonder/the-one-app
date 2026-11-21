@@ -21,6 +21,13 @@ pub struct Display {
     tick: Cell<Option<web_time::Instant>>,
     /// Whether the loop wants the display's next frame.
     wanted: Cell<bool>,
+    /// How its display link ticks once it's asked for frames (`set_link`), and how many refreshes it's run since it
+    /// was, while it is.
+    link: Cell<Link>,
+    running: Cell<Option<u32>>,
+    /// The refresh it last reached, counted from the clock's start, so each is reached once, whichever side of it the
+    /// clock lands (`Windows::run`).
+    refreshed: Cell<Option<i64>>,
     /// What decides which of its refreshes come late, where it's adversarial (`seed`): a xorshift's state.
     random: Cell<u64>,
     /// How long each frame takes to draw, in ms, where it's longer than a refresh, as on a device others load
@@ -72,6 +79,15 @@ fn placed(menu: &crate::view::TextMenu, width: f32) -> crate::geometry::Bounds<f
 /// How often a refresh comes late where the display is adversarial, a frame dropped, as a busy device's are: one in
 /// five, and never more than three in a row.
 const LATE: u64 = 5;
+
+/// How a display link ticks once it's started (`Display::set_link`): `starts` refreshes after, and with `pauses`,
+/// (ticks, refreshes), not for that many refreshes once it's ticked that many. The default ticks at every refresh, from
+/// the first.
+#[derive(Clone, Copy, Default, PartialEq)]
+pub struct Link {
+    pub starts: u32,
+    pub pauses: Option<(u32, u32)>,
+}
 
 pub struct NativeWindow {
     id: WindowId,
@@ -151,6 +167,9 @@ impl Display {
             events: RefCell::default(),
             tick: Cell::new(None),
             wanted: Cell::new(false),
+            link: Cell::new(Link::default()),
+            running: Cell::new(None),
+            refreshed: Cell::new(None),
             random: Cell::new(0),
             drawing: Cell::new(0.0),
             summoned: RefCell::default(),
@@ -247,8 +266,39 @@ impl Display {
         self.wanted.get()
     }
 
+    /// Its display link ticks as `link` says from now on: as a Mac's, which takes two or three refreshes to start, and a
+    /// ProMotion display's, whose link stops ticking a while as if what's on it were idle.
+    pub fn set_link(&self, link: Link) {
+        (self.link.set(link), self.running.set(None));
+    }
+
+    /// Whether its link ticks at the refresh due now: while the loop asks for frames, once it's started and unless
+    /// it's paused, and with the default link at every refresh.
+    pub fn ticks(&self) -> bool {
+        let link = self.link.get();
+        if link == Link::default() {
+            return true;
+        }
+        let Some(run) = self.wanted.get().then(|| self.running.get().map_or(0, |run| run + 1)) else {
+            return false;
+        };
+        self.running.set(Some(run));
+        run.checked_sub(link.starts).is_some_and(|ticked| !link.pauses.is_some_and(|(after, refreshes)| (after..after + refreshes).contains(&ticked)))
+    }
+
     pub fn set_refresh(&self, hz: f64) {
         self.refresh.set(std::time::Duration::from_secs_f64(1.0 / hz));
+        self.refreshed.set(None);
+    }
+
+    /// The refresh it last reached (`refreshed`).
+    pub fn refreshed(&self) -> Option<i64> {
+        self.refreshed.get()
+    }
+
+    /// It reached refresh `at`, counted from the clock's start.
+    pub fn reached(&self, at: i64) {
+        self.refreshed.set(Some(at));
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
@@ -370,8 +420,12 @@ impl Display {
         true
     }
 
+    /// Starts its link while a frame is `wanted`, and stops it once none is.
     pub fn request_frame(&self, wanted: bool) {
         self.wanted.set(wanted);
+        if !wanted {
+            self.running.set(None);
+        }
     }
 
     pub fn frame(&self) -> Option<web_time::Instant> {

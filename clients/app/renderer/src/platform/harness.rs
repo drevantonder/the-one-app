@@ -47,6 +47,12 @@ impl Windows {
         self.pressure.name()
     }
 
+    /// The display's link ticks `starts` refreshes after it's started from now on, and with `pauses`, (ticks,
+    /// refreshes), not for that many once it's ticked that many (`fake::Link`); 0 and none for one that ticks at once.
+    pub fn set_link(&self, starts: u32, pauses: Option<(u32, u32)>) {
+        self.display.set_link(fake::Link { starts, pauses });
+    }
+
     /// The display refreshes `hz` times a second from now on.
     pub fn set_refresh(&self, hz: f64) {
         self.display.set_refresh(hz);
@@ -67,11 +73,13 @@ impl Windows {
         came
     }
 
-    /// The display shows a frame now, which the loop hears on its turn. A panel just put on the screen with nothing
-    /// drawn on it (a page that hadn't drawn yet) is wrong (`wrong`), as a host's compositor shows its window then,
-    /// its backdrop an empty box, until the next frame.
+    /// The display refreshes now, its link saying so to the loop on its turn where it ticks (`set_link`). A panel just
+    /// put on the screen with nothing drawn on it (a page that hadn't drawn yet) is wrong (`wrong`), as a host's
+    /// compositor shows its window then, its backdrop an empty box, until the next frame.
     pub fn tick(&mut self) {
-        self.display.tick(now());
+        if self.display.ticks() {
+            self.display.tick(now());
+        }
         for id in self.display.summoned() {
             let Some(window) = self.windows.get_mut(&id) else { continue };
             let parts = window.parts.len();
@@ -268,14 +276,22 @@ impl Windows {
             self.wait();
             let now = fake::time();
             let left = started + ms - now;
-            // The display's next refresh, at least a microsecond on, so a clock a hair short of one isn't moved by nothing.
-            // The display ticks while the loop wants frames, or a window has what came meanwhile to draw (a picture
-            // that's there at its time).
-            let tick = (self.display.wanted() || self.windows.values().any(|window| window.dirty && window.on_screen())).then(|| refresh - now.rem_euclid(refresh)).map(|next| if next < 0.001 { next + refresh } else { next });
+            // The display's next refresh: the one it's at now, give or take a microsecond, unless it's taken it, as the
+            // clock's sums of ms land a hair either side of one. Where it took the next a hair on instead, a page's timer
+            // due a hair before it moved the clock there, and the refresh was never taken: a frame held (the Launcher's
+            // mouse wheel page turn at 200 ms, 60 Hz). The display ticks while the loop wants frames, or a window has
+            // what came meanwhile to draw (a picture that's there at its time).
+            let at = (now / refresh).round();
+            let reached = (now - at * refresh).abs() < 0.001;
+            let due = if reached && self.display.refreshed() != Some(at as i64) { now } else { (if reached { at + 1.0 } else { (now / refresh).floor() + 1.0 }) * refresh };
+            let tick = (self.display.wanted() || self.windows.values().any(|window| window.dirty && window.on_screen())).then(|| (due - now).max(0.0));
             let timer = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.timer_due()).chain(self.display.answer_due().map(|at| at - now)).reduce(f64::min).map(|due| due.max(0.0));
+            // What the loop has due by itself (`due`), as a host's waits for it: the loop's own clock standing in for
+            // a display link that's stopped, a refresh after its last frame, not at the display's next refresh.
+            let woken = self.due().map(|due| due.as_secs_f64() * 1000.0).filter(|due| *due > 0.001);
             // A refresh a hair past the end, as a driver's own refresh, `1000 / hz` ms, is a hair short of the
             // display's (a `Duration`, whole nanoseconds), is the one it ends on, where it was never shown.
-            let next = tick.into_iter().chain(timer).reduce(f64::min).filter(|next| *next <= left + 0.001);
+            let next = tick.into_iter().chain(timer).chain(woken).reduce(f64::min).filter(|next| *next <= left + 0.001);
             // The platform's time moves on once, its pages' clock with it, then each page runs what's due by then.
             let by = next.unwrap_or(left.max(0.0));
             fake::advance(by);
@@ -291,6 +307,7 @@ impl Windows {
                 break;
             }
             if next == tick {
+                self.display.reached((fake::time() / refresh).round() as i64);
                 // A late refresh shows nothing new: what's waiting is shown on the next.
                 match self.display.late(late) {
                     true => late += 1,
