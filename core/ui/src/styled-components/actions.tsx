@@ -1,6 +1,6 @@
 // Actions, as Raycast has them on a computer: the floating pills at a window's foot, with what Return does and
 // "Actions ⌘K", and the action panel ⌘K opens, a list of what can be done here that's searched as it's typed in.
-// Written once on the drawing primitives, the same on the DOM and on a native host.
+// Written once on the drawing primitives, the same on every host.
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Modal, Pressable, Text, TextInput, View } from "#primitives"
@@ -9,7 +9,7 @@ import { Icon, type IconName } from "./button.tsx"
 import { messages } from "../words.ts"
 import { styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
-import type { Keyed } from "../drawing-primitives/primitives.tsx"
+import type { Keyed } from "../types/ui.d.ts"
 
 /** Something that can be done: what it says, what does it, the keys that do it too (`["mod", "enter"]`: ⌘↵ on a
  * Mac, Ctrl ↵ on a PC), an icon, whether it can't be undone (red), whether it can't be done now, and the section

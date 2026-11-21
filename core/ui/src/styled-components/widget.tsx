@@ -1,5 +1,5 @@
 // A widget: a card of an app's, drawn from the parts a layout is made of. Written once on the drawing primitives,
-// the same on the DOM and on a native host. It fills the cells a Home Screen page gives it, and what doesn't fit is cut
+// the same on every host. It fills the cells a Home Screen page gives it, and what doesn't fit is cut
 // off, never scrolled. Its name is small and grey, low in its order. Colour is for what needs someone.
 import { createContext, createSignal, For, Match, Show, Switch as Which, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"

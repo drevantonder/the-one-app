@@ -1,5 +1,5 @@
 // A menu: a button that opens a few things to do, over the page under it. Written once on the drawing primitives,
-// the same on the DOM and on a native host.
+// the same on every host.
 import { children, createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Modal, Pressable, Text, View } from "#primitives"

@@ -1,5 +1,5 @@
 // A toast: one line about what just happened, at the foot of the window for a few seconds. Written once on the drawing
-// primitives, the same on the DOM and on a native host: a portal over the window (#primitives' `Portal`), drawn
+// primitives, the same on every host: a portal over the window (#primitives' `Portal`), drawn
 // while there are toasts, so it's over whatever was open when the first came.
 import { createRoot, createSignal, For, Show } from "solid-js"
 import { createToaster } from "../headless-components/toast.ts"

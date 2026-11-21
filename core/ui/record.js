@@ -1,21 +1,19 @@
 // Records a page as a native host would get it: `bun record.js <the page's built folder> <answers.json>` runs the
-// page's own bundle, as app.js built it for the DOM, with the UI library built for a native host (dist/client/native),
-// as a host's sandbox would, answers each tool it calls from answers.json (`{ "<tool>": <its answer> }`), and anything else it asks its client by
+// page's own bundle, as app.js built it, with the UI library (dist/client), as a host's sandbox would, answers each tool it calls from answers.json (`{ "<tool>": <its answer> }`), and anything else it asks its client by
 // its method (`{ "ui/initialize": { "hostContext": { "titled": true } } }`), and prints
-// the mutations it made, one a line, then its semantic tree (src/drawing-primitives/outline.ts), which the same
-// page's tree on the DOM is to match (`outlineOf` in a page, from `bun record.js --dom`). Build the UI library first.
+// the mutations it made, one a line, then its semantic tree (src/drawing-primitives/outline.ts). Build the UI library
+// first.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
 import { fileURLToPath } from "node:url"
 import { outline } from "./src/drawing-primitives/outline.ts"
 
 const dist = fileURLToPath(new URL("dist/client/", import.meta.url))
-// What a page imports of the UI library, as a native host loads it.
-const native = { "/ui/client/solid.js": "solid.js", "/ui/client/internal.js": "internal.js", "/ui/client/web.js": "native/web.js", "/ui/client/ui.js": "native/ui.js" }
+// What a page imports of the UI library, from where it's built, as a host serves it at `/ui/client/`.
 Bun.plugin({
-  name: "native",
+  name: "ui",
   setup(build) {
-    build.onResolve({ filter: /^\/ui\/client\// }, ({ path }) => ({ path: join(dist, native[path] ?? path.slice("/ui/client/".length)) }))
+    build.onResolve({ filter: /^\/ui\/client\// }, ({ path }) => ({ path: join(dist, path.slice("/ui/client/".length)) }))
   },
 })
 
@@ -61,7 +59,7 @@ export async function record(folder, answers) {
   return { made, root: drawn.get(0) }
 }
 
-/** The semantic tree of what a native host drew, as `fromDom` makes the DOM's. */
+/** The semantic tree of what a native host drew. */
 export function semantic(node) {
   const { type, props } = node
   if (type === "raw-text") return { text: props.value ?? "", states: {}, children: [] }
@@ -74,15 +72,7 @@ export function semantic(node) {
 }
 
 if (import.meta.main) {
-  if (process.argv[2] === "--dom") {
-    // What a page runs to have `outlineOf(document.body)`, its tree as text.
-    const [built] = (await Bun.build({ entrypoints: [fileURLToPath(new URL("src/drawing-primitives/outline.ts", import.meta.url))], minify: true })).outputs
-    const code = await built.text()
-    const named = Object.fromEntries([...code.match(/export\s*\{([^}]*)\}/)[1].matchAll(/(\w+) as (\w+)/g)].map(([, inner, outer]) => [outer, inner]))
-    console.log(`(()=>{${code.replace(/export\s*\{[^}]*\};?/, "")};window.outlineOf=(element)=>${named.outline}(${named.fromDom}(element))})()`)
-  } else {
-    const { made, root } = await record(process.argv[2], JSON.parse(readFileSync(process.argv[3], "utf8")))
-    for (const mutation of made) console.log(JSON.stringify(mutation))
-    console.log(`\n${outline(semantic(root))}`)
-  }
+  const { made, root } = await record(process.argv[2], JSON.parse(readFileSync(process.argv[3], "utf8")))
+  for (const mutation of made) console.log(JSON.stringify(mutation))
+  console.log(`\n${outline(semantic(root))}`)
 }

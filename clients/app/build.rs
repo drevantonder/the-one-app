@@ -52,10 +52,10 @@ fn ui() {
     };
     bun(&["install".as_ref(), "--frozen-lockfile".as_ref()]);
     bun(&["build.js".as_ref(), out.as_os_str()]);
-    // Its JS, but the DOM's own UI library (`ui.js`, `web.js`), which a native host loads from `native/` in their place,
-    // and what puts a DOM page in its Colour Mode; Solid's (`solid.js`, `internal.js`) is in a chunk they share.
+    // Its JS: Solid's (`solid.js`, `internal.js` and their chunks), and the UI library (`ui.js`, `web.js` and theirs) from
+    // `native/`, where this app's renderer loads it (`Resolve` in the renderer's js/quickjs.rs), and not again beside it.
     let files = |folder: &'static str| std::fs::read_dir(out.join(folder)).expect("the UI library built").map(move |file| format!("{folder}{}", file.expect("a file").file_name().to_string_lossy()));
-    let files = files("").filter(|file| file.ends_with(".js") && !["ui.js", "web.js", "colour-mode.js"].contains(&file.as_str())).chain(files("native/").filter(|file| file.ends_with(".js"))).chain(["tokens.json".to_owned(), "styles.json".to_owned()]);
+    let files = files("").filter(|file| file.ends_with(".js") && !file.starts_with("ui") && !file.starts_with("web")).chain(files("native/").filter(|file| file.ends_with(".js"))).chain(["tokens.json".to_owned(), "styles.json".to_owned()]);
     let mut table = "/// The UI library's files the client's own pages load, by the path each is served at.\npub const UI: &[(&str, &[u8])] = &[\n".to_owned();
     for file in files {
         writeln!(table, "    (\"/ui/client/{file}\", include_bytes!({:?})),", out.join(&file).display().to_string()).expect("a String takes it");

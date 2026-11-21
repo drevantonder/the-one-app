@@ -1,5 +1,5 @@
 // Something to press, a count or word beside something, an icon and a spinner: written once on the drawing
-// primitives (#primitives), the same on the DOM and on a native host.
+// primitives (#primitives), the same on every host.
 import { children, createContext, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Path, Pressable, Svg, Text, View } from "#primitives"

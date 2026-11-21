@@ -1,7 +1,7 @@
-// Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--scene <words>]
+// Draws every scene on a native host, and with `--web` on the web too, and compares them: `bun scenes.js [<folder>…] [--scene <words>]
 // [--out <dir>] [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
 // harness>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
-// --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
+// --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
 // A folder is the gallery (core/ui/gallery, its scenes the components': `*.scenes.tsx`) or an app's (apps/<app>,
@@ -10,20 +10,19 @@
 // give (record.js's answers): `{ "Inbox": { "answers": { "notifications_inbox": { … } } } }`, with any of `page` (its
 // page, `client/index.html` unless said, and a link after `#`), `component` (a component its client exports, drawn alone, in
 // place of a page, as another app's page draws it), `uses` (other apps whose components the page draws, as Settings draws its sections: each is built, and served beside the page as `/<app>/client/`), `taps` (what's done first: pressed by what each is named or
-// says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the DOM names it, with `ctrl`, `shift`, `alt`
+// says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the web names it, with `ctrl`, `shift`, `alt`
 // or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), `errors` (words of the errors it logs, as a page that can't reach its server does: any other the page logs fails the scene), `timeZone` (the IANA name of the device's, `UTC` unless said: a fixture's instants are said in it, as a person in it reads them), `latency` (ms each tool's answer takes to come on the page's clock, as a server's round trip: for checks of what shows meanwhile), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
 //
-// Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, with `--web` by our
-// renderer there too (its web frame, clients/web/renderer, on Chromium's WebGPU: on a machine with no GPU,
+// Each scene is drawn on a native host by its headless harness (clients/app/renderer's `screenshot` example), with
+// `--web` by our renderer in headless Chromium too, in a frame a stand-in client answers (its web frame, clients/web/renderer, on Chromium's WebGPU: on a machine with no GPU,
 // SwiftShader's, which draws every frame on the CPU, so it's for a change to the web platform; elsewhere native and
 // web draw with the same renderer), with `--ssh` on a device's GPU too, by its own build of the harness (a Windows
 // one's Direct3D 12, as motion.js plays there: where each node is laid out there and here, and how much of the
-// pictures differs, `device.png` beside `afresh.png`, drawn the same way here), and on a native host by
-// its headless harness (clients/app/renderer's `screenshot` example), each as a picture and its semantic tree as text
-// (src/drawing-primitives/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
+// pictures differs, `device.png` beside `afresh.png`, drawn the same way here), each as a picture, and natively its
+// semantic tree as text (src/drawing-primitives/outline.ts) too. It says, scene by scene, how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
@@ -41,7 +40,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, copied, env, library, pageFolder, runThere, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, library, pageFolder, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -70,11 +69,9 @@ const hosted = speaks("clients/app/renderer/src/lib.rs", /pub const RUNTIME_VERS
 if (stale(harness)) throw new Error(stale(harness))
 harness = copied(harness, out)
 
-// What a page runs to have its semantic tree as text, as `bun record.js --dom` makes it.
-const outlined = Bun.spawnSync(["bun", here("record.js"), "--dom"]).stdout.toString()
 
 /// A target's scenes, each its name, page, link, answers, taps and size.
-async function scenesOf(target, built, serve) {
+async function scenesOf(target, built) {
   if (existsSync(join(target, "client/scenes.json"))) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
@@ -85,9 +82,8 @@ async function scenesOf(target, built, serve) {
       return { name, page, link, uses, answers, taps, size, touch, timeZone, errors }
     })
   }
-  // The gallery lists its own, drawn at `#scenes`.
-  const listed = await serve.text("index.html", "scenes")
-  return JSON.parse(listed).map(({ name, taps, size = sized ?? [390, 844], touch = false, errors }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, timeZone: "UTC", errors }))
+  // The gallery lists its own, drawn at `#scenes` by the native harness (motion.js).
+  return (await gallery(target, built, join(out, basename(target), ".scenes"), true)).map((scene) => ({ ...scene, size: sized ?? scene.size, timeZone: "UTC" }))
 }
 
 /// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would. The frame
@@ -134,42 +130,12 @@ function server(built, target, used) {
   })
   return {
     url: (key) => `http://localhost:${listener.port}/host.html?scene=${encodeURIComponent(key)}`,
-    host: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch)),
     // The renderer's frame, drawing the page at its address here.
     hostWeb: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch, `/renderer/?runtime=${needed}#/${scene.page}${scene.link ? `#${encodeURIComponent(scene.link)}` : ""}`)),
     stop: () => listener.stop(true),
   }
 }
 
-/// Waits until a frame has drawn what it was asked and stopped moving: its fonts, two frames, and its animations done.
-const settle = (frame) =>
-  frame.evaluate(() =>
-    document.fonts.ready
-      .then(() => new Promise((drawn) => requestAnimationFrame(() => requestAnimationFrame(drawn))))
-      .then(() => Promise.all(document.getAnimations().filter((move) => move.effect?.getComputedTiming().endTime !== Infinity).map((move) => move.finished.catch(() => {}))))
-      .then(() => new Promise((drawn) => setTimeout(drawn, 400))),
-  )
-
-/// Presses what's named or says `name`, or what has `role` and is named `name`, as a person would.
-async function tap(frame, name) {
-  const page = frame.page()
-  if (name.key) return page.keyboard.press([...["ctrl", "shift", "alt", "meta"].filter((held) => name[held]).map((held) => ({ ctrl: "Control", shift: "Shift", alt: "Alt", meta: "Meta" })[held]), name.key].join("+"))
-  if (name.type) return page.keyboard.type(name.type)
-  if (name.x !== undefined) {
-    const at = await page.locator("#page").boundingBox()
-    return page.mouse.click(at.x + name.x, at.y + name.y)
-  }
-  if (typeof name === "object") return frame.getByRole(name.role, { name: name.name, exact: true }).first().click()
-  const found = await frame.evaluateHandle((name) => {
-    const all = [...document.querySelectorAll("*")].filter((element) => element.checkVisibility?.() !== false)
-    return all.find((element) => element.getAttribute("aria-label") === name) ?? all.findLast((element) => element.innerText?.trim() === name && element.children.length <= 2)
-  }, name)
-  const element = found.asElement()
-  if (!element) throw new Error(`Nothing named or saying "${name}" to press`)
-  await element.click()
-}
-
-/// A scene drawn on the DOM: its picture and its tree.
 /// The rows (`- listitem`) of a scene's semantic tree (src/drawing-primitives/outline.ts) that have no `list` or `listbox`
 /// above them: each as its line.
 function strayRows(tree) {
@@ -193,31 +159,12 @@ function internalWords(tree) {
   return tree.split("\n").filter((line) => INTERNAL.test(line)).map((line) => line.trim())
 }
 
-async function dom(browser, serve, key, scene, folder) {
-  const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light" })
-  const problems = []
-  page.on("pageerror", (error) => problems.push(String(error)))
-  // The clock a native host's harness has (clients/app/renderer/src/js.rs's `Clock::fixed`): 1 January 2026, UTC.
-  await page.clock.setFixedTime(new Date(Date.UTC(2026, 0, 1)))
-  serve.host(key, scene)
-  await page.goto(serve.url(key))
-  const frame = await (await page.waitForSelector("#page")).contentFrame()
-  await frame.waitForLoadState()
-  await settle(frame)
-  for (const name of scene.taps) await tap(frame, name).then(() => settle(frame))
-  await page.screenshot({ path: join(folder, "dom.png") })
-  await frame.evaluate(outlined)
-  const tree = await frame.evaluate(() => window.outlineOf(document.body))
-  writeFileSync(join(folder, "dom.txt"), tree)
-  await page.close()
-  return { tree, problems }
-}
-
 /// Presses what's named or says `name` on our renderer's canvas, as a person would: found in its ARIA tree
 /// (clients/web/renderer/semantics.js) and pressed where it's drawn.
 async function press(frame, name) {
   const page = frame.page()
-  if (name.key || name.type) return tap(frame, name)
+  if (name.key) return page.keyboard.press([...["ctrl", "shift", "alt", "meta"].filter((held) => name[held]).map((held) => ({ ctrl: "Control", shift: "Shift", alt: "Alt", meta: "Meta" })[held]), name.key].join("+"))
+  if (name.type) return page.keyboard.type(name.type)
   const at = await page.locator("#page").boundingBox()
   if (name.x !== undefined) return page.mouse.click(at.x + name.x, at.y + name.y)
   const found = typeof name === "object" ? frame.getByRole(name.role, { name: name.name, exact: true }).first() : frame.locator(`#semantics [aria-label="${name.replaceAll('"', '\\"')}"], #semantics :text-is("${name.replaceAll('"', '\\"')}")`).last()
@@ -348,9 +295,6 @@ function compared(said, them, treeA, treeB, pictureA, pictureB, diff) {
   said.push(`  ${them}: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
 }
 
-// Text laid out by its fonts' own advances, as Chrome lays it out on a Mac, Windows, an iPhone and Android: Linux's
-// headless Chrome hints by default, rounding each glyph's advance to a whole pixel, which no device people use does.
-const browser = await chromium.launch({ args: ["--font-render-hinting=none"] })
 // Our renderer on the web, on WebGPU, which a machine with no GPU has only as SwiftShader's, and whose canvas is put on
 // the page only when the page is composited on the GPU too (ANGLE on SwiftShader), at a phone's two pixels a point.
 // One that hangs (SwiftShader's GPU process, under load) is started again, so it takes no other scene with it.
@@ -374,20 +318,9 @@ for (const target of targets) {
   const used = new Map()
   for (const app of new Set(Object.values(scenes).flatMap((scene) => scene.uses ?? []))) used.set(app, usedApp(app, out))
   const serve = server(built, target, used)
-  serve.text = async (page, link) => {
-    const tab = await browser.newPage()
-    serve.host("list", { page, link, answers: {}, size: [390, 844] })
-    await tab.goto(serve.url("list"))
-    const frame = await (await tab.waitForSelector("#page")).contentFrame()
-    await frame.waitForFunction(() => document.body.innerText.trim().startsWith("["))
-    const text = await frame.evaluate(() => document.body.innerText.trim())
-    await tab.close()
-    return text
-  }
-  for (const scene of (await scenesOf(target, built, serve)).filter((scene) => !only || scene.name.toLowerCase().includes(only))) {
+  for (const scene of (await scenesOf(target, built)).filter((scene) => !only || scene.name.toLowerCase().includes(only))) {
     const folder = join(out, name, scene.name.replace(/[^\w.-]+/g, "-"))
     mkdirSync(folder, { recursive: true })
-    const shown = await dom(browser, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ problems: [String(error)] }))
     const drawn = native(built, scene, folder, used)
     const onWeb = !onTheWeb ? {} : await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch(async (error) => {
       await webgpu.close().catch(() => {})
@@ -395,22 +328,19 @@ for (const target of targets) {
       return { missing: String(error) }
     })
     const said = [`${name} · ${scene.name}`]
-    if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
     // A row is drawn in its card by the `List` it's in: one outside any has none, and floats on its screen's background.
-    if (name !== "gallery" && shown.tree !== undefined) for (const row of strayRows(shown.tree)) said.push(`  a row isn't in a List, so it has no card: ${row}`)
+    if (name !== "gallery" && drawn.tree !== undefined) for (const row of strayRows(drawn.tree)) said.push(`  a row isn't in a List, so it has no card: ${row}`)
     // A person reads a scene's words: nothing of the build's or the platform's is among them.
-    for (const line of shown.tree === undefined ? [] : internalWords(shown.tree)) {
+    for (const line of drawn.tree === undefined ? [] : internalWords(drawn.tree)) {
       said.push(`  the screen says a word that isn't a person's: ${line}`)
       process.exitCode = 1
     }
-    // A page that threw while drawing shows `render`'s Problem, whose scene says nothing of the page, on either host.
-    for (const [host, tree] of [["DOM", shown.tree], ["native", drawn.tree]])
-      if (tree?.includes(messages.cantShowPage)) {
-        said.push(`  ${host}: the page crashed, showing "${messages.cantShowPage}"`)
-        process.exitCode = 1
-      }
+    // A page that threw while drawing shows `render`'s Problem, whose scene says nothing of the page.
+    if (drawn.tree?.includes(messages.cantShowPage)) {
+      said.push(`  native: the page crashed, showing "${messages.cantShowPage}"`)
+      process.exitCode = 1
+    }
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
-    else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)
     if (drawn.measured?.first_content_ms > OPENS_WITHIN_MS) {
       said.push(`  opens slowly: its first content came ${drawn.measured.first_content_ms} ms after it opened, over ${OPENS_WITHIN_MS} ms, with each answer a client doesn't keep ${LATENCY_MS} ms away`)
@@ -423,16 +353,14 @@ for (const target of targets) {
       said.push(`  native and web: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
     }
     const before = against && join(against, name, basename(folder))
-    // What changed is our renderer's, where it drew the scene both times, and the DOM's where it didn't.
-    const [kind, tree] = drawn.tree !== undefined && before && existsSync(join(before, "native.png")) ? ["native", drawn.tree] : ["dom", shown.tree]
-    if (tree === undefined) {
-    } else if (before && existsSync(join(before, `${kind}.png`))) compared(said, `before and now (${kind === "dom" ? "DOM" : "native"})`, readFileSync(join(before, `${kind}.txt`), "utf8"), tree, join(before, `${kind}.png`), join(folder, `${kind}.png`), join(folder, "changed.png"))
+    // What changed, where our renderer drew the scene both times.
+    if (drawn.tree === undefined) {
+    } else if (before && existsSync(join(before, "native.png"))) compared(said, "before and now", readFileSync(join(before, "native.txt"), "utf8"), drawn.tree, join(before, "native.png"), join(folder, "native.png"), join(folder, "changed.png"))
     else if (before) said.push("  before and now: no scene of this name before")
     said.push(`  ${folder}`)
     report.push(said.join("\n"))
   }
   serve.stop()
 }
-await browser.close()
 if (webgpu) await webgpu.close()
 console.log(report.join("\n"))

@@ -1,4 +1,4 @@
-// Times and sizes as a person reads them, written once for the DOM and a native host, whose sandbox has Intl too.
+// Times and sizes as a person reads them, written once for every host, whose sandbox has Intl.
 
 const relative: Partial<Record<"long" | "narrow", Intl.RelativeTimeFormat>> = {}
 

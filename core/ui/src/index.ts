@@ -7,8 +7,8 @@
 /// it draws with from the UI library: `import { Screen, List, Row, call } from "ui"`. The UI library looks the same in every
 /// app, light and dark, under a finger and with a mouse, and right to left. A page shows pictures only from `data:`
 /// addresses and its app's own files. An app may be TypeScript (`.tsx`, `.ts`) as well as JavaScript.
-/// **A page.** An app's page runs natively, on our renderer on a computer, an iPhone and Android, and unchanged on the
-/// DOM in a browser and in MCP Apps. Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
+/// **A page.** An app's page runs on our renderer: natively on a computer, an iPhone and Android, and as the web's in
+/// a browser and in MCP Apps. Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
 /// "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`; a deploy checks it against its server's
 /// own copy), and its entrypoint names it with the runtime version it needs, the one native hosts have now:
 /// `%{page: "client/index.html", runtime_version: 5}`. It's written with the UI library alone: start with its styled
@@ -40,9 +40,8 @@
 /// the value chosen. `bun run lint:app apps/<app>/client`, from the repo's
 /// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a page may use is `core/ui/src/types/ui.d.ts`: one that needs what isn't
 /// there adds it there, with only what every host can draw (`drawing-primitives/renderer.ts`), and core/ui's `bun run typecheck` then says
-/// whether the DOM's takes it.
-export { call, changed, client, memoryWarning, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pickFiles, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
-export { share } from "./shared.ts"
+/// whether the UI library's components take it.
+export { call, changed, client, memoryWarning, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pickFiles, pinShortcut, reducedMotion, safeArea, share, showRecoveryKey, sizeChanged, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { seen, since, size } from "./format.ts"
 export { Badge, Button, Icon, Spinner } from "./styled-components/button.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "./styled-components/field.tsx"

@@ -1,6 +1,6 @@
 // What's over the page, as a system's own: a sheet, up from the foot of a narrow window and in the middle of a wide
 // one, and an alert, a question that stops everything until it's answered. Written once on the drawing
-// primitives, the same on the DOM and on a native host: each a `Modal` (#primitives) over the window.
+// primitives, the same on every host: each a `Modal` (#primitives) over the window.
 import { children, createRoot, createSignal, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Modal, Pressable, ScrollView, Text, View } from "#primitives"

@@ -1,5 +1,5 @@
 // An empty screen, what's coming, a problem, something under way and something starting: written once on the
-// drawing primitives (#primitives), the same on the DOM and on a native host.
+// drawing primitives (#primitives), the same on every host.
 import { createSignal, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, ScrollView, Text, View } from "#primitives"

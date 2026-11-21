@@ -1,5 +1,5 @@
-// The one screen someone signs in on, written once on the drawing primitives (#primitives): the same on the DOM, as
-// the network's sign-in pages show it, and on a native host, as the app's own window does before it's in.
+// The one screen someone signs in on, written once on the drawing primitives (#primitives): the same where the
+// network's sign-in pages show it in a browser, and in the app's own window before it's in.
 import { children, createSignal, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Image, Text, View } from "#primitives"

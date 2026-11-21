@@ -222,8 +222,6 @@ render(() => ListStyle({ value: "insetGrouped", get children() { return Shown({}
 `)
     writeFileSync(join(at, `${component}.html`), `<!doctype html>
 <html lang="en">
-<script src="/ui/client/colour-mode.js"></script>
-<link rel="stylesheet" href="/ui/client/ui.css">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <script type="module" src="./${component}.scene.js"></script>

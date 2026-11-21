@@ -1,15 +1,15 @@
-// Builds the UI library into dist, which is the app `ui`. What runs in a client is in client/, as every app's is: ui.css
-// is the one stylesheet, ui.js every component, solid.js and web.js are Solid, native/ what a native host loads in place
-// of web.js and ui.js, internal.js is Solid's internals (`solid-js/internal`), which Solid's universal renderer reads with
-// its views. SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
+// Builds the UI library into dist, which is the app `ui`. What runs in a client is in client/, as every app's is: ui.js
+// every component, drawn by our renderer, web.js Solid's universal renderer telling it a page's mutations, solid.js
+// and internal.js Solid and its internals (`solid-js/internal`), which the universal renderer reads with its views,
+// and tokens.json and styles.json the tables it draws with. native/ is the same UI library where a client built before
+// it was here asks for it. SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
 // built with has them, Emil Kowalski's, pstack's and our design rules. build/ is how an app is built and checked against it: app.js and lint-app.js, with what they need to run, which a server
 // installs and runs on an app's source.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { fileURLToPath } from "node:url"
-import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
-import { newMade, stylesCss, stylesPlugin, stylesTable, tokensCss, tokensTable } from "./tables.ts"
+import { newMade, stylesPlugin, stylesTable, tokensCss, tokensTable } from "./tables.ts"
 import { $ } from "bun"
 
 // A path of the UI library's own, as this machine writes one (Windows' with its drive's letter).
@@ -23,65 +23,60 @@ const client = into ?? here("dist/client")
 // Built afresh, but for dist/client itself, which Vite empties: a local network's edge serves it where it is, by a
 // link (core/edge/edge.js), and stops if what it serves goes.
 if (!into) for (const made of existsSync(here("dist")) ? readdirSync(here("dist")) : []) if (made !== "client") rmSync(here(`dist/${made}`), { recursive: true, force: true })
-// The UI library's styles (src/styles.ts), made as each module is built, for both builds alike.
+// The UI library's styles (src/styles.ts), made as each module is built.
 const made = newMade()
+// Solid, once, at an address of its own, so every page and module, whichever app built it, runs one Solid and one
+// reactive runtime, whose proxies the universal renderer's views recognise.
 await build({
   configFile: false,
   root: here("."),
-  // Its files find each other wherever the client serves them.
   base: "./",
   logLevel: "warn",
-  plugins: [stylesPlugin(made), solid()],
   build: {
     outDir: client,
     emptyOutDir: true,
     sourcemap: true,
     rolldownOptions: {
-      input: { ui: here("src/index.ts"), solid: "solid-js", internal: "solid-js/internal", web: "@solidjs/web" },
-      // What an app imports from each is what each exports, whether or not the UI library uses it.
+      input: { solid: "solid-js", internal: "solid-js/internal" },
       preserveEntrySignatures: "strict",
-      output: { entryFileNames: "[name].js", chunkFileNames: "ui-[hash].js" },
+      output: { entryFileNames: "[name].js", chunkFileNames: "solid-[hash].js" },
     },
   },
 })
-
-// The UI library a native host loads in their place (src/index.native.tsx and the `.native` files), as
-// /ui/client/native/web.js, Solid's universal renderer telling the host its mutations, and ui.js, the UI library drawn
-// with it. A page's
-// own bundle is the one built for the DOM: what it imports of web.js (`createComponent`, `memo`) both have.
+// The UI library (src/index.ts), and Solid's universal renderer as `@solidjs/web` (renderer.native.ts), which is what
+// an app's own build imports of it (`createComponent`, `memo`).
 await build({
   configFile: false,
   root: here("."),
   base: "./",
   logLevel: "warn",
   plugins: [stylesPlugin(made), solid()],
-  resolve: { alias: { "@solidjs/web": here("src/drawing-primitives/renderer.native.ts"), "#primitives": here("src/drawing-primitives/primitives.native.tsx"), "#bridge": here("src/bridge.native.ts") } },
+  resolve: { alias: { "@solidjs/web": here("src/drawing-primitives/renderer.native.ts") } },
   build: {
-    outDir: `${client}/native`,
+    outDir: client,
     emptyOutDir: false,
     sourcemap: true,
     rolldownOptions: {
-      input: { web: here("src/drawing-primitives/renderer.native.ts"), ui: here("src/index.native.tsx") },
-      // Both are the DOM build's, so the host runs one Solid and one reactive runtime, whose proxies the universal
-      // renderer's views recognise.
+      input: { web: here("src/drawing-primitives/renderer.native.ts"), ui: here("src/index.ts") },
       external: ["solid-js", "solid-js/internal"],
+      // What an app imports from each is what each exports, whether or not the UI library uses it.
       preserveEntrySignatures: "strict",
-      output: { entryFileNames: "[name].js", chunkFileNames: "native-[hash].js", paths: { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js" } },
+      output: { entryFileNames: "[name].js", chunkFileNames: "ui-[hash].js", paths: { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js" } },
     },
   },
 })
+// Where a client built before it was here asks for it (`/ui/client/native/`), the same files.
+mkdirSync(`${client}/native`, { recursive: true })
+for (const file of readdirSync(client).filter((file) => /^(ui|web)(\.js|-.*\.js)(\.map)?$/.test(file))) cpSync(`${client}/${file}`, `${client}/native/${file}`)
 
-// The tokens (src/tokens.ts) as the web's CSS variables, which the app's window also loads as they are
-// (clients/app/tauri.conf.json), and as a native host's table.
+// The tokens (src/tokens.ts) as CSS variables, which the app's window loads as they are (clients/app/tauri.conf.json),
+// and as the renderer's table.
 // Written only as it changes: a program that builds the UI library in (clients/app/build.rs) builds again as src/ does.
 if (!existsSync(here("src/tokens.css")) || text("src/tokens.css") !== tokensCss()) writeFileSync(here("src/tokens.css"), tokensCss())
 writeFileSync(`${client}/tokens.json`, JSON.stringify(tokensTable()))
 writeFileSync(`${client}/styles.json`, JSON.stringify(stylesTable(made)))
-const css = text("src/tokens.css") + text("src/ui.css") + stylesCss(made)
-writeFileSync(`${client}/ui.css`, transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
-// The typeface, beside the stylesheet that names it (tokens.css), the licence of the UI SDK code it holds, and what puts a page in its Colour Mode before it
-// draws, which every page loads first (app.js).
-for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt", "UI-SDK-LICENSE.txt", "colour-mode.js"]) cpSync(here(`src/${file}`), `${client}/${file}`)
+// The licence of the UI SDK code it holds.
+cpSync(here("src/UI-SDK-LICENSE.txt"), `${client}/UI-SDK-LICENSE.txt`)
 if (into) process.exit()
 
 /// The UI library's skill: every `///` comment that starts with an example, from index.ts and then from each file it

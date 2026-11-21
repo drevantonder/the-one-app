@@ -1,7 +1,7 @@
 // Solid's universal renderer for a native host: what a page draws, as mutations of its tree, each a direct call
 // of the host's (`globalThis.mutations`, ../renderer.ts), and what the person does, from the host, to the handler it's
-// for. A native host loads it as `/ui/client/web.js`, in place of Solid's DOM renderer: a page's bundle, built
-// for the DOM, imports only what both have (`createComponent`, `memo`).
+// for. A host loads it as `/ui/client/web.js`, as `@solidjs/web`: what a page's bundle imports of that
+// (`createComponent`, `memo`) it has.
 import { createRenderer } from "@solidjs/universal"
 import { dynamicComponent, omit, type Component } from "solid-js"
 import type { Event, Mutations, Type } from "./renderer.ts"

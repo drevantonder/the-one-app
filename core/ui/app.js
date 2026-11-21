@@ -8,11 +8,11 @@
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
 // exits with 1.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, extname, join, posix, relative, resolve, sep } from "node:path"
+import { dirname, extname, join, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
 import { build, normalizePath, parseAst } from "vite"
-import { newMade, stylesCss, stylesPlugin, stylesTable } from "./tables.ts"
+import { newMade, stylesPlugin, stylesTable } from "./tables.ts"
 
 const [source, out] = process.argv.slice(2)
 
@@ -37,36 +37,7 @@ try {
     // Its files find each other wherever the client serves the app.
     base: "./",
     logLevel: "silent",
-    plugins: [
-      stylesPlugin(made),
-      solid(),
-      // Every page has the UI library's look before any of it has run, in the Colour Mode its client chose, and its
-      // app's styles' after it (styles.css, beside it, which is written once every module is built).
-      {
-        name: "ui",
-        transformIndexHtml: () => [
-          { tag: "script", attrs: { src: "/ui/client/colour-mode.js" }, injectTo: "head-prepend" },
-          { tag: "link", attrs: { rel: "stylesheet", href: "/ui/client/ui.css" }, injectTo: "head-prepend" },
-          // Right after the UI library's, in the same place: a page has no <head> of its own, where "head" would put it
-          // before everything prepended, and the UI library's look would win over the page's own.
-          { tag: "link", attrs: { rel: "stylesheet", href: "styles.css" }, injectTo: "head-prepend" },
-        ],
-      },
-      // A module another page imports brings its own look: the stylesheets it imports, which a page links in its
-      // HTML, it links in the page that imports it as it runs.
-      {
-        name: "exported-css",
-        generateBundle(_, bundle) {
-          for (const chunk of Object.values(bundle)) {
-            if (chunk.type !== "chunk" || !exported.some(([name]) => name === chunk.name) || !chunk.viteMetadata?.importedCss.size) continue
-            const here = posix.dirname(chunk.fileName)
-            const links = [...chunk.viteMetadata.importedCss].map((css) => `\ndocument.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: new URL(${JSON.stringify(`./${posix.relative(here, css)}`)}, import.meta.url).href }))`)
-            // After its code and before its sourcemap's comment, so the lines the sourcemap maps stay where they were.
-            chunk.code = chunk.code.replace(/(\n\/\/# sourceMappingURL=.*)?$/, (comment = "") => links.join("") + comment)
-          }
-        },
-      },
-    ],
+    plugins: [stylesPlugin(made), solid()],
     build: {
       outDir: out,
       emptyOutDir: true,
@@ -87,13 +58,9 @@ try {
   process.exit(1)
 }
 
-// Its styles, beside each page and beside its modules: as CSS for the web, and as the style table a native host's
-// renderer draws with, which a host loads as it loads a module of the app for another's page (`Modules` in the
-// renderer's js.rs).
-for (const folder of new Set([out, ...pages.map((page) => join(out, dirname(page)))])) {
-  writeFileSync(join(folder, "styles.css"), stylesCss(made))
-  writeFileSync(join(folder, "styles.json"), JSON.stringify(stylesTable(made)))
-}
+// Its styles, beside each page and beside its modules: the style table the renderer draws with, which a host loads as
+// it loads a module of the app for another's page (`Modules` in the renderer's js.rs).
+for (const folder of new Set([out, ...pages.map((page) => join(out, dirname(page)))])) writeFileSync(join(folder, "styles.json"), JSON.stringify(stylesTable(made)))
 
 /// A problem as the compiler says it, with where: the file as the app's source names it, its line and column, and
 /// the lines around it. Solid's compiler says only what's wrong, so a file it couldn't read is read again by Vite's

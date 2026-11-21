@@ -1,8 +1,7 @@
 // The UI library as an app's page sees it (`tsconfig.app.json` names it `ui`): the drawing primitives, the
 // components drawn with them, and what an app asks for in passing, each with only the props a native host draws
-// too. Nothing here is the DOM's. The UI library's own typecheck proves its components take these (../check.ts),
-// so a page runs unchanged on the DOM. A component an app needs that isn't here yet is added here, with only
-// the props every host can draw, and the check says whether the DOM's takes them.
+// too. Nothing here is the DOM's. The UI library's own typecheck proves its components take these (../check.ts). A
+// component an app needs that isn't here yet is added here, with only the props every host can draw.
 import type { Element } from "solid-js"
 import type { Ice, Props, Rect } from "../drawing-primitives/renderer.ts"
 import type { Look, Styled, Styles } from "../styles.ts"
@@ -457,7 +456,7 @@ export declare function Widget(props: {
 }): Element
 
 // Scenes: a component's or a screen's states, named, each drawn as it is with what it shows, for the gallery
-// (core/ui/gallery) and for comparing what the DOM and a native host draw (core/ui/scenes.js). A scene is what to
+// (core/ui/gallery) and for drawing each natively and on the web (core/ui/scenes.js). A scene is what to
 // draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
 // (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
 // finger points at it (`touch`), what its window keeps at each edge (`safeArea`, top, right, bottom and left: a phone's

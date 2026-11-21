@@ -1,4 +1,4 @@
-// A list and its rows: written once on the drawing primitives, the same on the DOM and on a native host.
+// A list and its rows: written once on the drawing primitives, the same on every host.
 import { children, createContext, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, Text, textOf, View, VirtualizedList } from "#primitives"

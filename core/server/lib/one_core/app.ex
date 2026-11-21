@@ -454,7 +454,7 @@ defmodule OneCore.App do
     principles: `principle-experience-first` for what to build, `principle-model-the-domain` for the state it keeps,
     `principle-make-operations-idempotent` for tools and jobs that may run twice, `principle-fix-root-causes` when
     something's wrong, and `principle-prove-it-works` before calling it done.
-  - The UI library's components are its own and work on every host, the DOM and a native one. For something it lacks,
+  - The UI library's components are its own and work on every host. For something it lacks,
     compose its primitives (and, later, the element API).
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then

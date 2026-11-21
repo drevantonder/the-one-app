@@ -1,10 +1,10 @@
 // What's typed in or chosen: a field around it, a line or lines of text, a search, a checkbox, a switch and radios,
-// written once on the drawing primitives (#primitives), the same on the DOM and on a native host.
+// written once on the drawing primitives (#primitives), the same on every host.
 import { createSignal, For, omit, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Path, Pressable, Svg, Text, TextInput, View } from "#primitives"
 import { keydown, touch } from "#bridge"
-import type { Keyed, TextInputProps } from "../drawing-primitives/primitives.tsx"
+import type { Keyed, TextInputProps } from "../types/ui.d.ts"
 import { Icon } from "./button.tsx"
 import { askMac, pressed } from "./actions.tsx"
 import { ListStyle } from "./list.tsx"

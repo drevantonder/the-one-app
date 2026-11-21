@@ -1,5 +1,5 @@
 // A screen as it is now, as a remote desktop app shows one: written once on the drawing primitives (#primitives),
-// the same on the DOM and on a native host. Its live video is the `Video` primitive, which a host draws, and its
+// the same on every host. Its live video is the `Video` primitive, which a host draws, and its
 // pictures, where video can't connect, are an `Image` the page draws itself.
 import { createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"

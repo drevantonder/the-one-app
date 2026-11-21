@@ -1,7 +1,7 @@
-// How an app's page draws natively, on our renderer on a computer, an iPhone and Android: its JS runs in a
-// sandbox of its own (rquickjs), and Solid's universal renderer (@solidjs/universal) tells the host what changes in its
-// tree as mutations, which the host applies and draws. What the person does comes back as events. In a browser and in
-// MCP Apps the same app draws to the DOM instead, and none of this is used.
+// How an app's page draws on our renderer: natively on a computer, an iPhone and Android, its JS in a sandbox of its
+// own (rquickjs), and in a browser and in MCP Apps on the web's, its JS the browser's (clients/web/renderer). Solid's
+// universal renderer (@solidjs/universal) tells the host what changes in its tree as mutations, which the host applies
+// and draws. What the person does comes back as events.
 //
 // This file is the renderer's bridge: what crosses between the sandbox and the host to draw. Its other channel, what a
 // page asks its client (calls.ts), is MCP Apps' JSON-RPC, the same on every host. This one is ours and made to be fast,

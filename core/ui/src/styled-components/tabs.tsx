@@ -1,5 +1,5 @@
 // Tabs: a few views of one thing, one showing at a time, chosen in a segmented control. Written once on the drawing
-// primitives, the same on the DOM and on a native host.
+// primitives, the same on every host.
 import { createContext, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, Text, View } from "#primitives"

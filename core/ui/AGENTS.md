@@ -23,8 +23,7 @@ time it's set, and a node says it has it by `onFocus`: the host's in place of th
 
 `src/` itself holds what every layer uses: the tokens (`tokens.ts`), styles (`styles.ts`), the host bridge
 (`bridge.ts`, `calls.ts`) and words; and what's built from all of it: `index.ts`, `render.tsx` and `types/`, the UI
-library as a page's type check sees it. A `.native` file is a native host's twin of the file it's named after, as React
-Native's platform files are; build.js swaps them in for the native build.
+library as a page's type check sees it.
 
 ## Adding
 
@@ -58,5 +57,3 @@ Motion is the renderer's, on its own thread, never a turn of a page's JS a frame
 - `animationName` as keyframes (CSS's `@keyframes`) and `animation`, a motion token: a loop (a spinner, a shimmer, a
   wobble) runs in the renderer, never as a `requestAnimationFrame` loop in JS.
 - Colours move through Oklch, and corners, shadows and `backdropFilter` move too.
-
-The DOM build draws what CSS has (`transition`, `@starting-style`) and leaves out the rest.

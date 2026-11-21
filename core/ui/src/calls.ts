@@ -1,5 +1,5 @@
-// What a page asks its client on a native host, and hears back: MCP Apps' JSON-RPC 2.0, as a page on the DOM
-// posts it to its frame's parent and hears it in its `message` event, the same on every host. It's one of the two
+// What a page asks its client, and hears back: MCP Apps' JSON-RPC 2.0, as an MCP App's page posts it to its frame's
+// parent and hears it in its `message` event, the same on every host. It's one of the two
 // channels between a page's sandbox and its host; the other draws (renderer.ts).
 
 /** What a native host gives an app's sandbox, as `globalThis.host`, for its calls. */

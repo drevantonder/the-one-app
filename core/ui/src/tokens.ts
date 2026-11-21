@@ -9,8 +9,8 @@
 // a style names a token here by reference (`tokens.colour.mutedForeground`), never by its value.
 //
 // Values are Raycast's, as the round-two mockup measured them beside it (DESIGN.md), light and dark. The typeface is Allo (allo.joshpuckett.me, github.com/joshpuckett/
-// allo v1.0, SIL Open Font License with no Reserved Font Name: Allo-LICENSE.txt), served beside the UI library's
-// stylesheet so nothing comes from a font host; code is in the device's own monospace, and a script Allo lacks in the
+// allo v1.0, SIL Open Font License with no Reserved Font Name: Allo-LICENSE.txt), built into the renderer and
+// served beside the app's window page, so nothing comes from a font host; code is in the device's own monospace, and a script Allo lacks in the
 // device's own font. Allo-Variable.woff2 is its AlloVariable.ttf with roundness pinned at 100 and only Latin kept:
 //   fonttools varLib.instancer AlloVariable.ttf ROND=100 -o allo.ttf
 //   pyftsubset allo.ttf --layout-features='*' --flavor=woff2 --output-file=Allo-Variable.woff2 --unicodes=U+0000-00FF,

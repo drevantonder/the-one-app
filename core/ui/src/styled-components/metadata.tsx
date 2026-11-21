@@ -1,5 +1,5 @@
 // What something is, as label and value rows, as Raycast's Detail.Metadata: written once on the drawing
-// primitives, the same on the DOM and on a native host.
+// primitives, the same on every host.
 import { children, For, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Text, View } from "#primitives"

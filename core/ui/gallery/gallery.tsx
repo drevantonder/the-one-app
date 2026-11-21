@@ -1,6 +1,6 @@
 // Every component of the UI library in each of its states, as scenes (`<family>.scenes.tsx`): one page that
 // draws them all, under their families, or the one its link names (`#Buttons/Variants`), alone, as the scenes'
-// runner (core/ui/scenes.js) draws each to compare the DOM's with a native host's; `#scenes` lists them for it.
+// runner (core/ui/scenes.js) draws each, natively and on the web; `#scenes` lists them for it.
 // Nothing here calls a tool.
 import { For, Show } from "solid-js"
 import { link, render, type Scene, type Scenes, ScrollView, Section, styles, Text, tokens, View } from "ui"

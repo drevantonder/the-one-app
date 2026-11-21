@@ -50,16 +50,13 @@ in core/ui, after `bun build.js`:
     bun scenes.js --out <scratch>/before          # on main, before the change (or an earlier run)
     bun scenes.js --out <scratch>/after --against <scratch>/before [<folder>…]
 
-It draws every scene, or those of the folders named, on the DOM in headless Chromium (Playwright's, which
-`bunx playwright-core install chromium` fetches where it's missing), with `--web` by our renderer on the web there (its
-WebGPU on SwiftShader, which draws on the CPU, so only for a change to the web platform: `web.png`, compared with
-`native.png`) and on a native host by its headless
-harness (`cargo build -p renderer --example screenshot --features fake`). What counts is **what changed since `--against`** on our renderer
+It draws every scene, or those of the folders named, on a native host by its headless harness (`cargo build -p
+renderer --example screenshot --features fake`), and with `--web` by our renderer on the web too, in headless Chromium
+(Playwright's, which `bunx playwright-core install chromium` fetches where it's missing; its WebGPU on SwiftShader,
+which draws on the CPU, so only for a change to the web platform: `web.png`, compared with `native.png`). What counts is **what changed since `--against`** on our renderer
 (`changed.png`): a tree that changed, or pictures more than 2% apart, is looked at. A difference that's meant is said
 in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md (Raycast-inspired), not
-the browser: it draws the web too. Until the DOM is gone, the sign-in and Vault pages in a browser still
-show it, so a large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but
-matching the DOM isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
+the browser: it draws the web too. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
 
 ### Checks: every change to the UI library or the renderer
 

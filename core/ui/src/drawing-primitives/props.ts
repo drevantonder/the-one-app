@@ -1,10 +1,28 @@
-// What a primitive makes of the props it's given, on the DOM and a native host alike.
+// What a primitive makes of the props it's given.
 import { children, merge, omit, type Element } from "solid-js"
-import type { PickerItemProps, PressableProps } from "./primitives.tsx"
+import type { PressableProps } from "../types/ui.d.ts"
 import { flat, styles, type Styled, type Styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
 
-/** The roles of what's pressed, which the DOM draws as a button, so the keyboard reaches it too (the renderer's
+/** A picker's props, as @react-native-picker/picker's: the value chosen, what's told as another is, and whether it
+ * can be. */
+export interface PickerProps {
+  selectedValue?: string
+  onValueChange?: (value: string, index: number) => void
+  enabled?: boolean
+  "aria-label"?: string
+  style?: Styles
+  children?: Element
+}
+
+/** An option of a picker's, as @react-native-picker/picker's `Picker.Item`. */
+export interface PickerItemProps {
+  label: string
+  value: string
+  enabled?: boolean
+}
+
+/** The roles of what's pressed, which the keyboard reaches too (the renderer's
  * `BUTTON_ROLES`). */
 export const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link", "combobox"])
 

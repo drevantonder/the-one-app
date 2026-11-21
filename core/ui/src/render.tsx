@@ -1,5 +1,5 @@
 // `render` as a page calls it: its first screen, in an error boundary, so a page that throws while drawing shows what
-// failed and Try Again instead of a blank window. Once here for every page, the DOM's and a native host's: the
+// failed and Try Again instead of a blank window. Once here for every page: the
 // primitives' own `render` (#primitives) draws it.
 import { Errored } from "solid-js"
 import type { JSX } from "@solidjs/web"

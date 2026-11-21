@@ -242,31 +242,15 @@ function declarations(property: string, value: any): string {
 /** The name of keyframes, as their CSS has them (`keyframes`). */
 const keyframesName = (frames: Record<string, Record<string, unknown>>) => `k${hash(JSON.stringify(frames))}`
 
-/** Keyframes as CSS's `@keyframes`. */
-const keyframes = (frames: Record<string, Record<string, unknown>>) =>
-  `@keyframes ${keyframesName(frames)}{${Object.entries(frames).map(([at, style]) => `${at}{${Object.entries(style).map(([property, value]) => declarations(property, value)).join(";")}}`).join("")}}`
-
-/** A class's rule, where it's in `state`. */
-function rule(name: string, state: string, body: string): string {
-  if (state === "hover") return `@media (hover:hover) and (pointer:fine){.${name}:hover{${body}}}`
-  if (state === "pressed") return `.${name}:active{${body}}`
-  if (state === "focused") return `.${name}:focus-visible{${body}}`
-  if (state === "entering") return `@starting-style{.${name}{${body}}}`
-  // The DOM takes out what goes at once, with no state of its going to draw.
-  if (state === "exiting") return ""
-  return `.${name}{${body}}`
-}
-
-/** What a module's styles and tokens made: each style's classes by property, the CSS and entries they need, the app's own
- * tokens and the ones it names new values for (`defineVars`, `createTheme`) by id, and what it warns of. */
+/** What a module's styles and tokens made: each style's entry, the app's own tokens and the ones it names new values
+ * for (`defineVars`, `createTheme`) by id, and what it warns of. */
 export interface Made {
-  css: Map<string, string>
   table: Table["styles"]
   tokens: Map<string, Token>
   warnings: Set<string>
 }
 
-export const newMade = (): Made => ({ css: new Map(), table: {}, tokens: new Map(), warnings: new Set() })
+export const newMade = (): Made => ({ table: {}, tokens: new Map(), warnings: new Set() })
 
 /** An app's tokens as a native host's table has them, with the UI library's that are a part of one it names a new
  * value for (a label at 60%) as they are now. */
@@ -301,11 +285,7 @@ function compile(style: Record<string, any>, made: Made, dynamic: Record<string,
     out[property] = Object.entries(by)
       .map(([state, value]) => {
         const body = declarations(property, value)
-        const name = `x${hash(`${state}|${body}`)}`
-        // A state's rules after those it wins over, and a type style's before what changes a part of it.
-        made.css.set(`${["default", ...states].indexOf(state)}${property === "font" ? 0 : 1}${name}`, rule(name, state, body))
-        if (property === "animationName" && value && typeof value === "object") made.css.set(`00${keyframesName(value as never)}`, keyframes(value as never))
-        return name
+        return `x${hash(`${state}|${body}`)}`
       })
       .join(" ")
   }
@@ -322,9 +302,7 @@ function compile(style: Record<string, any>, made: Made, dynamic: Record<string,
   for (const property of Object.keys(dynamic).filter((property) => property !== "transitionVelocity")) {
     const custom = `var(--${id}-${property})`
     const body = property === "rotate" ? `rotate:${custom}` : declarations(property, custom)
-    const name = `x${hash(`default|${body}`)}`
-    made.css.set(`01${name}`, rule(name, "default", body))
-    out[property] = name
+    out[property] = `x${hash(`default|${body}`)}`
   }
   return out
 }
@@ -506,13 +484,6 @@ function warn(style: Record<string, any>, node: any, code: string, file: string,
     }
   }
 }
-
-/** The CSS of what `made`, its rules in the order states win, after its app's own tokens as CSS variables. */
-export const stylesCss = (made: Made) =>
-  [
-    made.tokens.size ? variablesCss([...made.tokens.values()], "/* The app's own tokens (defineVars) and those it names new values for (createTheme). */\n") : "",
-    ...[...made.css.entries()].sort(([a], [b]) => a.slice(0, 2).localeCompare(b.slice(0, 2))).map(([, rule]) => rule),
-  ].join("\n")
 
 /** Vite's plugin: each module's styles worked out as it's built, into `made`. */
 export const stylesPlugin = (made: Made): Plugin => ({

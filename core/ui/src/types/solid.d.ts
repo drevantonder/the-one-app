@@ -1,4 +1,4 @@
-// What Solid 2.0 has at runtime, on the DOM and on a native host, that its own public types leave out.
+// What Solid 2.0 has at runtime that its own public types leave out.
 import type { Accessor } from "solid-js"
 
 declare module "solid-js" {
