@@ -23,7 +23,7 @@
 // one's Direct3D 12, as motion.js plays there: where each node is laid out there and here, and how much of the
 // pictures differs, `device.png` beside `afresh.png`, drawn the same way here), each as a picture, and natively its
 // semantic tree as text (src/drawing-primitives/outline.ts) too. It says, scene by scene, how much of the pictures
-// differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
+// differs (a web picture more than 1% from its native one fails, `WEB_DIFFERS_MOST`), and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
 // scrolls, the memory drawing took and what a second window adds, to compare a change's before and after.
@@ -397,6 +397,12 @@ function compared(said, them, treeA, treeB, pictureA, pictureB, diff) {
   said.push(`  ${them}: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
 }
 
+/// The most of a scene's web picture that may differ from its native one, from 0 to 1, else the scene fails: our
+/// renderer draws both, so more is the web platform's fault, as the widgets' shapes missing from the web were (L30).
+const WEB_DIFFERS_MOST = 0.01
+/// Scenes whose web picture differs more for a known reason that isn't one, by `<folder> · <scene>`, each with why.
+const WEB_DIFFERS = {}
+
 // Our renderer on the web, on WebGPU, which a machine with no GPU has only as SwiftShader's, and whose canvas is put on
 // the page only when the page is composited on the GPU too (ANGLE on SwiftShader), at a phone's two pixels a point.
 // One that hangs (SwiftShader's GPU process, under load) is started again, so it takes no other scene with it.
@@ -454,10 +460,13 @@ for (const target of targets) {
       said.push(`  web: the screen says a word that isn't a person's: ${line}`)
       process.exitCode = 1
     }
+    const excused = WEB_DIFFERS[`${name} · ${scene.name}`]
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
     else if (onTheWeb && !drawn.missing) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))
-      said.push(`  native and web: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
+      const over = part === undefined || part > WEB_DIFFERS_MOST
+      said.push(`  native and web: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${over ? ` (over ${WEB_DIFFERS_MOST * 100}%${excused ? `, known: ${excused}` : ""})` : ""}`}`)
+      if (over && !excused) process.exitCode = 1
     }
     const before = against && join(against, name, basename(folder))
     // What changed, where our renderer drew the scene both times.
