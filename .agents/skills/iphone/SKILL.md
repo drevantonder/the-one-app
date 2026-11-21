@@ -94,6 +94,22 @@ API key (App Store Connect's `buildUploads`), with no Mac. Apple processes it by
 nothing waits for: then the internal group "The One App" has the build (`hasAccessToAllBuilds`) and its testers take
 it automatically. App Store Connect's `processingState` says where it is, and Apple emails if it rejects it.
 
+## Memory
+
+An iPhone counts the app's GPU memory as its own (footprint's "IOAccelerator (graphics)" and "IOSurface"); the
+simulator doesn't. There the GPU's work runs in the Mac's `SimMetalHost` and `SimRenderServer`, shared with every
+other app on it, and the app's footprint (`footprint <pid>` on the Mac) is only its CPU side: about 105 MB with apps
+open on 20 Nov, flat over many opens. So a phone's memory over budget that's GPU memory doesn't show on the simulator,
+and Metal's `currentAllocatedSize` and the graphics ledger both read 0 there. Its CPU side (heap, JS, code) is the
+same as a phone's, so the simulator is where to find a CPU-side leak. What a phone holds, part by part, is in its
+Telemetry (`one.client.memory.*`, `clients/app/src/memory.rs`).
+
+On the simulator, `simctl launch --console` shows nothing the app says (`eprintln!`): read what it reports from the
+Telemetry of the network it's in. Its client's home is its App Group's container, as Xcode signs a simulator build
+with the group (`xcrun simctl` lists none: find the folder under the device's `data/Containers/Shared/AppGroup/` whose
+metadata names `group.app.theone.client`), so that's where its `network` file goes. A network on Linux reaches it
+through `ssh -R <port>:localhost:<port>` to the runner, and `axe` drives it (the App Library's search opens an app).
+
 ## Mistakes already made
 
 - Signing through anything running in the owner's logged-in session (Xcode, a GUI `osascript`, a Terminal tab):
