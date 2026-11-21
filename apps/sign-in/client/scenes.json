@@ -344,15 +344,31 @@
         ]
       }
     },
-    "component": "people"
+    "component": "people",
+    "checks": {
+      "Each person's menu button is at the row's end, in one column": [
+        {
+          "expect": {
+            "aligned": {
+              "of": {
+                "role": "button",
+                "text": "More for"
+              }
+            }
+          }
+        }
+      ]
+    }
   },
   "Group": {
+    "checks": {},
     "like": "People & Groups",
     "taps": [
       "Family"
     ]
   },
   "Invite": {
+    "checks": {},
     "like": "Group",
     "taps": [
       "Invite"

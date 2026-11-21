@@ -190,7 +190,6 @@ function PersonRow(props: { person: Person; all: All }) {
     <Row
       heading={name()}
       text={about(props.person, props.all) || undefined}
-      onPress={me() ? () => setNaming(true) : undefined}
       end={
         <Show when={me() || mayRemove()}>
           <Menu.Root onSelect={(value) => (value === "rename" ? setNaming(true) : remove(props.person, props.all))}>
