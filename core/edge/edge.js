@@ -15,8 +15,8 @@
 // That's the edge's Worker (`wrangler.jsonc`, `edge.ts`), with the web client's files (`clients/web`) as its assets,
 // the relay's (`relay/wrangler.jsonc`, `relay/worker.ts`), and each app's edge function: an app that has one holds an
 // ordinary Worker in the folder `edge` of its own (`apps/<name>/edge`), with a `wrangler.jsonc` and a `package.json` that names the first part of each path it
-// answers (`"paths": ["mcp"]`). The edge's list of them is made here. A part is built in `target/edge-dev/<name>` or
-// `target/edge-deploy/<name>`, a copy as deep in the repo as the folder it's of, so nothing that building leaves behind
+// answers (`"paths": ["mcp"]`). The edge's list of them is made here. A part is built in `target/edge-dev-<port>/<name>`
+// or `target/edge-deploy/<name>`, a copy as deep in the repo as the folder it's of, so nothing that building leaves behind
 // is among its app's files, and what it reaches in the repo by a path from itself it still reaches. A deploy never
 // rewrites what a local network's edge runs from. It's given three bindings to the edge beside its own:
 //
@@ -56,7 +56,10 @@ if (at && !process.env.CLOUDFLARE_API_TOKEN) {
 /** The first part of each path a piece of the edge answers (`edge.ts`). The web client's files are the rest. */
 const PIECES = await Bun.file(`${here}/paths.json`).json();
 
-const built = `${root}/target/edge-${what === "dev" ? "dev" : "deploy"}`;
+// A local network's edge is built in a folder of its own, by the port it listens on (`--port`, 8787 where `wrangler dev`
+// takes none), so networks side by side in one checkout don't build over each other's.
+const port = rest.includes("--port") ? rest[rest.indexOf("--port") + 1] : "8787";
+const built = `${root}/target/edge-${what === "dev" ? `dev-${port}` : "deploy"}`;
 rmSync(built, { recursive: true, force: true });
 mkdirSync(built, { recursive: true });
 
