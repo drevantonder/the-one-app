@@ -187,6 +187,11 @@ impl Renderer {
         #[cfg(target_arch = "wasm32")]
         let surface = context.instance.create_surface(target)?;
         let capabilities = surface.get_capabilities(&context.adapter);
+        // A browser's canvas may be read and copied, as WebGPU's `GPUCanvasConfiguration.usage` has it, which wgpu's
+        // WebGPU backend doesn't say (only `RENDER_ATTACHMENT`): without it a backdrop drew nothing on the web, so
+        // its glass showed what's under it unblurred, and each frame was drawn whole.
+        #[cfg(target_arch = "wasm32")]
+        let capabilities = wgpu::SurfaceCapabilities { usages: capabilities.usages | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING, ..capabilities };
         // 8 bits a channel, unconverted: the shaders blend in sRGB, as the DOM does. BGRA where the surface has it,
         // as most do, else RGBA, as Android's.
         let format = [wgpu::TextureFormat::Bgra8Unorm, wgpu::TextureFormat::Rgba8Unorm]
