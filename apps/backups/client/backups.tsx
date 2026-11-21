@@ -2,7 +2,7 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Spinner, Split, Status, styles, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, date, Empty, Field, Icon, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Spinner, Split, Status, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
   note: { color: tokens.colour.secondaryLabel },
@@ -47,7 +47,8 @@ const network = { subject: "network" }
 const backups = createMemo(() => call("backups_destinations", {}, network).then((text): All => JSON.parse(text)))
 changed(() => refresh(backups))
 
-const when = (at: number) => new Date(at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
+/// When a backup was made: its day (`date`, never broken across lines) and time, "Dec 28, 2025, 2:30 PM".
+const when = (at: number) => `${date(at)}, ${time.format(at)}`
 /// How long something took: "40 ms", "14 s", "3 min".
 const took = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 /// A name as relation tuples say it, short: "users/andre" is "andre".

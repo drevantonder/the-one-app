@@ -1618,5 +1618,54 @@
         }
       ]
     }
+  },
+  "An Old Alert": {
+    "like": "Overview",
+    "taps": [
+      "Disk was nearly full"
+    ],
+    "size": [
+      1024,
+      720
+    ],
+    "answers": {
+      "telemetry_alerts": {
+        "alerts": [
+          {
+            "id": 2,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Disk was nearly full",
+            "began": 1759449600000,
+            "last": 1759453200000,
+            "ended": 1759456800000
+          }
+        ],
+        "kinds": [
+          {
+            "kind": "failing",
+            "about": "A tool keeps failing"
+          },
+          {
+            "kind": "disk",
+            "about": "A disk is nearly full"
+          },
+          {
+            "kind": "slow",
+            "about": "A tool is slow"
+          }
+        ],
+        "forwarding": "https://logs.example.com/ingest"
+      }
+    },
+    "checks": {
+      "A date is never broken inside": [
+        {
+          "expect": {
+            "unbroken": "[A-Z][a-z]{2} \\d{1,2}, \\d{4}"
+          }
+        }
+      ]
+    }
   }
 }
