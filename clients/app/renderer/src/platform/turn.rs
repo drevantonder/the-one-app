@@ -49,6 +49,15 @@ impl Windows {
         self.display.paced() && self.ticked.is_some_and(|at| since(at) < self.refresh() * 5 / 4)
     }
 
+    /// Whether the display's link, ticking while something moves, hasn't yet for a refresh that's gone by: what the
+    /// person does meanwhile came after that refresh, so it waits (`waits`) for the frame drawn for it, on the link's
+    /// late tick or the loop's own clock standing in (`ticking`), and is drawn in the next, as a browser's input is in
+    /// the frame begun after it came. Done at once, the late frame drew it a refresh early and the next drew nothing
+    /// new: a trackpad's swipe at 120 Hz, as a ProMotion display's link stopped, moved 5.5 pt and then held.
+    pub(super) fn overdue(&self) -> bool {
+        self.ticking() && self.framing() && self.ticked.is_some_and(|at| since(at) >= self.refresh())
+    }
+
     /// The display's refresh interval, as it says: every platform's knows it before its first frame, so the loop's own
     /// clock stands in at the display's pace from the first motion after it starts, never a 60 Hz display's on a 120.
     pub fn refresh(&self) -> std::time::Duration {

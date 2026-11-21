@@ -13,9 +13,12 @@ impl Windows {
         if let Some((recording, event)) = self.recording.as_mut().zip(input.traced()) {
             recording.input(id, event, None);
         }
-        if let Some(discrete) = input.waits()
-            && self.waits(id, discrete)
-        {
+        // The wheel, which waits for no page, waits for a frame that's overdue (`overdue`), as what does.
+        let waits = match input.waits() {
+            Some(discrete) => self.waits(id, discrete),
+            None => matches!(input, Input::Wheel(..)) && self.overdue(),
+        };
+        if waits {
             if let Some(window) = self.windows.get_mut(&id) {
                 window.waiting.push_back(Waiting::Input(part, input));
             }

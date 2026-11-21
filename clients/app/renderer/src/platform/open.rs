@@ -172,11 +172,11 @@ impl Windows {
     /// `discrete` (a press, a key) waits until the page has run what they did before (`Screen::caught_up`), as a
     /// browser runs each input event once its page has run the one before, so a Tab or a press acts on what the page
     /// made of the key or press before it, never on a frame from before it. What's continuous (the pointer or a finger
-    /// moving) waits only behind what does, so it comes after it.
+    /// moving) waits only behind what does, so it comes after it. Either waits for a frame that's overdue (`overdue`).
     pub(super) fn waits(&mut self, id: WindowId, discrete: bool) -> bool {
         let Some(window) = self.windows.get(&id) else { return false };
         let Ok(screen) = &window.screen else { return false };
-        if !window.waiting.is_empty() || (discrete && !screen.caught_up()) {
+        if !window.waiting.is_empty() || (discrete && !screen.caught_up()) || self.overdue() {
             return true;
         }
         if discrete {
@@ -197,11 +197,14 @@ impl Windows {
         }
     }
 
-    /// What waited for window `id`'s page is done, in order, while its page has caught up.
+    /// What waited for window `id`'s page is done, in order, while its page has caught up and no frame is overdue.
     pub(super) fn catch_up(&mut self, id: WindowId) {
         loop {
             #[cfg(feature = "fake")]
             self.wait();
+            if self.overdue() {
+                return;
+            }
             let Some(window) = self.windows.get_mut(&id) else { return };
             let Ok(screen) = &window.screen else { return window.waiting.clear() };
             let discrete = match window.waiting.front() {
