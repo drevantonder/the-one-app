@@ -65,6 +65,9 @@ type Adapter = Pick<DBAdapter, "findMany" | "findOne" | "create" | "update" | "d
 /** Someone, as Better Auth keeps them here: `users/<name>`, and the name they go by. */
 type User = AuthUser & { called?: string | null };
 
+/** Someone's account at this network, as a passkey of theirs is named: what they go by, and the network's address. */
+const account = (user: User, origin: string) => `${user.called || user.name} · ${new URL(origin).host}`;
+
 /** A device or an assistant someone let act as them. */
 interface Device {
   id: string;
@@ -565,13 +568,16 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
         registration: {
           // Whoever holds an invitation makes their first passkey with it, signed in as nobody yet.
           requireSession: false,
+          // A passkey is its person's account at this network, wherever it syncs to, so that's its name, in the
+          // password manager that keeps it and in Sign In & Security: "André van Tonder · one.example.com".
           resolveUser: async ({ ctx, context }) => {
             const invite = await invited(ctx.context.adapter, context ?? undefined);
-            const user = (await ctx.context.internalAdapter.findUserById(invite.userId))!;
-            return { id: user.id, name: user.name };
+            const user = (await ctx.context.internalAdapter.findUserById(invite.userId))! as User;
+            return { id: user.id, name: account(user, origin), displayName: account(user, origin) };
           },
-          afterVerification: async ({ ctx, context }) => {
+          afterVerification: async ({ ctx, user, context }) => {
             if (context) await ctx.context.adapter.delete({ model: "invite", where: [{ field: "id", value: await sha256(context) }] });
+            return { name: user.name };
           },
         },
       }),
@@ -882,7 +888,9 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     return { removed: user.called ?? user.name };
   }
   // A link that this person makes another passkey by, in a browser, within a quarter of an hour.
-  if (ask === "passkey") return { link: `${origin}/sign-in/#passkey=${await invitation(adapter, user, 15 * 60 * 1000)}` };
+  // Its query makes it a page of its own: a browser that has the sign-in page open already (Safari, from the app) loads it
+  // afresh, where a link that differs only after `#` kept what that page was doing (21 Nov: Unlock with Passkey's error).
+  if (ask === "passkey") return { link: `${origin}/sign-in/?passkey#passkey=${await invitation(adapter, user, 15 * 60 * 1000)}` };
   // A device that holds this person's key encrypted it to the passkey they confirmed there, whose PRF output derives
   // `prf_key`. It's kept only for that passkey, and only while that's its key: whatever else a device sends, as one
   // on a build that encrypted it to every passkey did, is never kept.

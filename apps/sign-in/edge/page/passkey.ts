@@ -19,7 +19,7 @@ const suite = new CipherSuite({ kem: new DhkemX25519HkdfSha256(), kdf: new HkdfS
 export const PRF = { prf: { eval: { first: new TextEncoder().encode(`one/encryption/1/passkey\n${location.host}`) } } } as AuthenticationExtensionsClientInputs
 
 /// What a passkey that can't unlock anything is told.
-export const NO_PRF = "This passkey can't unlock your key on a new device, so approve it from a device that holds your key, or with your recovery key. Passkeys in iCloud Keychain, Google Password Manager, 1Password and Windows Hello can."
+export const NO_PRF = "This passkey can't unlock your key on a new device."
 
 /// The PRF output a passkey gave, if it gave one. A passkey that says it has PRF may still give none as it's made.
 export function output(results: AuthenticationExtensionsClientOutputs | undefined) {

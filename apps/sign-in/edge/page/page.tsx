@@ -17,7 +17,6 @@ import { Field, Icon, Image, Input, render, SignIn, styles, Text, tokens, View }
 import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
-import Bowser from "bowser"
 import { check, code, forDevice, forPasskey, forServers, NO_PRF, opened as openedKey, output, PRF, prfKey, unwrap } from "./passkey.ts"
 
 const look = styles({
@@ -74,6 +73,10 @@ type Flow =
   | { flow: "unlock"; device?: string; scope?: string }
   | { flow: "signIn" }
 
+// What it's opened for is read once, as it loads: a browser that opens another link to it in the same tab, which
+// differs only after `#`, loads it again, as Safari does with a link from the app.
+addEventListener("hashchange", () => location.reload())
+
 const flow: Flow = params.has("client_id")
   ? { flow: "assistant", request: location.search.slice(1), client: params.get("client_id")! }
   : opened.has("invite")
@@ -104,6 +107,7 @@ type Stage =
   | { stage: "approved"; name: string; unlocked: boolean }
   | { stage: "denied"; name: string }
   | { stage: "ready"; app: App }
+  | { stage: "confirm" }
   | { stage: "created" }
   | { stage: "unlocked"; name?: string; servers: string[]; whose: string }
   | { stage: "failed"; why: string; ended?: boolean }
@@ -263,19 +267,32 @@ async function withPasskey() {
     if (webauthn && PublicKeyCredential.signalUnknownCredential) PublicKeyCredential.signalUnknownCredential({ rpId: location.hostname, credentialId: webauthn.response.id })
     throw new Error("This passkey is no longer valid for this network. Try again and choose another one, or ask to be invited again if you have no other.")
   }
-  if (error) throw new Error(error.message ?? "That passkey didn't work. Try again.")
+  if (error) throw await plainly("use", error)
   await answered(result as Answered, output((result as Answered).webauthn?.clientExtensionResults) ?? null)
 }
 
 /// A passkey just made: its PRF output if making it gave one. One that has PRF but gave none as it was made (most
-/// providers but iCloud Keychain and Google Password Manager) gives it once it's used, so someone adding a passkey
-/// to unlock with uses it once more here. Someone joining has no key yet, and gives it the next time they sign in.
+/// providers but iCloud Keychain and Google Password Manager) gives it once it's used, so someone adding a passkey to
+/// unlock with uses it once more here, with a tap of its own: a browser asks for a passkey only right after one, and
+/// Safari refuses it otherwise. Someone joining has no key yet, and gives it the next time they sign in.
 async function made(result: Answered, again: boolean) {
   const results = result.webauthn?.clientExtensionResults
   const prf = output(results)
   if (prf || !results?.prf?.enabled) return answered(result, prf ?? null)
-  if (again) return withPasskey()
   used = { credential: result.webauthn!.response.id, at: Date.now() }
+  if (again) setStage({ stage: "confirm" })
+}
+
+/// What a browser said when a passkey wasn't made or used, in the page's words, with what to do. Its own words go to
+/// Telemetry, as they help whoever looks into it and nobody here: Safari's NotAllowedError says only that "the user
+/// agent or the platform" didn't allow it. What this network's sign-in says (`edge/auth.ts`) is said as it is.
+async function plainly(as: "make" | "use", error: { code?: string; message?: string }) {
+  const browser = !error.code || /^(ERROR_|AUTH_CANCELLED|UNKNOWN_ERROR)/.test(error.code)
+  if (!browser) return new Error(error.message ?? "That didn't work. Try again.")
+  const record = { name: "sign_in.page.passkey", attributes: { as, code: error.code ?? "" }, error: error.message ?? "" }
+  console.error("passkey", record)
+  await tool("telemetry_record", { records: [record] }).catch(() => {})
+  return new Error(as === "make" ? "Not saved. Create a passkey to try again." : "No passkey was used. Try again.")
 }
 
 /// Calls a tool of the network's as whoever is signed in here, as the web client does (`clients/web/host.js`), for
@@ -382,28 +399,25 @@ async function another() {
   location.reload()
 }
 
-/// What a passkey made here is called, by where it was made, as its person's Sign In & Security lists it, and asks
-/// whether it may unlock their key.
-const passkeyName = ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ")
-
 /// The passkey question, and what answering it lets in. Someone joining makes their passkey, and is signed in
 /// with it. Whoever was signed in here before no longer is.
 async function signIn() {
   if (flow.flow === "addPasskey") {
     await auth.signOut()
-    const result = await auth.passkey.addPasskey({ context: flow.another, name: passkeyName, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
+    const result = await auth.passkey.addPasskey({ context: flow.another, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
     const { error } = result
     // Better Auth's own words for a device that holds a passkey of theirs already, which is all the browser says.
     if ((error as { code?: string } | null)?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
-    if (error) throw new Error(error.message ?? "That passkey wasn't made. Try again.")
+    if (error) throw await plainly("make", error)
     await made(result as Answered, true)
-    return setStage({ stage: "created" })
+    if (stage().stage !== "confirm") setStage({ stage: "created" })
+    return
   }
   if (flow.flow === "join") {
     if (!called().trim()) throw new Error("Say your name first.")
     await auth.signOut()
-    const result = await auth.passkey.addPasskey({ context: flow.invite, name: passkeyName, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
-    if (result.error) throw new Error(result.error.message ?? "That passkey didn't work. Try again.")
+    const result = await auth.passkey.addPasskey({ context: flow.invite, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
+    if (result.error) throw await plainly("make", result.error)
     await made(result as Answered, false)
     await ask("/update-user", { called: called().trim() })
   } else if (flow.flow === "assistant" && (await signedInJustNow())) {
@@ -548,7 +562,20 @@ function shows(): Shows {
           return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : flow.scope ? `Use your passkey to hand ${whose(flow.scope)} key to the servers waiting for it.` : "Use your passkey to hand your key to the servers waiting for it.", button: "Continue", onSignIn: signIn }
       }
     case "addPasskey":
-      return now.stage === "created" ? { heading: "Add a passkey", done: shownCode ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}` : "Your passkey is created. Go back to the app." } : { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }
+      switch (now.stage) {
+        // One more tap, for its PRF output, which a browser gives only right after one.
+        case "confirm":
+          return { heading: "Add a passkey", note: "Use your new passkey once, so it can unlock your key on a new device.", button: "Use Passkey", onSignIn: () => withPasskey().then(() => setStage({ stage: "created" })) }
+        case "created":
+          return {
+            heading: "Add a passkey",
+            done: shownCode
+              ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}`
+              : "Your passkey is created, and you can sign in with it, but it can't unlock your key on a new device. Passkeys saved in iCloud Keychain or Google Password Manager can.",
+          }
+        default:
+          return { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }
+      }
     case "join":
       return google() ? { heading: "Join", problem: refused, ...withGoogleFirst("Create a Passkey"), asksName: true } : { heading: "Join", button: "Create a passkey", onSignIn: signIn, asksName: true }
     case "signIn":
