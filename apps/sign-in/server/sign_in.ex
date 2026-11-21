@@ -453,7 +453,7 @@ defmodule SignIn do
   def call("add_passkey", _inputs, call) do
     who = person(call)
 
-    if screen?(call, who) do
+    if screen?(call) do
       %{link: ask(%{ask: "passkey", who: who})["link"]}
     else
       Call.tool(call, "notifications", "send", %{
@@ -573,20 +573,56 @@ defmodule SignIn do
     OneCore.Hooks.validate("reach", request, {call.actor, call.subject}) == :ok
   end
 
-  # Whether a call comes from its person's own screen: the app, or the web client, on a device of theirs that isn't an
-  # assistant. A client's name is only what it says (`Call.client/1`), so an assistant, which comes over the web too and
-  # may say it's anything, is told apart by its device, which the edge knows. What runs on a device with its key, as
-  # `one` does, could say it's the app as well, and holds what the device does already.
-  defp screen?(call, who) do
+  @doc """
+  The device a call came from, as `devices` lists its person's (`kind` app, assistant or browser), or `nil` for one
+  that's none of theirs, as a sharing link's holder or a scheduled job. What comes over the web is the device the
+  edge proved: an app by its signature, an assistant by its token, and a browser by its session, which the edge names
+  by a hash of it (`edge/auth.ts`).
+
+      Call.app(call, "sign-in").device(call)
+  """
+  def device(call) do
+    with %{"device" => device} when is_binary(device) <- Call.client(call),
+         "users/" <> _ = who <- call.actor do
+      %{"devices" => devices} = ask(%{ask: "devices", who: who})
+      Enum.find(devices, &(&1["id"] == device or (&1["kind"] == "browser" and browser(&1["id"]) == device)))
+    else
+      _ -> nil
+    end
+  end
+
+  @doc """
+  Whether a call comes from its person's own screen, where they see what they're doing: the One App (`one-app`) on a
+  device of theirs, or the web client (`one-web`) in a browser they signed in. A client's name is only what it says
+  (`Call.client/1`), so it counts only on the kind of device it names, as that's proved: a browser by its session
+  and an app by its key, over its own connection or the web. An assistant or a sharing link's holder is neither,
+  whatever it says. What runs on a device with its key, as `one` does, could say it's the app, and holds what the
+  device does already; `one mcp` says an agent's MCP client is never one of these (`clients/cli/src/mcp.rs`).
+
+      Call.app(call, "sign-in").screen?(call)
+  """
+  def screen?(call) do
     case Call.client(call) do
-      %{"name" => name, "device" => device} when name in ["one-app", "one-web"] ->
-        %{"devices" => devices} = ask(%{ask: "devices", who: who})
-        not Enum.any?(devices, &(&1["id"] == device and &1["kind"] == "assistant"))
+      %{"web" => false, "name" => "one-app"} ->
+        true
+
+      %{"web" => true, "name" => name} when name in ["one-app", "one-web"] ->
+        case device(call) do
+          %{"kind" => "app"} -> name == "one-app"
+          %{"kind" => "browser"} -> name == "one-web"
+          _ -> false
+        end
 
       _ ->
         false
     end
   end
+
+  # The device a browser's session is, as the edge names it (`browserDevice`, `edge/auth.ts`).
+  defp browser(session) when is_binary(session),
+    do: Base.encode16(:crypto.hash(:sha256, "browser\n" <> session), case: :lower)
+
+  defp browser(_session), do: nil
 
   defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
 
