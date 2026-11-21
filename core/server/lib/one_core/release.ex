@@ -255,12 +255,21 @@ defmodule OneCore.Release do
   end
 
   @doc """
-  Says how deploying the edge of `build` went (the hook `edge`): `:ok`, or `{:error, why}`, which the network's update
-  says of this server until a deploy of it goes. It's told again to deploy it as the update tries again.
+  Says how deploying the edge of `build` went (the hook `edge`): `:ok`; `{:setup, why}`, where it can't as the network
+  isn't set up for it, as with no token; or `{:error, why}`, where the deploy went back. The network's update says
+  which once, and never holds its servers for it (`core/edge/updater/updater.ts`).
   """
   def edge_deployed(build, result) do
     :persistent_term.erase({__MODULE__, :edge})
-    told(%{"edge_went_back" => with({:error, why} <- result, do: %{"build" => build, "why" => why}, else: (:ok -> nil))})
+
+    went =
+      case result do
+        :ok -> nil
+        {:setup, why} -> %{"build" => build, "why" => why, "setup" => true}
+        {:error, why} -> %{"build" => build, "why" => why}
+      end
+
+    told(%{"edge_went_back" => went})
     :ok
   end
 
@@ -342,8 +351,15 @@ defmodule OneCore.Release do
         _ -> "Updating… #{update["done"]} of #{update["of"]}"
       end
 
+    edge =
+      case update["edge_update"] do
+        %{"status" => "needs_setup", "why" => why} -> ["The network's address needs setting up to update itself: #{why}"]
+        %{"status" => "failed", "why" => why} -> ["The network's address didn't update: #{why}"]
+        _ -> []
+      end
+
     Enum.join(
-      [now | for(%{"name" => name, "why" => why} <- update["went_back"] || [], do: "#{name} didn't update: #{why}")],
+      [now | for(%{"name" => name, "why" => why} <- update["went_back"] || [], do: "#{name} didn't update: #{why}")] ++ edge,
       " · "
     )
   end

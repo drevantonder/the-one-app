@@ -8,12 +8,13 @@ metadata:
   category: Admin
 ---
 
-The network's update takes its servers to each build, and then has one of them deploy that build's edge, the part
-of the network at its address (`core/edge/updater/updater.ts`). This app is what deploys it there: with it installed
-for the network, a server says it deploys the edge (`deploys_edge`, in `one builds`' servers), and the update
-tells one ready server on the build to, as `updating_edge`. The deploy checks the edge answers as that build and
-rolls every Worker back if not; one that went back says why under `went_back`, and the update tries again as it
-does for a server.
+The network's update takes its servers to each build. Once they're all up to date on one, it has one of them deploy
+that build's edge, the part of the network at its address (`core/edge/updater/updater.ts`): the edge's own update,
+`edge_update` in `one builds`, which never holds the servers'. This app is what deploys it there: with it installed for
+the network, a server says it deploys the edge (`deploys_edge`), and one ready server on the build is told to. The
+deploy checks the edge answers as that build and rolls every Worker back if not. It's tried once a build, and Update
+Now tries again: `edge_update` says `needs_setup` where this app can't use the token, and `failed`, with why, where
+the deploy went back.
 
 It deploys with the network's Cloudflare API token: the field `api_token` of the item `Cloudflare edge deploy` in the
 network's Vault, switched on for this app, a token that can edit Workers and read the zone of the network's address.

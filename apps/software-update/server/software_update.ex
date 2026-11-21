@@ -30,8 +30,8 @@ defmodule SoftwareUpdate do
         # A deploy takes minutes, and a hook ten seconds at most.
         Task.start(fn -> OneCore.Release.edge_deployed(build, deploy(build, token)) end)
 
-      {:error, why} ->
-        OneCore.Release.edge_deployed(build, {:error, why})
+      {:setup, why} ->
+        OneCore.Release.edge_deployed(build, {:setup, why})
     end
 
     :ok
@@ -41,9 +41,9 @@ defmodule SoftwareUpdate do
   defp token(call) do
     {:ok, OneCore.Call.app(call, "vault").value(%{call | forwarded: true}, @item, "api_token")}
   rescue
-    error -> {:error, "Software Update can't use the network's Cloudflare token, #{@item} in its Vault: #{Exception.message(error)}"}
+    error -> {:setup, "Software Update can't use the network's Cloudflare token, #{@item} in its Vault: #{Exception.message(error)}"}
   catch
-    :throw, {OneCore.Call, :forwarding_loop} -> {:error, "#{OneCore.Servers.name(call.server) || "This server"} doesn't open the network's Vault"}
+    :throw, {OneCore.Call, :forwarding_loop} -> {:setup, "#{OneCore.Servers.name(call.server) || "This server"} doesn't open the network's Vault"}
   end
 
   # Deploys this server's build of the edge from a copy of its own, where Bun installs Wrangler, to the network's
