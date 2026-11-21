@@ -442,6 +442,17 @@ impl Screen {
         said
     }
 
+    /// The node a selector names, once it's there, for a harness that waits for it: `None` while nothing matches, an
+    /// error where several do and it doesn't say which (`nth`), as `inspect::one` has it.
+    pub fn matched(&self, selector: &Request) -> Option<anyhow::Result<Id>> {
+        (!inspect::select(&self.tree, selector).is_empty()).then(|| inspect::one(&self.tree, selector))
+    }
+
+    /// Why nothing matches a selector: no node, or only ones hidden from a screen reader (`includeHidden`).
+    pub fn unmatched(&self, selector: &Request) -> String {
+        inspect::none(&self.tree, selector)
+    }
+
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order, each once
     /// what came before it has run, and while its page asks for frames, each as a display's would come, on its clock:
     /// for an inspector's request, which no display ticks for. This waits on the app's JS thread.

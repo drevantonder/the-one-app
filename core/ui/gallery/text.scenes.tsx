@@ -90,10 +90,10 @@ export default {
     render: () => <Flying />,
     size: [390, 700],
     motions: {
-      "A text flies": { from: "Go", gesture: { moves: [{ ms: 90 }] }, follow: "Flies", located: true },
-      "A text rides a view that flies": { from: "Go", gesture: { moves: [{ ms: 90 }] }, follow: "Rides", located: true },
-      "A text spins": { from: "Go", gesture: { moves: [{ ms: 90 }] }, follow: "Spins", located: true },
-      "A text rides a view that spins": { from: "Go", gesture: { moves: [{ ms: 90 }] }, follow: "Turns", located: true },
+      "A text flies": { from: { role: "button", name: "Go" }, gesture: { moves: [{ ms: 90 }] }, follow: "Flies", located: true },
+      "A text rides a view that flies": { from: { role: "button", name: "Go" }, gesture: { moves: [{ ms: 90 }] }, follow: "Rides", located: true },
+      "A text spins": { from: { role: "button", name: "Go" }, gesture: { moves: [{ ms: 90 }] }, follow: "Spins", located: true },
+      "A text rides a view that spins": { from: { role: "button", name: "Go" }, gesture: { moves: [{ ms: 90 }] }, follow: "Turns", located: true },
     },
   },
   "Text/Type styles": () => (

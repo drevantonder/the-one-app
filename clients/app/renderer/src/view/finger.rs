@@ -176,7 +176,10 @@ impl Screen {
             // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it: the node the
             // selector first found, not another it finds once that's gone (an App Library's Notes, as Home's goes).
             if let Some(selector) = track {
-                followed = followed.or_else(|| inspect::one(&self.tree, selector).ok());
+                // The first frame it's there, it must be one node: another that matches later isn't it.
+                if followed.is_none() && let Some(found) = self.matched(selector) {
+                    followed = Some(found.context("what it follows (`track`)")?);
+                }
                 match followed.filter(|id| self.tree.nodes.contains_key(id)).and_then(|id| self.rects.get(&id)) {
                     Some(rect) => {
                         drawn["x"] = json!((rect.x * 100.0).round() / 100.0);
@@ -193,6 +196,10 @@ impl Screen {
             if frame >= ms && next == samples.len() && still {
                 break;
             }
+        }
+        // What's tracked was there in some frame, or it's a selector that matches nothing, which isn't a node that's gone.
+        if let (Some(selector), None) = (track, followed) {
+            anyhow::bail!("what it follows (`track`): {}", self.unmatched(selector));
         }
         // The window's own scene is older than what was drawn here, so its next frame is painted afresh.
         if draw.is_some() {

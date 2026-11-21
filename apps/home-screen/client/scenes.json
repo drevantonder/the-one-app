@@ -378,7 +378,11 @@
           "x": 300,
           "y": 500
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "swipe": [
             -200,
@@ -392,7 +396,11 @@
           "x": 300,
           "y": 500
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "fling": [
             -80,
@@ -405,7 +413,11 @@
           "x": 300,
           "y": 500
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "drag": [
             -130,
@@ -419,7 +431,11 @@
           "x": 100,
           "y": 500
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "swipe": [
             160,
@@ -433,7 +449,11 @@
           "x": 330,
           "y": 450
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "moves": [
             {
@@ -449,7 +469,11 @@
           "x": 300,
           "y": 450
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "moves": [
             {
@@ -465,7 +489,11 @@
           "x": 330,
           "y": 450
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes",
+          "nth": 0
+        },
         "gesture": {
           "moves": [
             {
@@ -984,7 +1012,10 @@
         {
           "expect": {
             "states": {
-              "of": "App Library",
+              "of": {
+                "role": "button",
+                "name": "App Library"
+              },
               "is": {}
             }
           }
@@ -993,7 +1024,10 @@
           "putAway": true
         },
         {
-          "press": "App Library",
+          "press": {
+            "role": "button",
+            "name": "App Library"
+          },
           "agent": true
         },
         {
@@ -1060,7 +1094,10 @@
           "x": 700,
           "y": 400
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
         "gesture": {
           "swipe": [
             -500,
@@ -1074,7 +1111,10 @@
           "x": 700,
           "y": 400
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
         "gesture": {
           "fling": [
             -140,
@@ -1087,7 +1127,10 @@
           "x": 700,
           "y": 400
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
         "gesture": {
           "drag": [
             -200,
@@ -1100,7 +1143,10 @@
         "gesture": {
           "trace": "traces/mac-swipe-to-app-library.json"
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
         "steady": true
       }
     }
@@ -1696,14 +1742,20 @@
         "gesture": {
           "trace": "traces/mouse-wheel-down.json"
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
         "steady": true
       },
       "A mouse's wheel spun on to the App Library": {
         "gesture": {
           "trace": "traces/mouse-wheel-spin.json"
         },
-        "follow": "Notes",
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
         "steady": true
       }
     },
@@ -3184,7 +3236,11 @@
           "wait": 1000
         },
         {
-          "press": "Notes",
+          "press": {
+            "role": "button",
+            "name": "Notes",
+            "nth": 0
+          },
           "hold": 800
         },
         {

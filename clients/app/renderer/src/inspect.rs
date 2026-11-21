@@ -42,7 +42,7 @@
 //! - `replay` (a selector, or a point, where a press goes down; `moves`, each `{dx, dy, ms}`, a stretch with neither
 //!   holding still; `lift`, true unless given; `hz`, the display's frames a second, 60 unless given; `input_hz`, its
 //!   moves a second, `hz` unless given; `after`, ms to keep drawing past its end, 2000 unless given, stopping once
-//!   nothing moves; `track`, a selector of a node to follow; `count`, a selector of nodes to count; `shows` and `holds`, ones whose nodes are counted the same way; `apart`, one whose nodes' rects are listed; `snap`: true for
+//!   nothing moves; `track`, a selector of the one node to follow (it fails, saying why, where nothing ever matches, or several do); `count`, a selector of nodes to count; `shows` and `holds`, ones whose nodes are counted the same way; `apart`, one whose nodes' rects are listed; `snap`: true for
 //!   each frame's picture) → `{hz, budget_ms, over, frames, time, paused}`: the press played as `drag` plays it, each
 //!   move at its own time, and every frame of the display drawn as the window draws one, each with what `profile`'s
 //!   says, `at` (ms since it went down), where `track` was drawn (`x`, `y`), how many nodes `count` matches a person
@@ -191,6 +191,11 @@ impl Request {
         self.selector().any(|input| self.inputs.contains_key(input))
     }
 
+    /// The inputs of its selector, with `includeHidden`, as a query that finds the same nodes takes them.
+    pub fn selector_inputs(&self) -> Map<String, Value> {
+        self.selector().chain(["includeHidden"]).filter_map(|input| Some((input.to_owned(), self.inputs.get(input)?.clone()))).collect()
+    }
+
     /// One of its selector's inputs.
     fn wants(&self, name: &str) -> Option<&str> {
         self.selector().any(|input| input == name).then(|| self.str(name)).flatten()
@@ -297,14 +302,36 @@ pub fn select(tree: &Tree, request: &Request) -> Vec<Id> {
         .collect()
 }
 
-/// The one node the request's selector names: its `nth` match, the first unless it says.
+/// The one node the request's selector names: its `nth` match where it says, else the only one. It fails, saying so, where
+/// none matches or where several do and it doesn't say which, never the first of them as if that were meant.
 pub fn one(tree: &Tree, request: &Request) -> anyhow::Result<Id> {
-    let nth = request.inputs.get("nth").and_then(Value::as_u64).unwrap_or(0) as usize;
     let matched = select(tree, request);
-    matched.get(nth).copied().with_context(|| match matched.len() {
-        0 => "no node matches that".to_owned(),
-        found => format!("only {found} nodes match that, so there's no nth {nth}"),
-    })
+    // The words of a node that match its name are the node, not another: a button named "Save" and its text "Save" are one.
+    let matched: Vec<Id> = matched.iter().copied().filter(|id| !(matches!(tree.nodes[id].kind, Kind::Text | Kind::RawText) && std::iter::successors(tree.parent(*id), |at| tree.parent(*at)).any(|at| matched.contains(&at)))).collect();
+    match (request.inputs.get("nth").and_then(Value::as_u64), matched.len()) {
+        (_, 0) => anyhow::bail!("{}", none(tree, request)),
+        (Some(nth), found) => matched.get(nth as usize).copied().with_context(|| format!("only {found} nodes match {}, so there's no nth {nth}", described(request))),
+        (None, 1) => Ok(matched[0]),
+        (None, found) => anyhow::bail!("{found} nodes match {}: say which with `nth`, or narrow it", described(request)),
+    }
+}
+
+/// Why nothing matches the request's selector, as an agent fixes it: a node hidden from a screen reader (`aria-hidden`,
+/// as a badge is) matches only with `includeHidden`.
+pub fn none(tree: &Tree, request: &Request) -> String {
+    let mut inputs = request.inputs.clone();
+    inputs.insert("includeHidden".into(), Value::Bool(true));
+    let hidden = select(tree, &Request { id: Value::Null, op: "query".into(), inputs }).len();
+    match (request.bool("includeHidden"), hidden) {
+        (false, 1..) => format!("no node matches {}, but {hidden} do that are hidden from a screen reader (aria-hidden): pass includeHidden", described(request)),
+        _ => format!("no node matches {}", described(request)),
+    }
+}
+
+/// A request's selector as it was said: `name "3", within {…}`.
+fn described(request: &Request) -> String {
+    let said: Vec<String> = request.selector().filter_map(|input| Some(format!("{input} {}", request.inputs.get(input)?))).collect();
+    said.join(", ")
 }
 
 /// Whether a press does something to it: it's an input, or it listens for `click` and isn't disabled.

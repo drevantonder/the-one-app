@@ -55,6 +55,7 @@
 //! renderer, as the process's resident set grew), and what a second window of its size adds (`window_mb`: a renderer
 //! of its own, drawing the same frame, the GPU and the atlas shared).
 
+use anyhow::Context as _;
 use std::path::PathBuf;
 
 use serde_json::{Value, json};
@@ -567,21 +568,21 @@ fn point_of(windows: &mut Windows, id: renderer::platform::WindowId, request: &r
         };
     }
     let mut query = json!({"op": "query"});
-    for input in ["node", "role", "name", "text", "key"] {
-        if let Some(value) = request.inputs.get(input) {
-            query[input] = value.clone();
-        }
-    }
+    query.as_object_mut().into_iter().for_each(|query| query.extend(request.selector_inputs()));
     let nth = request.inputs.get("nth").and_then(Value::as_u64).unwrap_or(0) as usize;
     // What isn't there yet, its page busy, is waited for, a second at most, as Playwright's click waits for its locator.
     let started = renderer::platform::fake_time();
     let node = loop {
         let found = ask(windows, id, query.clone()).ok_or_else(|| anyhow::anyhow!("its window didn't answer"))?;
+        // Several that match, with no `nth` to say which, is a selector too loose, not the first of them.
+        if let Some(Err(error)) = windows.with(id, |screen| screen.matched(request)).flatten() {
+            return Err(error);
+        }
         if let Some(node) = found["result"]["nodes"].get(nth).and_then(|node| node["node"].as_u64()) {
             break node;
         }
         if renderer::platform::fake_time() - started >= 1000.0 {
-            anyhow::bail!("no node matches that");
+            anyhow::bail!("{}", windows.with(id, |screen| screen.unmatched(request)).unwrap_or_default());
         }
         windows.run(1000.0 / 60.0);
     };
@@ -895,6 +896,10 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         _ => None,
     };
     let (mut track, count, shows, holds, apart) = (query("track"), query("count"), query("shows"), query("holds"), query("apart"));
+    let tracking = match request.inputs.get("track") {
+        Some(Value::Object(selector)) => Some(renderer::inspect::Request { id: Value::Null, op: "query".into(), inputs: selector.clone() }),
+        _ => None,
+    };
     // The nodes of what a selector matches that a person sees: drawn at all opaque, some of it in the window.
     let seen = |windows: &mut Windows, query: &Value| -> Vec<Value> {
         let found = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"].as_array().cloned()).unwrap_or_default();
@@ -980,9 +985,10 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         // selector first found, not another it finds once that's gone (an App Library's Notes, as Home's goes).
         if let Some(query) = &mut track {
             if query.get("node").is_none()
-                && let Some(node) = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"][0]["node"].as_u64())
+                && let Some(selector) = &tracking
+                && let Some(found) = windows.with(id, |screen| screen.matched(selector)).flatten()
             {
-                *query = json!({"op": "query", "node": node});
+                *query = json!({"op": "query", "node": found.context("what it follows (`track`)")?});
             }
             // Where the frame on the screen drew it, not where input since has it laid out for the next.
             match query["node"].as_u64().and_then(|node| windows.with(id, |screen| screen.shown_rect(node)).flatten()) {
@@ -1055,6 +1061,12 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     windows.set_refresh(60.0);
     windows.set_frame_ms(0.0);
     windows.set_link(0, None);
+    // What's tracked was there in some frame, or its selector matches nothing, which isn't a node that's gone.
+    if let (Some(selector), Some(query)) = (&tracking, &track)
+        && query.get("node").is_none()
+    {
+        anyhow::bail!("what it follows (`track`): {}", windows.with(id, |screen| screen.unmatched(selector)).unwrap_or_default());
+    }
     // What's been taken out but is still drawn going, which `after` should have seen go.
     let leaving = ask(windows, id, json!({"op": "window"})).and_then(|answer| answer["result"]["leaving"].as_u64()).unwrap_or(0);
     let budget = refresh;

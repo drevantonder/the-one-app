@@ -172,7 +172,7 @@ export default {
         </Field>
       </Screen>
     ),
-    checks: { "Its label ends at the middle of the window": [{ expect: { at: { of: "Colour Mode", x: 214, width: 330 } } }, { expect: { at: { of: "Light", x: 556 } } }] },
+    checks: { "Its label ends at the middle of the window": [{ expect: { at: { of: { role: "text", name: "Colour Mode" }, x: 214, width: 330 } } }, { expect: { at: { of: { role: "radio", name: "Light" }, x: 556 } } }] },
   },
   // A text field, a picker and a toggle in a computer's pane, as macOS Settings' General pane draws them: each beside
   // its label, so a field has room for what's typed in it.

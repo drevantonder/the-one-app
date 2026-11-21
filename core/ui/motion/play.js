@@ -6,7 +6,7 @@ import { against, only, out, present, rates, ssh } from "./options.js"
 import { build, pageFolder } from "./pages.js"
 import { device, devices, hostScore, judge } from "./tiers.js"
 import { presentThere, run, scenesOf } from "./harness.js"
-import { finger, ios, moves, selector, travel } from "./gesture.js"
+import { finger, ios, moves, selector, single, travel } from "./gesture.js"
 import { apart, contactSheet, curve, differs, filmstrip, rect, strayInk } from "./output.js"
 
 
@@ -46,7 +46,10 @@ async function play(built, scene, name, motion, hz, folder) {
   const started = performance.now()
   const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
-  if (ran.failed || !answer?.result) return { said: `  ${hz} Hz: ${answer?.error ?? ran.said.split("\n").at(-1)}` }
+  if (ran.failed || !answer?.result) {
+    process.exitCode = 1
+    return { said: `  ${hz} Hz FAILS: ${answer?.error ?? ran.said.split("\n").at(-1)}` }
+  }
   const { frames, budget_ms: budget, over, leaving } = answer.result
   // Whether its frames wait for its page's JS: a wheel's notches and the pointer moving don't, as a window scrolls them
   // at once, as a browser's compositor does (`Windows::waits`); a press, a key or a finger does.
@@ -100,12 +103,14 @@ async function play(built, scene, name, motion, hz, folder) {
   // grows out of its square and its apps out of the square's: within a point, or a step of its own motion, which may
   // have taken one before the frame it's first drawn on.
   if (origin) {
-    const from = ran.answers.at(-2)?.result?.nodes?.[0]?.rect
+    const { node: opensFrom, why } = single(ran.answers.at(-2), motion.opensFrom)
+    const from = opensFrom?.rect
     const drawn = frames.flatMap((frame) => (frame.rect ? [frame.rect] : []))
     const apart = (a, b) => Math.max(Math.abs(a.y - b.y), Math.abs(a.x + a.width / 2 - b.x - b.width / 2))
     const [first] = drawn
     const next = drawn.find((one) => apart(one, first) > 0)
-    if (!from || !first) failed.push(`${from ? "what it follows" : "what it opens from"} isn't there to compare`)
+    if (why) failed.push(`what it opens from: ${why}`)
+    else if (!from || !first) failed.push(`${from ? "what it follows" : "what it opens from"} isn't there to compare`)
     else if (apart(first, from) > Math.max(1, next ? apart(next, first) : 0)) failed.push(`it's first drawn at ${rect(first)}, not where it opens from, ${rect(from)}`)
   }
   // What each wheel's turn moves goes over several frames, as Windows' apps and Chrome smooth-scroll a notch: no frame

@@ -2,7 +2,7 @@
 import { readFileSync, writeFileSync } from "node:fs"
 import { join } from "node:path"
 import { PNG } from "pngjs"
-import { pressed, selector } from "./gesture.js"
+import { pressed, selector, single } from "./gesture.js"
 import { rect, strayInk } from "./output.js"
 
 /// The roles a layer over the page has, which a check's end finds drawn whole in the window wherever it's open.
@@ -78,7 +78,7 @@ export function requests(steps, folder, answers = {}) {
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
       // Where something's drawn, so what comes in above it isn't seen to push it.
-      if (step.expect.at) out.push({ request: { op: "query", ...selector(step.expect.at.of) }, judge: (answer) => { const rect = answer?.result?.nodes?.[0]?.rect; const off = ["x", "y", "width"].filter((side) => step.expect.at[side] !== undefined && !(Math.abs(rect?.[side] - step.expect.at[side]) <= 1)); return off.length > 0 && `${named(step.expect.at.of)} is drawn at ${off.map((side) => `${side} ${rect?.[side]}, not ${step.expect.at[side]}`).join(", ")}` } })
+      if (step.expect.at) out.push({ request: { op: "query", ...selector(step.expect.at.of) }, judge: (answer) => { const { node, why } = single(answer, step.expect.at.of); if (why) return why; const rect = node.rect; const off = ["x", "y", "width"].filter((side) => step.expect.at[side] !== undefined && !(Math.abs(rect?.[side] - step.expect.at[side]) <= 1)); return off.length > 0 && `${named(step.expect.at.of)} is drawn at ${off.map((side) => `${side} ${rect?.[side]}, not ${step.expect.at[side]}`).join(", ")}` } })
       if (js !== undefined) out.push({ request: { op: "window" }, judge: (answer) => answer?.result?.js_bytes > js * 1e6 && `its JS holds ${(answer.result.js_bytes / 1e6).toFixed(1)} MB, over ${js} MB` })
       // How many times the page has asked for each, by `<tool>` or `<tool> for <subject>`, as a check that it doesn't ask again.
       if (asked) out.push({ request: { op: "asks" }, judge: (answer) => Object.entries(asked).map(([what, times]) => ({ what, times, was: (answer?.result?.asks ?? []).filter((one) => one === what).length })).filter((one) => one.was !== one.times).map((one) => `${one.what} was asked ${one.was} times, not ${one.times}`).join(", ") || false })
@@ -242,7 +242,9 @@ export function requests(steps, folder, answers = {}) {
         out.push({
           request: { op: "query", ...selector(centred) },
           judge: (answer) => {
-            const rect = answer?.result?.nodes?.[0]?.rect
+            const { node, why } = single(answer, centred)
+            if (why) return why
+            const rect = node.rect
             if (!rect) return `${named(centred)} isn't drawn`
             const off = rect.x + rect.width / 2 - width / 2
             return Math.abs(off) > 1 && `${named(centred)}'s middle is ${Math.round(off)} pt from the window's`
@@ -261,12 +263,13 @@ export function requests(steps, folder, answers = {}) {
       // What's named stands off what's around it: the most contrast (WCAG's ratio) between the colour 3 pt outside its
       // start, at its middle, and any along its first 4 pt in, where a control's ring or a card's edge and fill are.
       if (contrast) {
-        let found, points
+        let found, points, missing
         out.push({ request: { op: "window" }, judge: (answer) => void (points = answer?.result?.width) })
-        out.push({ request: { op: "query", ...selector(contrast.of) }, judge: (answer) => void (found = answer?.result?.nodes?.[0]?.rect) })
+        out.push({ request: { op: "query", ...selector(contrast.of) }, judge: (answer) => void (({ node: { rect: found } = {}, why: missing } = single(answer, contrast.of))) })
         out.push({
           request: { op: "snap" },
           judge: (answer) => {
+            if (missing) return missing
             if (!found) return `${named(contrast.of)} isn't drawn`
             const { scale, luminance } = lights(answer.result.png, points)
             const y = found.y + found.height / 2
@@ -285,12 +288,13 @@ export function requests(steps, folder, answers = {}) {
       // glyph) off that background where it's furthest from it, as an iOS toolbar's glyph is an icon's size in a colour
       // that shows, not a speck.
       if (inked) {
-        let found, points
+        let found, points, missing
         out.push({ request: { op: "window" }, judge: (answer) => void (points = answer?.result?.width) })
-        out.push({ request: { op: "query", ...selector(inked.of) }, judge: (answer) => void (found = answer?.result?.nodes?.[0]?.rect) })
+        out.push({ request: { op: "query", ...selector(inked.of) }, judge: (answer) => void (({ node: { rect: found } = {}, why: missing } = single(answer, inked.of))) })
         out.push({
           request: { op: "snap" },
           judge: (answer) => {
+            if (missing) return missing
             if (!found) return `${named(inked.of)} isn't drawn`
             const { scale, luminance } = lights(answer.result.png, points)
             // Inside its box, clear of the edge a row's hairline or its own fill is drawn along.

@@ -26,6 +26,23 @@ export function moves(gesture) {
 /// What the inspector selects for a tap's name, as `scenes.js` presses it.
 export const selector = (tap) => (typeof tap === "string" ? { name: tap } : tap)
 
+/// The one node a `query` for `tap` found, as a check that means one reads it: `{ node }`, or `{ why }` where none matched
+/// (it may be hidden from a screen reader, as a badge is, which only `includeHidden` finds) or several did and `tap` doesn't
+/// say which (`nth`): never the first of them, which reads as a rect that doesn't move.
+export function single(answer, tap) {
+  const found = answer?.result?.nodes ?? []
+  // The words of a node that match its name are the node, not another: a button named "Save" and its text "Save" are one.
+  const inside = new Set()
+  const within = (node) => (node.children ?? []).forEach((child) => (inside.add(child), within(found.find((one) => one.node === child) ?? {})))
+  found.forEach(within)
+  const nodes = found.filter((node) => !(["text", "raw-text"].includes(node.kind) && inside.has(node.node)))
+  const said = typeof tap === "string" ? `"${tap}"` : JSON.stringify(tap)
+  const nth = selector(tap).nth
+  if (!nodes.length) return { why: `no node matches ${said} (it may be aria-hidden: pass includeHidden)` }
+  if (nth === undefined && nodes.length > 1) return { why: `${nodes.length} nodes match ${said}: say which with nth, or narrow it` }
+  return nodes[nth ?? 0] ? { node: nodes[nth ?? 0] } : { why: `only ${nodes.length} nodes match ${said}, so there's no nth ${nth}` }
+}
+
 /// How far what moved had gone at each frame: what `follow` names where it's said and moved, else what scrolls.
 export function travel(frames) {
   const series = (pick) => frames.map((frame) => pick(frame)).map((at) => (at === undefined ? undefined : at - pick(frames[0])))

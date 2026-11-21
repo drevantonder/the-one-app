@@ -2523,7 +2523,10 @@
         }
       ],
       "Pressing a row shows what it is and restores nothing": [
-        "Messenger",
+        {
+          "name": "Messenger",
+          "nth": 0
+        },
         {
           "expect": {
             "gone": {
@@ -2538,7 +2541,10 @@
         }
       ],
       "Delete Now asks over a dimmed page": [
-        "More for Messenger",
+        {
+          "name": "More for Messenger",
+          "nth": 0
+        },
         "Delete Now",
         {
           "expect": {
