@@ -38,7 +38,7 @@ defmodule Inspector do
         name: "windows",
         read_only: true,
         description:
-          "The app windows, drawn natively, open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none. Each device is asked at once, for up to eight seconds: one that didn't answer is in `failed`, with why, by its key.",
+          "The app windows, drawn natively, open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none. Each device is asked at once, for up to eight seconds: one that didn't answer is in `failed`, with why, by its key. Devices whose owner couldn't be checked are counted there too, unnamed, as they may be someone else's.",
         inputs: %{type: "object", properties: %{device: @device}},
         outputs: %{
           type: "object",
@@ -188,7 +188,7 @@ defmodule Inspector do
 
   @impl true
   def call("windows", inputs, call) do
-    devices = if inputs["device"], do: [device(call, inputs["device"])], else: mine(call)
+    {devices, unchecked} = if inputs["device"], do: {[device(call, inputs["device"])], []}, else: checked(call)
 
     {answers, failed} = OneCore.Asks.each(devices, &ask(&1, "windows", %{}))
 
@@ -202,7 +202,7 @@ defmodule Inspector do
           []
       end)
 
-    %{"windows" => windows, "failed" => failed}
+    %{"windows" => windows, "failed" => Map.merge(failed, unchecked(unchecked))}
   end
 
   def call(tool, inputs, call) do
@@ -222,10 +222,33 @@ defmodule Inspector do
     end
   end
 
-  # The devices the caller may inspect, of those whose app is watching: their own, or any where they own the network.
-  defp mine(call), do: Enum.filter(Server.devices(), &may?(call, &1))
+  # The devices the caller may inspect, of those whose app is watching: their own, or any where they own the network;
+  # and why, for each whose owner couldn't be checked, as when Sign-in can't be reached: it isn't named, as it may be
+  # someone else's.
+  defp checked(call) do
+    Enum.reduce(Enum.reverse(Server.devices()), {[], []}, fn device, {mine, unchecked} ->
+      whose = Hooks.whose(device)
 
-  defp may?(call, device), do: Hooks.whose(device) == call.subject or Call.owns?(%{call | subject: "network"})
+      cond do
+        whose == call.subject or Call.owns?(%{call | subject: "network"}) -> {[device | mine], unchecked}
+        match?({:error, _why}, whose) -> {mine, [elem(whose, 1) | unchecked]}
+        true -> {mine, unchecked}
+      end
+    end)
+  end
+
+  defp mine(call), do: elem(checked(call), 0)
+
+  defp unchecked([]), do: %{}
+
+  defp unchecked([why]), do: %{"1 device" => "Couldn't check whose it is, so it isn't named or asked: #{why}"}
+
+  defp unchecked(whys) do
+    why = Enum.join(Enum.uniq(whys), " ")
+    %{"#{length(whys)} devices" => "Couldn't check whose they are, so they aren't named or asked: #{why}"}
+  end
+
+  defp said(failed), do: Enum.map_join(failed, " ", fn {device, why} -> "#{device}: #{why}" end)
 
   # A device by its key, or by the name its app gives itself, which `windows` lists.
   defp device(call, named) do
@@ -237,9 +260,12 @@ defmodule Inspector do
 
   # The one device with a native window open, when none is named.
   defp only(call) do
-    case Enum.uniq(for w <- call("windows", %{}, call)["windows"], do: w["device"]) do
+    %{"windows" => windows, "failed" => failed} = call("windows", %{}, call)
+
+    case Enum.uniq(for w <- windows, do: w["device"]) do
       [device] -> device
-      [] -> raise "None of your devices has a native window open."
+      [] when failed == %{} -> raise "None of your devices has a native window open."
+      [] -> raise "None of your devices that answered has a native window open. #{said(failed)}"
       _ -> raise "More than one of your devices has a native window open: say which, as `windows` lists them."
     end
   end
