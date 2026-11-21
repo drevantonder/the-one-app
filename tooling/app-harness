@@ -13,6 +13,7 @@
 #   reopen   an app's window closed as its system closes it (`inspector close`) opens again from a `one:` link.
 #   closed   the launcher closed as its system closes it (`inspector close`) is there again: a phone's Home Screen, a
 #            window, opens again in its place, or says it didn't open, with Try Again; a computer's panel is put away.
+#   reloaded a phone's page loaded again as its system has it, its native windows left: one launcher, which answers.
 #   stale    the app started as an update starts it, its Home Screen and Settings updated while it wasn't running
 #            (the files it kept then stale): one window of each app, at every moment.
 #   cached   a view's read while the server holds every request, after a write of its own: answered at once, from
@@ -41,20 +42,20 @@
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [--phone] [start|reopen|closed|stale|cached|restart|updated|twice|blank|loading|open]…"
+usage="tooling/app-harness <folder> [--seed <n>] [--phone] [start|reopen|closed|reloaded|stale|cached|restart|updated|twice|blank|loading|open]…"
 folder= seed=1 phone= checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
     --phone) phone=390x844 ;;
-    start | reopen | closed | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
+    start | reopen | closed | reloaded | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen closed stale cached restart updated twice blank loading open)
+((${#checks[@]})) || checks=(start reopen closed reloaded stale cached restart updated twice blank loading open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -178,6 +179,27 @@ closed() {
   again=$(open_window home-screen)
   echo "        the launcher was window $launcher, and is $again"
   sleep 2 && snap "$again" "$folder/closed-after.png"
+  one_each
+}
+
+# A phone's page loaded again as its system has it, while its native windows stay: iOS loads it again as it ends its web
+# view's process in the background (Tauri's `on_web_content_process_terminate`), and Android as it makes its activity
+# again. Here its web process ends, which a phone's app on Linux loads its page again after, as an iPhone's does.
+# Within 20 s the launcher is a new window that answers, and a moment later the only one, where the page, which knew
+# nothing of the old one, opened a second over it (21 Nov). A computer's launcher has no page.
+reloaded() {
+  local launcher web
+  [[ -n $phone ]] || { echo "        a computer's launcher has no page" && return 0; }
+  [[ -n $app ]] || start_app || return 1
+  within 10 '[[ -n $(open_window home-screen) ]]' || { echo "        the inspector lists no launcher" && return 1; }
+  launcher=$(open_window home-screen)
+  web=$(ps -o pid=,comm= --ppid "$(programs | head -1)" | awk '$2 == "WebKitWebProces" { print $1 }')
+  [[ -n $web ]] || { echo "        the app's page has no web process" && return 1; }
+  kill -KILL $web
+  within 20 '[[ -n $(open_window home-screen) && $(open_window home-screen) != *"$launcher"* ]] && "$one" inspector tree --window "$(open_window home-screen | tail -1)" >/dev/null 2>&1' ||
+    { echo "        no new launcher answers 20 s after the page's web process ended: $(windows | tr '\n' ' ')" && return 1; }
+  sleep 3
+  echo "        the launcher was window $launcher, and is $(open_window home-screen | tr '\n' ' ')"
   one_each
 }
 
@@ -456,6 +478,7 @@ for name in "${checks[@]}"; do
     start) check "start: the launcher, and one window of each app" started ;;
     reopen) check "reopen: an app closed by its system opens again" reopened ;;
     closed) check "closed: the launcher closed by its system is there again" closed ;;
+    reloaded) check "reloaded: a phone's page loaded again by its system leaves one launcher" reloaded ;;
     stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;

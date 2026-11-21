@@ -125,7 +125,6 @@ impl Shell for Phone {
     }
 
     fn reload(&self) {
-        hosts::close_all();
         if let Some(window) = self.0.get_webview_window("main") {
             let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
         }
@@ -205,6 +204,12 @@ pub(crate) fn window(app: &AppHandle) -> Result<tauri::WebviewWindow, Box<dyn st
             }
         });
     let window = window.build()?;
+    // A page whose web process ended loads again, as Tauri has iOS's (`tauri-runtime-wry`): Linux's is the app harness's.
+    #[cfg(target_os = "linux")]
+    window.with_webview(|webview| {
+        use webkit2gtk::WebViewExt;
+        webview.inner().connect_web_process_terminated(|view, _| view.reload());
+    })?;
     #[cfg(target_os = "ios")]
     cover(&window)?;
     #[cfg(target_os = "ios")]
@@ -213,4 +218,21 @@ pub(crate) fn window(app: &AppHandle) -> Result<tauri::WebviewWindow, Box<dyn st
     edge::watch(&window)?;
     navigation_gestures(window.clone(), true, false)?;
     Ok(window)
+}
+
+/// What a phone's window's page asks of it alone, where a native window's page asks the same over its channel (`hosts`).
+#[cfg(mobile)]
+pub(crate) mod own_page {
+    use serde_json::Value;
+
+    /// Where this device is with its network, as the page asks once it has opened (`commands::start`). A phone's native
+    /// windows are its page's, so a page that starts has none: those of the page before it close, as the app closes
+    /// them, whether the app loaded it again, iOS did as it ended its web view's process in the background, or Android
+    /// made its activity again. Its launcher then opens once, where it opened again over the old one, the page knowing
+    /// nothing of the old one or of any app's window left over it.
+    #[tauri::command]
+    pub(crate) async fn start() -> Result<Value, String> {
+        crate::hosts::close_all();
+        crate::commands::start().await
+    }
 }

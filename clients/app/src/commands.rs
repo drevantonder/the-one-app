@@ -201,7 +201,6 @@ pub(crate) async fn sign_out() -> Result<(), String> {
 /// Where this device is with its network (`state`), as the window's page asks once it has opened, which waits for the
 /// client to open, and whether a phone hears a tap on a notification, through its push plugin, which the page listens
 /// to. The page follows where it is from there (`state`). A client that couldn't open at all has reached nothing.
-#[cfg_attr(mobile, tauri::command)]
 pub(crate) async fn start() -> Result<Value, String> {
     let app = app();
     let mut session = app.start.subscribe();

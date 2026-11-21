@@ -131,7 +131,7 @@ pub fn run() {
             retry,
             reconnect,
             sign_out,
-            start,
+            own_page::start,
             push,
             settings,
             listen,
