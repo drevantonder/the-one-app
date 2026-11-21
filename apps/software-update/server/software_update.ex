@@ -41,7 +41,7 @@ defmodule SoftwareUpdate do
   defp token(call) do
     {:ok, OneCore.Call.app(call, "vault").value(%{call | forwarded: true}, @item, "api_token")}
   rescue
-    error -> {:error, Exception.message(error)}
+    error -> {:error, "Software Update can't use the network's Cloudflare token, #{@item} in its Vault: #{Exception.message(error)}"}
   catch
     :throw, {OneCore.Call, :forwarding_loop} -> {:error, "#{OneCore.Servers.name(call.server) || "This server"} doesn't open the network's Vault"}
   end
