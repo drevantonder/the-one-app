@@ -21,7 +21,8 @@ const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : u
 const host = option("--ssh")
 const harness = option("--harness") && resolve(option("--harness"))
 const name = option("--name") ?? host
-const out = resolve(option("--out") ?? join(process.env.TMPDIR ?? "/tmp", "calibrate"))
+// Its own worktree's, never a folder every agent on the machine shares, where one ran with another's UI build.
+const out = resolve(option("--out") ?? join(here("../../"), "target", "calibrate"))
 if (!host || !harness) throw new Error("Say where: --ssh <host> --harness <the harness built for it>")
 
 /// The work a frame did, as the fit takes it: millions of pixels of each kind, its draw calls, megabytes uploaded.

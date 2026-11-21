@@ -47,7 +47,8 @@ const root = here("../../")
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(name)
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
-const out = resolve(option("--out") ?? join(process.env.TMPDIR ?? "/tmp", "scenes"))
+// Its own worktree's, never a folder every agent on the machine shares, where one ran with another's UI build.
+const out = resolve(option("--out") ?? join(root, "target", "scenes"))
 const dark = flag("--dark")
 const onTheWeb = flag("--web")
 // Every scene in a window this size, as a computer's, where it says none of its own.
