@@ -13,6 +13,8 @@
 #   reopen   an app's window closed as its system closes it (`inspector close`) opens again from a `one:` link.
 #   closed   the launcher closed as its system closes it (`inspector close`) is there again: a phone's Home Screen, a
 #            window, opens again in its place, or says it didn't open, with Try Again; a computer's panel is put away.
+#   unopened a phone's native windows that can't start: its page is told why its Home Screen didn't open, with Try Again,
+#            where it said it needed a newer One App, and Telemetry hears the why the page showed.
 #   reloaded a phone's page loaded again as its system has it, its native windows left: one launcher, which answers.
 #   stale    the app started as an update starts it, its Home Screen and Settings updated while it wasn't running
 #            (the files it kept then stale): one window of each app, at every moment.
@@ -42,20 +44,20 @@
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [--phone] [start|reopen|closed|reloaded|stale|cached|restart|updated|twice|blank|loading|open]…"
+usage="tooling/app-harness <folder> [--seed <n>] [--phone] [start|reopen|closed|unopened|reloaded|stale|cached|restart|updated|twice|blank|loading|open]…"
 folder= seed=1 phone= checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
     --phone) phone=390x844 ;;
-    start | reopen | closed | reloaded | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
+    start | reopen | closed | unopened | reloaded | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen closed reloaded stale cached restart updated twice blank loading open)
+((${#checks[@]})) || checks=(start reopen closed unopened reloaded stale cached restart updated twice blank loading open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -180,6 +182,29 @@ closed() {
   echo "        the launcher was window $launcher, and is $again"
   sleep 2 && snap "$again" "$folder/closed-after.png"
   one_each
+}
+
+# A phone's native windows that can't start (as on a device whose graphics don't, `ONE_NATIVE_FAILS`): the app's first
+# open of its Home Screen fails, and its page is told why, as the Home Screen's problem, with Try Again, pictured as its
+# screen shows it (`unopened-page.png`), where it said it needed a newer One App, as it was told only that it hadn't
+# opened. Telemetry hears the why the page showed (`one.client.problem`). The first open is the page's `open_launcher`;
+# a Home Screen that opened, and then can't open again, was always told why (`closed`).
+unopened() {
+  [[ -n $phone ]] || { echo "        a computer's launcher says why of its own: see closed" && return 0; }
+  stop_app
+  local why="harness: no graphics $seed $(date +%s%N)" problem=0
+  ONE_NATIVE_FAILS=$why setsid "$folder/app/one" >>"$log" 2>&1 &
+  app=$!
+  if within 60 'grep -qF "didn'"'"'t open: $why" "$log"'; then
+    # Show Details open, which says why.
+    sleep 3 && xdotool mousemove 340 321 click 1 && sleep 1 && import -window root "$folder/unopened-page.png"
+    within 120 'ONE_SUBJECT=network "$one" telemetry errors --hours 1 | jq -e --arg why "$why" "any(.errors[]; .message | startswith(\"Home Screen didn\") and contains(\$why))" >/dev/null' ||
+      { echo "        Telemetry didn't hear the why the page showed within 2 minutes: $(ONE_SUBJECT=network "$one" telemetry errors --hours 1 | jq -c '[.errors[].message | select(startswith("Home Screen"))]')" && problem=1; }
+  else
+    echo "        the app didn't say its launcher didn't open within a minute" && problem=1
+  fi
+  stop_app
+  return $problem
 }
 
 # A phone's page loaded again as its system has it, while its native windows stay: iOS loads it again as it ends its web
@@ -489,6 +514,7 @@ for name in "${checks[@]}"; do
     start) check "start: the launcher, and one window of each app" started ;;
     reopen) check "reopen: an app closed by its system opens again" reopened ;;
     closed) check "closed: the launcher closed by its system is there again" closed ;;
+    unopened) check "unopened: a phone's Home Screen that can't start says why, with Try Again" unopened ;;
     reloaded) check "reloaded: a phone's page loaded again by its system leaves one launcher" reloaded ;;
     stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;

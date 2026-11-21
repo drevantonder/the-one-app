@@ -744,10 +744,13 @@ pub(crate) mod computer {
     pub const CORNER: f64 = 0.0;
     pub const NAME: &str = "";
 
-    /// Opens the launcher's page `entrypoint` as the root window, under every app's (`super::launcher_window`). →
-    /// whether it did; if not, its page shows the web launcher.
-    pub async fn open(entrypoint: String) -> bool {
-        super::launcher(&entrypoint).await.is_some()
+    /// Opens the launcher's page `entrypoint` as the root window, under every app's (`super::launcher_window`). → why
+    /// not, if it didn't: its page says so, with Try Again.
+    pub async fn open(entrypoint: String) -> Result<(), String> {
+        match super::opening(&entrypoint).await? {
+            Some(_) => Ok(()),
+            None => Err("its window closed as it opened".to_owned()),
+        }
     }
 
     /// Hides the launcher's root window while the page shows an app over it, which it draws itself, or shows it.
@@ -791,7 +794,7 @@ pub(crate) mod computer {
     pub fn reload_native() {
         let Some(entrypoint) = close() else { return };
         crate::spawn(async move {
-            open(entrypoint).await;
+            super::launcher(&entrypoint).await;
         });
     }
 

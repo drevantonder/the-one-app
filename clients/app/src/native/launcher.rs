@@ -7,15 +7,24 @@ use super::*;
 /// draw, or that didn't open, is a panel that says why, and Telemetry hears it; where its native windows can't start,
 /// there's none, and the system's alert says so (`computer::unnative`). A phone's is its page's.
 pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
+    match opening(entrypoint).await {
+        Ok(id) => id,
+        Err(why) => unopened_launcher(entrypoint, why, false).await,
+    }
+}
+
+/// Opens the launcher's page natively. → its window, once it's open, or why it didn't, which Telemetry hears. A phone's
+/// first open (`computer::open`) answers its page with it.
+pub(crate) async fn opening(entrypoint: &str) -> Result<Option<WindowId>, String> {
     let started = Instant::now();
     let (opened_to, opened) = tokio::sync::oneshot::channel();
     let why = match window(started, entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to), None)).await {
-        Ok(true) => return opened_launcher(opened.await.ok().flatten(), entrypoint),
+        Ok(true) => return Ok(opened_launcher(opened.await.ok().flatten(), entrypoint)),
         Ok(false) => "this One App doesn't draw its page: it needs a newer One App".to_owned(),
         Err(error) => format!("{error:#}"),
     };
     reported(entrypoint, started, &why);
-    unopened_launcher(entrypoint, why, false).await
+    Err(why)
 }
 
 /// The launcher's window and its page, once it's open (`launcher`, `launcher_instead`), a computer's and a phone's alike.

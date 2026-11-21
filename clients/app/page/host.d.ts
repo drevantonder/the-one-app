@@ -194,7 +194,7 @@ export interface Commands {
   /** Opens an app in a window of its own, at `link`, or brings it forward there if it's open, and on a phone says whether its native window opened, from its icon at `icon` where it was opened from one. */
   open_window(args: { entrypoint: string; subject: string | undefined; link: string; icon?: [number, number, number, number] }): boolean
   /** Opens the launcher natively, as a phone's root window, and says whether it did. */
-  open_launcher(args: { entrypoint: string }): boolean
+  open_launcher(args: { entrypoint: string }): boolean | void
   /** Says whether the native launcher shows, which it doesn't while an app is over it. */
   launcher_shown(args: { shown: boolean }): void
   /** Registers the push token a phone's push service gave. */

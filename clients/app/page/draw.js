@@ -93,8 +93,8 @@ export function draw() {
     byId("problem-action").hidden = !action
     byId("problem-button").textContent = action ?? ""
   }
-  // What's shown is reported once, as it's shown.
-  const said = behind ? "Update Required: This version of the One App no longer works with your network." : problem && `${problem[0]}: ${problem[1]}`
+  // What's shown is reported once, as it's shown, with what Show Details says.
+  const said = behind ? "Update Required: This version of the One App no longer works with your network." : problem && [problem[0], problem[1], problem[2]].filter(Boolean).join(": ")
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
   fit()

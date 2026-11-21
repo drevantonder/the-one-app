@@ -310,10 +310,10 @@ pub(crate) async fn open_window(entrypoint: String, subject: Option<String>, lin
 }
 
 /// Opens the launcher's page natively, as the phone's root window, under every app's (`native::computer::open`).
-/// → whether it did; if not, the page shows the web launcher.
+/// → why it didn't, if it didn't, which the page says, with Try Again.
 #[cfg(mobile)]
 #[tauri::command]
-pub(crate) async fn open_launcher(entrypoint: String) -> bool {
+pub(crate) async fn open_launcher(entrypoint: String) -> Result<(), String> {
     native::computer::open(entrypoint).await
 }
 

@@ -447,8 +447,10 @@ function openLauncher() {
   /** @param {unknown} why */
   const failed = (why) => on({ type: "failed", key: baseKey(), why: String(why) })
   if ((needs.get(launcher) ?? 0) > runtimeVersion) return failed(NEWER)
+  // An app before 21 Nov answers whether it opened, and says nothing of why not: its page loads from the network, so it
+  // meets this one. Nothing of what it answers is used from the first TestFlight build after this one on.
   invoke("open_launcher", { entrypoint: launcher }).then((opened) => {
-    if (!opened) return failed(NEWER)
+    if (opened === false) return failed(NEWER)
     nativeLauncher = launcherShown = true
     on({ type: "drawn", key: baseKey() })
   }, failed)
