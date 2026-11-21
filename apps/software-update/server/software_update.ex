@@ -18,7 +18,7 @@ defmodule SoftwareUpdate do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.34.290", "vault" => "to deploy your network's edge with its Cloudflare token"}
+  def requires, do: %{"core" => ">= 0.34.299", "vault" => "to deploy your network's edge with its Cloudflare token"}
 
   @impl true
   def hooks, do: ["edge"]
