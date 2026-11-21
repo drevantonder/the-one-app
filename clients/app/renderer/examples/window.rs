@@ -1,9 +1,10 @@
 //! A page in a real window of this computer's, drawn and presented on its display as the app's windows are, with a
 //! wheel's notches played on it, and each motion's frames as the app's log says them (`Event::Frames`), as JSON lines:
 //! how long apart they came, and each part of a frame's 95th percentile, its painting, drawing, waiting for an image,
-//! submitting and presenting. It exits 1 where a motion's frames took longer than a refresh of a `--hz` display (60
-//! unless it says) at their 95th percentile: this thread's painting and drawing, or the GPU's. How far apart they came
-//! isn't judged: a wheel's notches each move it at once, so its frames come as often as the notches do.
+//! submitting and presenting; and on stderr what the GPU holds at its end (`memory`). It exits 1 where a motion's
+//! frames took longer than a refresh of a `--hz` display (60 unless it says) at their 95th percentile: this thread's
+//! painting and drawing, or the GPU's. How far apart they came isn't judged: a wheel's notches each move it at once, so
+//! its frames come as often as the notches do.
 //!
 //!     cargo run -p renderer --example window -- <page's built folder> --trace <trace.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 1100x720] [--rounds 3] [--panel <corner>]
@@ -105,6 +106,11 @@ fn main() -> anyhow::Result<()> {
         native.run(move |windows| windows.inspect(id, back, Box::new(|_| {})));
         quiet(&said);
     }
+    // What the GPU holds once it's played, as the app's memory report says it (`Windows::memory`): how many command
+    // encoders wgpu keeps, and what its allocator reserved.
+    let (memory_to, memory) = mpsc::channel();
+    native.run(move |windows| drop(memory_to.send(windows.memory())));
+    eprintln!("{}", json!({ "memory": memory.recv()? }));
     let mut long = false;
     for report in &reports {
         println!("{report}");

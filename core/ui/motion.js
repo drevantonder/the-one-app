@@ -583,6 +583,8 @@ async function play(built, scene, name, motion, hz, folder) {
     const ms = (value) => `${value} ms`
     const lines = shown.said.map((round, n) => `  ${hz} Hz presented, round ${n + 1}: ${round.frames} frames, p95 painting ${ms(round.paint_ms)}, drawing ${ms(round.draw_ms)} (waiting for an image ${ms(round.acquire_ms)}, submitting ${ms(round.submit_ms)}, presenting ${ms(round.present_ms)}), GPU ${ms(round.gpu_ms)}, render passes p95 ${round.passes} (most ${round.most_passes})`)
     if (!shown.said.length) lines.push(`  ${hz} Hz presented: nothing said: ${shown.stderr.trim().split("\n").at(-1)}`)
+    const memory = shown.stderr.split("\n").map((line) => line.trim()).filter((line) => line.startsWith('{"memory"')).map((line) => JSON.parse(line).memory.gpu).at(-1)
+    if (memory) lines.push(`  ${hz} Hz presented, the GPU at its end: ${memory.encoders} command encoders, ${((memory.reserved ?? 0) / 1e6).toFixed(1)} MB reserved (${((memory.allocated ?? 0) / 1e6).toFixed(1)} MB allocated)`)
     if (shown.failed) {
       process.exitCode = 1
       lines.push(`  ${hz} Hz presented FAILS: ${device.name}'s frames took longer than its ${(1000 / hz).toFixed(1)} ms refresh`)
