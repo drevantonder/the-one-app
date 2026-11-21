@@ -203,7 +203,10 @@ async function web(browser, serve, key, scene, folder) {
   // it drew last is on the screen.
   const settled = async () => {
     const { settled, pending } = await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), SETTLES_WITHIN_MS)
-    if (!settled) problems.push(`it didn't settle within ${SETTLES_WITHIN_MS} ms: ${JSON.stringify(pending)}`)
+    if (!settled) {
+      problems.push(`it didn't settle within ${SETTLES_WITHIN_MS} ms: ${JSON.stringify(pending)}`)
+      process.exitCode = 1
+    }
     await frame.evaluate(() => new Promise((shown) => requestAnimationFrame(() => requestAnimationFrame(shown))))
   }
   if (drawn) await settled()

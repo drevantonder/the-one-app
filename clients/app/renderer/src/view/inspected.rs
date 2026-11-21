@@ -525,6 +525,11 @@ impl Screen {
         if self.pictures.pending() > 0 {
             pending.push(json!({"kind": "picture", "decoding": self.pictures.pending()}));
         }
+        // A picture the last frame drew empty, with nothing above saying why, isn't shown yet: nothing's settled while
+        // a person would see a hole where it goes.
+        if self.pictures.blank > 0 {
+            pending.push(json!({"kind": "blank", "pictures": self.pictures.blank}));
+        }
         pending.extend(self.asking.iter().map(|(_, src)| json!({"kind": "page", "src": src})));
         for child in self.frames.values() {
             pending.extend(child.screen.pending());
