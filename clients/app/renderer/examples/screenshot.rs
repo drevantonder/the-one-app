@@ -112,6 +112,9 @@ fn main() -> anyhow::Result<()> {
     // What its tools answer now, which a `changed` request moves on.
     let answers = std::rc::Rc::new(std::cell::RefCell::new(answers));
     let answering = answers.clone();
+    // Each call the page made, by what it was (`asked_of`), for an `asks` request.
+    let calls: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+    let calling = calls.clone();
     // What the page logged as an error (an uncaught one, a promise nothing handled, what an `<Errored>` caught), as it
     // tells its client (`notifications/message`): the run fails with them, as a browser's console fails a test, but
     // for those `--errors` (a JSON list of words) says a scene shows on purpose, as a page that can't reach its server.
@@ -170,6 +173,9 @@ fn main() -> anyhow::Result<()> {
             return Some(json!({"jsonrpc": "2.0", "id": id, "result": {}}));
         }
         let answer = answered(&answers, id, method, params);
+        if let (true, Some(tool)) = (method == "tools/call", params["name"].as_str()) {
+            calling.borrow_mut().push(asked_of(params).unwrap_or_else(|| tool.to_owned()));
+        }
         match params["name"].as_str() {
             Some(tool) if method == "tools/call" && latency > 0.0 && !cached.iter().any(|kept| kept == tool) => {
                 sent.borrow_mut().push((renderer::platform::fake_time() + latency, answer));
@@ -383,6 +389,11 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
+        // What the page has asked its client so far, each call as `asked_of` names it, as a check counts them.
+        if request.op == "asks" {
+            println!("{}", renderer::inspect::answer(&request.id, Ok(json!({"asks": *calls.borrow()}))));
+            continue;
+        }
         // A server said something changed, as a client tells a page on screen (`notifications/one/changed`), with what
         // its tools answer now (`answers`), as what the network keeps moved on.
         if request.op == "changed" {
@@ -1197,13 +1208,18 @@ fn built_page(folder: &std::path::Path, page: &std::path::Path, ui: Option<PathB
     Ok((module, files, tokens_page))
 }
 
+/// What a call is, as `asks` counts it and `answered` looks it up: `<tool> for <subject>` for someone, else the tool.
+fn asked_of(params: &Value) -> Option<String> {
+    Some(format!("{} for {}", params["name"].as_str()?, params["_meta"]["subject"].as_str()?))
+}
+
 /// What a page's request is answered with from `answers` (`--answers`, as core/ui's scenes.js has them): a tool's answer
 /// as its text, `{ "$error": "…" }` as the tool's refusal, and `{ "$image": "data:image/png;base64,…" }` as a picture,
 /// as a server answers one (MCP's `image`: Computer Use's screenshot); any other method by its result, or not at all.
 fn answered(answers: &Value, id: Value, method: &str, params: &Value) -> Value {
     let picture = |src: &str| src.strip_prefix("data:").and_then(|data| data.split_once(";base64,")).map(|(kind, data)| json!({"type": "image", "mimeType": kind, "data": data}));
     match (method, params["name"].as_str()) {
-        ("tools/call", Some(tool)) => match answers.get(tool) {
+        ("tools/call", Some(tool)) => match asked_of(params).and_then(|asked| answers.get(&asked)).or_else(|| answers.get(tool)) {
             Some(answer) if answer.get("$error").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": answer["$error"].as_str().unwrap_or_default()}]}}),
             Some(answer) if answer.get("$image").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [answer["$image"].as_str().and_then(picture)]}}),
             Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),

@@ -3609,5 +3609,48 @@
         }
       ]
     }
+  },
+  "Home, a group they were taken out of": {
+    "like": "Home, two pages",
+    "answers": {
+      "home-screen_pages for groups/family": {
+        "$error": "users/mira isn't a member of groups/family. Whoever owns it adds them, with permissions_share."
+      }
+    },
+    "checks": {
+      "A group that says they're not a member is left out and not asked for again, as the group list is asked again": [
+        {
+          "expect": {
+            "text": "Notes"
+          }
+        },
+        {
+          "expect": {
+            "gone": "Family"
+          }
+        },
+        {
+          "answers": {
+            "permissions_groups": {
+              "groups": [
+                {
+                  "group": "groups/family",
+                  "called": "Family"
+                }
+              ]
+            }
+          }
+        },
+        {
+          "expect": {
+            "text": "Notes",
+            "gone": "Family",
+            "asked": {
+              "home-screen_pages for groups/family": 1
+            }
+          }
+        }
+      ]
+    }
   }
 }

@@ -15,6 +15,11 @@ export interface Owner extends Pages {
   name: string
 }
 
+/// The groups whose page was refused as not theirs, with the group list that still named them: the client answers a
+/// read it kept at once and asks again behind it, so a group someone was taken out of can be in the list a while, and
+/// every read of the Home Screen in that while would ask for its page and fail. They're left out until the list changes.
+const refused = { list: "", groups: new Set<string>() }
+
 /// You, everyone, then each of your groups, in the order they're listed. A network with nothing that keeps groups
 /// has none. Yours and everyone's are asked for beside the groups, which they don't wait on. Asked again and not
 /// answered, as while a server restarts, it's what it was, as a phone's Home Screen stays: only a Home Screen that
@@ -34,8 +39,22 @@ export const owners = createMemo(async (was?: Owner[]) => {
       }),
     }))
   const groups = json<{ groups: { group: string; called: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string; called: string }[] => [])
-  const all = Promise.all([pages({ name: "You" }), pages({ subject: "network", name: "Everyone" }), groups.then((groups) => Promise.all(groups.map(({ group, called }) => pages({ subject: group, name: called }))))])
-  return all.then(([yours, everyone, theirs]) => [yours, everyone, ...theirs], (error) => was ?? Promise.reject(error))
+  const theirs = groups.then((groups) => {
+    const listed = JSON.stringify(groups)
+    if (listed !== refused.list) Object.assign(refused, { list: listed, groups: new Set() })
+    return Promise.all(
+      groups
+        .filter(({ group }) => !refused.groups.has(group))
+        .map(({ group, called }) =>
+          pages({ subject: group, name: called }).catch((error: Error) => {
+            if (!String(error.cause ?? error.message).includes("isn't a member of")) throw error
+            refused.groups.add(group)
+          }),
+        ),
+    )
+  })
+  const all = Promise.all([pages({ name: "You" }), pages({ subject: "network", name: "Everyone" }), theirs])
+  return all.then(([yours, everyone, groupsPages]) => [yours, everyone, ...groupsPages.filter((owner) => owner !== undefined)], (error) => was ?? Promise.reject(error))
 })
 changed(() => refresh(owners))
 

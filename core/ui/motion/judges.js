@@ -72,13 +72,15 @@ export function requests(steps, folder, answers = {}) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, bleeds, aligned, centred, widest, contrast, inked, located, textMenu, handles, magnifier, dimmed, js } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, bleeds, aligned, centred, widest, contrast, inked, located, textMenu, handles, magnifier, dimmed, js, asked } = step.expect
       // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
       // Where something's drawn, so what comes in above it isn't seen to push it.
       if (step.expect.at) out.push({ request: { op: "query", ...selector(step.expect.at.of) }, judge: (answer) => { const rect = answer?.result?.nodes?.[0]?.rect; const off = ["x", "y", "width"].filter((side) => step.expect.at[side] !== undefined && !(Math.abs(rect?.[side] - step.expect.at[side]) <= 1)); return off.length > 0 && `${named(step.expect.at.of)} is drawn at ${off.map((side) => `${side} ${rect?.[side]}, not ${step.expect.at[side]}`).join(", ")}` } })
       if (js !== undefined) out.push({ request: { op: "window" }, judge: (answer) => answer?.result?.js_bytes > js * 1e6 && `its JS holds ${(answer.result.js_bytes / 1e6).toFixed(1)} MB, over ${js} MB` })
+      // How many times the page has asked for each, by `<tool>` or `<tool> for <subject>`, as a check that it doesn't ask again.
+      if (asked) out.push({ request: { op: "asks" }, judge: (answer) => Object.entries(asked).map(([what, times]) => ({ what, times, was: (answer?.result?.asks ?? []).filter((one) => one === what).length })).filter((one) => one.was !== one.times).map((one) => `${one.what} was asked ${one.was} times, not ${one.times}`).join(", ") || false })
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
