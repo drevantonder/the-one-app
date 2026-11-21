@@ -385,7 +385,9 @@ loading() {
   stop_app
   rm -rf "$ONE_HOME/cache"
   start_app || return 1
-  # The inspector answers once, so its code is read before the bucket holds it too.
+  # The launcher answers the inspector, so its page and the inspector's code are read before the bucket holds them too:
+  # held as the launcher's page is read, it doesn't open, and the link to Telemetry waits for it.
+  within 30 '"$one" inspector tree --window "$(open_window home-screen)" >/dev/null 2>&1' || { echo "        the launcher didn't answer within 30 s" && return 1; }
   windows >/dev/null
   held=$(bucket)
   [[ -n $held ]] || { echo "        no bucket" && return 1; }
