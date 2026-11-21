@@ -2752,7 +2752,15 @@
             "name": "Productivity"
           }
         },
-        "onward": true
+        "onward": true,
+        "holds": {
+          "role": "button",
+          "name": "Notes",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        }
       },
       "Close it with less motion": {
         "from": {

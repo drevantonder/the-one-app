@@ -896,7 +896,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
         _ => None,
     };
-    let (mut track, count, shows) = (query("track"), query("count"), query("shows"));
+    let (mut track, count, shows, holds) = (query("track"), query("count"), query("shows"), query("holds"));
     // The nodes of what a selector matches that a person sees: drawn at all opaque, some of it in the window.
     let seen = |windows: &mut Windows, query: &Value| -> Vec<Value> {
         let found = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"].as_array().cloned()).unwrap_or_default();
@@ -992,12 +992,14 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
                 None => frame["gone"] = json!(true),
             }
         }
-        // How many of what `count` matches a person sees, and the same for `shows`.
+        // How many of what `count` matches a person sees, and the same for `shows` and `holds`.
         if let Some(query) = &count {
             frame["count"] = json!(seen(windows, query).len());
         }
-        if let Some(query) = &shows {
-            frame["shows"] = json!(seen(windows, query).len());
+        for (name, query) in [("shows", &shows), ("holds", &holds)] {
+            if let Some(query) = query {
+                frame[name] = json!(seen(windows, query).len());
+            }
         }
         if let Some(scrolled) = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten() {
             frame["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});

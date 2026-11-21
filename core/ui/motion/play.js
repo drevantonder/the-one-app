@@ -36,7 +36,7 @@ async function play(built, scene, name, motion, hz, folder) {
   }
   // Where what it opens should first be drawn: what `opensFrom` names, before the press.
   const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
-  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
+  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.holds ? { holds: { ...selector(motion.holds), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
   const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
@@ -129,6 +129,16 @@ async function play(built, scene, name, motion, hz, folder) {
     const missing = lands < 0 ? -1 : frames.findIndex((frame, n) => n >= lands && frame.shows === 0)
     if (!last) failed.push("what it follows isn't there to land")
     else if (missing >= 0) failed.push(`${JSON.stringify(motion.shows)} isn't drawn at frame ${missing + 1} (${frames[missing].at} ms), where what moved landed at frame ${lands + 1} (${frames[lands].at} ms)`)
+  }
+  // What `holds` names is drawn in every frame from the first where what `follow` moves to the one where it lands: apps
+  // flying out of a folder, or back into it, are drawn on their way, not handed over before they've gone.
+  if (motion.holds) {
+    const where = frames.map((frame) => frame.rect)
+    const first = where.findIndex((rect, n) => rect && where[n + 1] && (Math.abs(where[n + 1].x - rect.x) > 0.5 || Math.abs(where[n + 1].y - rect.y) > 0.5))
+    const last = where.findLastIndex((rect, n) => rect && where[n - 1] && (Math.abs(where[n - 1].x - rect.x) > 0.5 || Math.abs(where[n - 1].y - rect.y) > 0.5))
+    const hidden = first < 0 ? -1 : frames.findIndex((frame, n) => n >= first && n <= last && frame.holds === 0)
+    if (first < 0) failed.push("what it follows doesn't move")
+    else if (hidden >= 0) failed.push(`${JSON.stringify(motion.holds)} isn't drawn at frame ${hidden + 1} (${frames[hidden].at} ms), while what moves is on its way (frames ${first + 1} to ${last + 1})`)
   }
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a

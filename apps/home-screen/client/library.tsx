@@ -1,7 +1,7 @@
 // The App Library: one page of every app you can reach, by category, with its search, Background Apps and an app's icon
 // in it.
 import { createMemo, createSignal, For, Show } from "solid-js"
-import { ScrollView, Empty, Icon, Image, type Located, Pressable, type Rect, Search, Text, View } from "ui"
+import { ScrollView, Empty, Icon, Image, type Located, Pressable, type Rect, reducedMotion, Search, Text, View } from "ui"
 import { BAR, corner, TOP_ROW } from "./layout.ts"
 import { type Category, type Listed, src } from "./types.ts"
 import { looks } from "./looks.ts"
@@ -45,6 +45,9 @@ const BEHIND = "background:"
 
 export const openedCategory = (library: Category[], key: string) =>
   key.startsWith(BEHIND) ? sorted(library, true).find((category) => category.category === key.slice(BEHIND.length)) : sorted(library, false).find((category) => category.category === key)
+
+/// How a category's apps are handed between its square and it: after the flight, or at once with less motion, when they jump.
+export const handed = () => [looks.handed, reducedMotion() && looks.handing]
 
 /// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into, and each of its
 /// apps' icons in it (`apps`), which that app grows out of.
@@ -152,7 +155,7 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
                   {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small away={away()} />}
                 </For>
                 <Show when={count() > 4}>
-                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key, count)} style={[looks.more, looks.square(laid().icon + 14), looks.handed, away() && [looks.handing, looks.unseen]]}>
+                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key, count)} style={[looks.more, looks.square(laid().icon + 14), handed(), away() && [looks.handing, looks.unseen]]}>
                     <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                       {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={[looks.iconImage(corner((laid().icon + 9) / 2)), looks.square((laid().icon + 9) / 2)]} />}
                     </For>
@@ -242,7 +245,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
       onPress={(event) => {
         if (tapping() && state().matches("nothing")) press(props.entrypoint, props.owner, false, from(event))
       }}
-      style={[looks.entry, props.small && [looks.entrySmall, looks.handed], props.away && [looks.handing, looks.unseen]]}
+      style={[looks.entry, props.small && [looks.entrySmall, handed()], props.away && [looks.handing, looks.unseen]]}
     >
       <View style={[looks.slots, looks.square(props.icon)]}>
         <Image src={src(props.entrypoint.icon)} alt="" style={[looks.iconImage(corner(props.icon)), looks.square(props.icon)]} />

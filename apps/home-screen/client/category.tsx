@@ -6,7 +6,7 @@ import { home, room, tapping, windowWidth } from "./store.ts"
 import { type Owner, badgeOf, opens, press } from "./owners.ts"
 import { holds } from "./holds.ts"
 import { Tile } from "./tiles.tsx"
-import { openedCategory, places } from "./library.tsx"
+import { handed, openedCategory, places } from "./library.tsx"
 
 /// How large an opened category's apps' icons are, how wide each is with its name, and the gap between them across,
 /// as `sizes.found` and `looks.openedApps` have them.
@@ -75,7 +75,7 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
       {/* What's behind blurs and dims through a veil. */}
       <Pressable aria-hidden="true" onPress={close} style={[looks.cover, looks.frosted, looks.veils, !props.open && looks.unveiled, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height)]} />
       <View role="dialog" aria-label={category()?.category} style={[looks.opening, props.within && looks.round, looks.at(area().x, area().y, area().width, area().height)]}>
-        <View style={[looks.inOpened, looks.handed, props.open ? looks.handing : looks.unseen]}>
+        <View style={[looks.inOpened, handed(), props.open ? looks.handing : looks.unseen]}>
           <ScrollView style={[looks.openedArea, !props.open && looks.inert, looks.sized(area().width, area().height)]}>
             <Pressable onPress={beside} onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, all: event.currentTarget.getBoundingClientRect() }))} style={[looks.opened, props.within && looks.centred, looks.libraryPadding(inset().inline, inset().top, inset().bottom), looks.atLeast(area().height)]}>
               <Text role="heading" aria-level={2} style={[looks.categoryTitle, named(), column()]}>
