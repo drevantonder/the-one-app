@@ -414,9 +414,14 @@ bucket() {
 # its middle. A phone's first start showed black for 5 s and more as its page was read, as a window whose page isn't
 # there drew nothing (21 Nov). The client keeps every app's files whole in the background as it lists them
 # (`keep_whole` in core/client), so once the launcher answers and Telemetry's are kept, the bucket holds, and then
-# Telemetry's go, everything else kept: nothing can read them again before its window asks. Its server loses the
-# device's windows some 2 s into the hold (`inspector windows` waits 20 s, then lists none), so a window listed later
-# than that isn't pictured, and the check fails.
+# Telemetry's go, everything else kept: nothing can read them again before its window asks.
+#
+# Each inspector call is one of the server's, which asks whether its caller may reach the device, and whose the device
+# is, of what it kept for 10 s (`OneCore.Hooks`), and after that of the apps that say, Permissions and Sign-in, whose
+# databases look at the bucket before they answer (`Database.Lease`, every 4 s): so with the bucket held, every call
+# waits once those 10 s are up, as strict as it's meant to be, where the check took that for the device's link
+# stalling (21 Nov). So the check starts those 10 s just before the hold, by having the server forget what it kept
+# and asking once, and its pictures land in them, while the page's own read, on the same link, waits.
 loading() {
   [[ -n $app ]] || start_app || return 1
   within 30 '"$one" inspector tree --window "$(open_window home-screen)" >/dev/null 2>&1' || { echo "        the launcher didn't answer within 30 s" && return 1; }
@@ -424,15 +429,19 @@ loading() {
   [[ -z $(open_window telemetry) ]] || "$one" inspector close --window "$(open_window telemetry)" >/dev/null
   held=$(bucket)
   [[ -n $held ]] || { echo "        no bucket" && return 1; }
+  mise exec -C "$root" -- elixir --sname "harness-$$" --cookie "$(cat "$net/cookie")" \
+    --rpc-eval "server-$(printf %s "$net" | cksum | cut -d' ' -f1)@$(hostname -s)" 'OneCore.Hooks.invalidate()'
+  local kept=$SECONDS window shown=0
+  windows >/dev/null
   kill -STOP "$held"
   grep -rlZF '"uri":"ui://telemetry/' "$ONE_HOME/cache" | xargs -0r rm -f
   "$folder/app/one" one:telemetry
-  local window shown=0
-  within 20 '[[ -n $(open_window telemetry) ]]' && window=$(open_window telemetry) &&
+  within 8 '[[ -n $(open_window telemetry) ]]' && window=$(open_window telemetry) &&
     snap "$window" "$folder/loading-first.png" && sleep 1 && snap "$window" "$folder/loading.png" && shown=1
   kill -CONT "$held"
   held=
-  ((shown)) || { echo "        Telemetry's window wasn't listed, or wasn't drawn, within 20 s" && return 1; }
+  echo "        pictured $((SECONDS - kept)) s after the server last asked who may reach the device"
+  ((shown)) || { echo "        Telemetry's window wasn't listed, or wasn't drawn, within 8 s" && return 1; }
   python3 - "$folder/loading-first.png" "$folder/loading.png" <<'PY'
 import sys
 from PIL import Image
