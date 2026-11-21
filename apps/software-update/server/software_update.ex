@@ -40,10 +40,10 @@ defmodule SoftwareUpdate do
   # The token, read on this server, which is never passed on to another that opens the Vault.
   defp token(call) do
     {:ok, OneCore.Call.app(call, "vault").value(%{call | forwarded: true}, @item, "api_token")}
-  catch
-    :throw, {OneCore.Call, :forwarding_loop} -> {:error, "#{OneCore.Servers.name(call.server) || "This server"} doesn't open the network's Vault"}
   rescue
     error -> {:error, Exception.message(error)}
+  catch
+    :throw, {OneCore.Call, :forwarding_loop} -> {:error, "#{OneCore.Servers.name(call.server) || "This server"} doesn't open the network's Vault"}
   end
 
   # Deploys this server's build of the edge from a copy of its own, where Bun installs Wrangler, to the network's
