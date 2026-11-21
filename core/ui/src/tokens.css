@@ -245,5 +245,11 @@
   :root {
     --move-travel: 200ms;
     --ease-travel: cubic-bezier(0.22, 1, 0.36, 1);
+    --move-snappy: 200ms;
+    --ease-snappy: cubic-bezier(0.22, 1, 0.36, 1);
+    --move-smooth: 200ms;
+    --ease-smooth: cubic-bezier(0.22, 1, 0.36, 1);
+    --move-paging: 200ms;
+    --ease-paging: cubic-bezier(0.22, 1, 0.36, 1);
   }
 }

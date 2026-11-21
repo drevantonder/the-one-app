@@ -64,8 +64,10 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
       return condition === "default" && value.tracking ? [[`${token.id.replace(/^type-/, "")}-tracking`, `${value.tracking}em`]] : []
     case "motion": {
       if (value.bounce !== undefined) {
+        // A spring is its settling time and path by default, and an ease of its reduced duration with less motion.
+        if (condition === "reducedMotion") return [[token.id, `${varying(value.duration).reducedMotion}ms`], [token.id.replace(/^move-/, "ease-"), `cubic-bezier(${value.easing.join(", ")})`]]
         if (condition !== "default") return []
-        const { settles, easing } = sprung(value.duration, value.bounce)
+        const { settles, easing } = sprung(varying(value.duration).default as number, value.bounce)
         return [[token.id, `${settles}ms`], [token.id.replace(/^move-/, "ease-"), easing]]
       }
       const duration = at(value.duration)
@@ -298,7 +300,7 @@ function compile(style: Record<string, any>, made: Made, dynamic: Record<string,
   if (dynamic.transitionVelocity) {
     const spring = style.transition?.value
     if (spring?.bounce === undefined) throw new Error("a style's transitionVelocity is a spring's, so its transition is a spring token")
-    ;(out as Record<string, unknown>).$spring = [spring.duration, spring.bounce]
+    ;(out as Record<string, unknown>).$spring = [varying(spring.duration).default, spring.bounce]
   }
   // What a call gives is a CSS custom property of its own, which its class reads.
   for (const property of Object.keys(dynamic).filter((property) => property !== "transitionVelocity")) {

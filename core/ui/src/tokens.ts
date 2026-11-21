@@ -51,8 +51,9 @@ const material = (blur: number, saturate: number, system?: boolean): Token<"mate
 const motion = (duration: Varies<number>, easing: Varies<[number, number, number, number]>): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, easing } })
 /** A spring, as SwiftUI's `.spring(duration:bounce:)` and Motion's are given: about how long it takes to get there, in
  * milliseconds, and how far past it goes, from 0 (not at all) to 1. A change on its way is turned to the new value
- * from where it is, at the speed it has. `easing` is for a host that draws only Béziers. */
-const spring = (duration: number, bounce: number): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, bounce, easing: [0.22, 1, 0.36, 1] } })
+ * from where it is, at the speed it has. `easing` is for a host that draws only Béziers, and for whoever asked for less
+ * motion, for whom it is a 200 ms ease out and no spring: what moves is faded instead. */
+const spring = (duration: number, bounce: number): Token<"motion"> => ({ kind: "motion", id: "", value: { duration: { default: duration, reducedMotion: 200 }, bounce, easing: [0.22, 1, 0.36, 1] } })
 
 // Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-white window, one text colour,
 // and Apple's accents but red, orange and blue, which are the mockup's. Dark is true black, an OLED's (20 Nov), with

@@ -295,7 +295,8 @@ impl Table {
         let duration = varies(&value["duration"], conditions).as_f64()? as f32;
         let easing = varies(&value["easing"], conditions);
         let point = |at: usize| easing.get(at).and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32;
-        let spring = value["bounce"].as_f64().map(|bounce| Spring::new(duration, bounce as f32));
+        // With less motion it's an ease of its (reduced) duration, a fade where it would have moved: no spring.
+        let spring = value["bounce"].as_f64().filter(|_| !conditions.reduced_motion).map(|bounce| Spring::new(duration, bounce as f32));
         Some(Motion { duration, easing: [point(0), point(1), point(2), point(3)], spring })
     }
 }
