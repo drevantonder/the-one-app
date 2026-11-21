@@ -211,6 +211,14 @@ async function web(browser, serve, key, scene, folder) {
   page.on("pageerror", (error) => problems.push(String(error)))
   page.on("console", (message) => message.type() === "warning" && !message.text().includes("preferred by this device") && problems.push(message.text()))
   await page.clock.setFixedTime(new Date(Date.UTC(2026, 0, 1)))
+  // The first fetch of each picture file fails on the network, as a loaded or flaky connection's does: a picture is tried
+  // again, and drawn when it comes, never left broken for a failure that passed.
+  const failed = new Map()
+  await page.route(/\.(png|jpe?g|gif|webp|svg)(\?.*)?$/, (route) => {
+    const url = route.request().url()
+    failed.set(url, (failed.get(url) ?? 0) + 1)
+    return failed.get(url) === 1 ? route.abort("connectionreset") : route.continue()
+  })
   serve.hostWeb(`${key} (web)`, scene)
   await page.goto(serve.url(`${key} (web)`))
   const frame = await (await page.waitForSelector("#page")).contentFrame()
@@ -227,6 +235,11 @@ async function web(browser, serve, key, scene, folder) {
   }
   if (drawn) await settled()
   for (const name of drawn ? scene.taps : []) await press(frame, name).then(settled)
+  for (const [url, times] of failed) {
+    if (times > 1) continue
+    problems.push(`${url} failed on the network once and wasn't fetched again, so it's drawn broken`)
+    process.exitCode = 1
+  }
   if (drawn) await page.screenshot({ path: join(folder, "web.png") })
   // What its screen reader reads, each name a line, as the native tree's are checked for words that aren't a person's.
   const words = drawn ? await frame.evaluate(() => [...document.querySelectorAll("#semantics *")].map((node) => node.getAttribute("aria-label") ?? "").filter(Boolean).join("\n")) : ""

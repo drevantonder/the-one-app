@@ -78,9 +78,9 @@ pub fn cut_short(seed: u64) {
     CUT_SHORT.store(seed, std::sync::atomic::Ordering::Relaxed);
 }
 
-/// How long after a picture fails to decode it's tried again, each time it has: one that fails once more is broken,
-/// within the second a harness's scene is given to settle.
-const RETRIES_MS: [f64; 3] = [50.0, 200.0, 500.0];
+/// How long after a picture fails to decode, or to be fetched on the web, it's tried again, each time it has: one that
+/// fails once more is broken, within the second a harness's scene is given to settle.
+pub(crate) const RETRIES_MS: [f64; 3] = [50.0, 200.0, 500.0];
 
 /// A picture that didn't decode: how many times it hasn't, and when it's tried again, or that it's being tried again,
 /// once its time's come and a frame's drawn it (`get`).

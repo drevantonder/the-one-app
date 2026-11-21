@@ -144,21 +144,13 @@ fn allo(src: &str) -> Option<String> {
 }
 
 /// A picture a page names by an address, fetched as one of its app's files by the browser, which the screen then has
-/// as a `data:` address (`Screen::fetched`): the frame's own page's, or that of the page in frame `frame`.
+/// as a `data:` address (`Screen::fetched`): the frame's own page's, or that of the page in frame `frame`. A fetch that
+/// fails on the network is tried again as a decode is (`RETRIES_MS`), and the picture is pending (`Screen::fetching`)
+/// until it's come or failed every time; one the server doesn't have (a 404) isn't.
 pub(super) fn fetch(page: &url::Url, src: &str, frame: Option<crate::tree::Id>) {
     let (src, address) = (src.to_owned(), page.join(src).map(String::from).unwrap_or_default());
     wasm_bindgen_futures::spawn_local(async move {
-        let fetched = async {
-            let window = web_sys::window()?;
-            let response: web_sys::Response = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(&address)).await.ok()?.dyn_into().ok()?;
-            if !response.ok() {
-                return None;
-            }
-            let kind = response.headers().get("content-type").ok().flatten().unwrap_or_default();
-            let bytes = js_sys::Uint8Array::new(&wasm_bindgen_futures::JsFuture::from(response.array_buffer().ok()?).await.ok()?).to_vec();
-            Some(format!("data:{kind};base64,{}", data_encoding::BASE64.encode(&bytes)))
-        };
-        let data = fetched.await;
+        let data = fetched(&address).await;
         let _ = Native::get().map(|native| native.run(move |windows| {
             windows.with(WINDOW, |screen| match frame {
                 Some(node) => screen.frame_mut(node).map_or((), |screen| screen.fetched(&src, data)),
@@ -166,4 +158,30 @@ pub(super) fn fetch(page: &url::Url, src: &str, frame: Option<crate::tree::Id>) 
             });
         }));
     });
+}
+
+/// What `address` holds as a `data:` address: none where it isn't found (a 404), or the network failed every time.
+async fn fetched(address: &str) -> Option<String> {
+    for after in crate::view::RETRIES_MS.iter().map(|after| Some(*after)).chain([None]) {
+        match fetch_once(address).await {
+            Ok(found) => return found,
+            Err(()) => match after {
+                Some(after) => gloo_timers::future::TimeoutFuture::new(after as u32).await,
+                None => return None,
+            },
+        }
+    }
+    None
+}
+
+/// One try at `address`: its `data:` address, none where the server hasn't it, or an error where the network failed.
+async fn fetch_once(address: &str) -> Result<Option<String>, ()> {
+    let window = web_sys::window().ok_or(())?;
+    let response: web_sys::Response = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(address)).await.map_err(drop)?.dyn_into().map_err(drop)?;
+    if !response.ok() {
+        return Ok(None);
+    }
+    let kind = response.headers().get("content-type").ok().flatten().unwrap_or_default();
+    let bytes = wasm_bindgen_futures::JsFuture::from(response.array_buffer().map_err(drop)?).await.map_err(drop)?;
+    Ok(Some(format!("data:{kind};base64,{}", data_encoding::BASE64.encode(&js_sys::Uint8Array::new(&bytes).to_vec()))))
 }

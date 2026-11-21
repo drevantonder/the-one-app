@@ -36,6 +36,8 @@ mod paint;
 mod pictures;
 #[cfg(feature = "fake")]
 pub use pictures::{cut_short, decoding_takes};
+#[cfg(target_arch = "wasm32")]
+pub(crate) use pictures::RETRIES_MS;
 mod selection;
 mod text_selection;
 pub use text_selection::Magnifier;
