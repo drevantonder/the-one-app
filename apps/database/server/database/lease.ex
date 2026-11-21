@@ -63,7 +63,8 @@ defmodule Database.Lease do
   there's no other to ask (`Database.transaction/3`). One that couldn't reach a holder that took the lease from it, and
   found no other server to ask, doesn't take it back while the relay at the network's address still reaches that one
   (`OneCore.Servers.answers?/1`): it's the one out of reach, as a laptop that has just woken is, and taking the lease
-  back would have it move back and forth.
+  back would have it move back and forth. A holder that answers neither has lost it, however recently the relay last
+  saw it: being connected there isn't answering.
 
   Whether a server may answer from its copy isn't a state of its own. It's the time since it last saw the log's next
   entry free, read after the transaction ran by both its clocks, since a state timeout fires only between events,
@@ -148,9 +149,10 @@ defmodule Database.Lease do
 
   # The server this one follows didn't run a call passed on to it, `why`: `:cannot_run` where it answered that it
   # would pass it on in turn, `:unanswered` where neither this server nor another it asked reached it, and `:alone`
-  # where this one couldn't and had no other to ask. If it handed the lease on, this server takes it; if the log names
-  # nobody after it, this server takes it, unless it's `:alone`, that server took it from this one, and the relay still
-  # reaches it; and otherwise it has learnt who holds it now. Only what was logged after the last entry it read is read,
+  # where this one couldn't and had no other to ask, or `:relayed` where the relay at the network's address still
+  # reached it meanwhile (`Database.transaction/3`). If it handed the lease on, this server takes it; if the log names
+  # nobody after it, this server takes it, unless it's `:relayed` and that server took it from this one; and otherwise
+  # it has learnt who holds it now. Only what was logged after the last entry it read is read,
   # which is one request: every call passed to a holder that's gone asks this, one after another, and each waits for
   # the ones before. One that isn't up takes nothing, and says so.
   def handle_event({:call, from}, {:take_over, server, why}, {:following, server}, data) do
@@ -166,7 +168,7 @@ defmodule Database.Lease do
           failed?(data) ->
             {:keep_state_and_data, {:reply, from, :failed}}
 
-          why == :alone and data.lost_to == server and OneCore.Servers.answers?(server) ->
+          why == :relayed and data.lost_to == server ->
             {:keep_state_and_data, {:reply, from, :connected}}
 
           true ->

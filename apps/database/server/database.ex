@@ -69,8 +69,12 @@ defmodule Database do
   # members to reach one that didn't answer: one that reaches the holder has it run there, and the lease stays where
   # the others reach it, and one that can't either takes the lease, two servers having failed to reach it, and runs it.
   # Only where none of them answered, or there's none, does this server take the lease itself, as the log lets it
-  # (`Database.Lease`). A server that isn't up takes no lease, so the call fails here, for whoever asked to ask
-  # another, as it does where this server is the one out of reach.
+  # (`Database.Lease`), unless the relay at the network's address still reaches a holder that took it from this one.
+  # The relay is asked as the holder is, not after it gave up, so a holder that answers neither has lost the lease once
+  # the slower of the two gave up, where it was both, one after the other: a frozen holder's first call waited 10 s.
+  # A server that isn't up takes no lease, so the call fails here, for whoever asked to ask another, as it does where
+  # this server is the one out of reach. Whoever asked is told only that the app couldn't be reached: which server
+  # holds what, and how long it waited, is for whoever reads this server's log.
   #
   # How long the holder kept it is said as a number of the app's (Telemetry's `one.database.lease.wait`):
   # `not_answered` where it kept it `@waited` or more without running it, as one that's stuck does, which is warned
@@ -81,49 +85,72 @@ defmodule Database do
     # A call another server passed here to run, as one whose own copy failed passes its own (`:failed`), or as one
     # that couldn't reach the holder does, is asked of the holder once, for `@witness`, and passed on no further.
     passed = call.forwarded == :to
-    within = if passed, do: @witness, else: @reach
-    first = if server, do: Call.forward_to(call, server, within)
-    again = if server && not passed && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
-    waited = System.monotonic_time(:millisecond) - began
-    whose = OneCore.User.owner(OneCore.Artifact.name(call.own))
-    # One that answered it would pass the call on in turn is there, and can't run it: the others aren't asked.
-    cannot_run = :forwarding_loop in [first, again]
-    others = if server && not passed && not cannot_run, do: OneCore.Apps.servers(whose) -- [server, OneCore.Server.key()], else: []
-    if others != [], do: Call.forward(call, others)
-    why = if(cannot_run, do: :cannot_run, else: if(passed, do: :unanswered, else: :alone))
-    took = :gen_statem.call(lease, {:take_over, server, why})
-    app = Lease.app(call.own)
-    holder = server && (OneCore.Servers.name(server) || server)
+    relay = if server && not passed, do: Task.async(fn -> OneCore.Servers.answers?(server) == true end)
 
-    if server do
-      outcome = if took == :connected, do: "connected", else: if(waited >= @waited, do: "not_answered", else: "gone")
-      Lease.waited(waited, %{"one.app" => app, "one.outcome" => outcome})
+    try do
+      within = if passed, do: @witness, else: @reach
+      first = if server, do: Call.forward_to(call, server, within)
+      again = if server && not passed && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
+      waited = System.monotonic_time(:millisecond) - began
+      whose = OneCore.User.owner(OneCore.Artifact.name(call.own))
+      # One that answered it would pass the call on in turn is there, and can't run it: the others aren't asked.
+      cannot_run = :forwarding_loop in [first, again]
+      others = if server && not passed && not cannot_run, do: OneCore.Apps.servers(whose) -- [server, OneCore.Server.key()], else: []
+      if others != [], do: Call.forward(call, others)
 
-      if outcome == "not_answered",
-        do: Logger.warning("#{app}'s database: #{holder} holds its lease and didn't answer within #{waited} ms, so this server takes it")
+      why =
+        cond do
+          cannot_run -> :cannot_run
+          passed -> :unanswered
+          Task.await(relay, :infinity) -> :relayed
+          true -> :alone
+        end
+
+      took = :gen_statem.call(lease, {:take_over, server, why})
+      app = Lease.app(call.own)
+      holder = server && (OneCore.Servers.name(server) || server)
+
+      if server do
+        outcome = if took == :connected, do: "connected", else: if(waited >= @waited, do: "not_answered", else: "gone")
+        Lease.waited(waited, %{"one.app" => app, "one.outcome" => outcome})
+
+        if outcome == "not_answered",
+          do: Logger.warning("#{app}'s database: #{holder} holds its lease and didn't answer within #{waited} ms, so this server takes it")
+      end
+
+      case took do
+        :ok ->
+          :ok
+
+        :connected ->
+          Logger.warning("#{app}'s database: #{holder} took its lease from this server and answers the network's relay, but didn't answer this server within #{waited} ms, and no other server could be asked, so this server doesn't take it back")
+          unreachable(call)
+
+        # This server is stopping, or not one of its network's yet, so it takes no lease that others would then come
+        # to it for: the call goes to one of the servers that are, which takes it.
+        :not_up ->
+          Call.forward(call, OneCore.Apps.servers(whose))
+          held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
+          Logger.warning("#{app}'s database: this server is starting or stopping, so it doesn't take its lease over, #{held}, and no other server took it")
+          unreachable(call)
+
+        # This server's own copy failed just now, and it handed the lease on: a call asked here is passed to another of
+        # the servers acting for whoever the database is, which takes the lease and runs it, and one passed on here is
+        # answered as one this server would pass on again, so the server that passed it takes the lease (`Call.forward/2`).
+        :failed ->
+          Call.forward(call, OneCore.Apps.servers(whose))
+          Logger.warning("#{app}'s database: this server's copy failed just now, so it handed its lease on, and no other server took it")
+          unreachable(call)
+      end
+    after
+      if relay, do: Task.shutdown(relay, :brutal_kill)
     end
+  end
 
-    case took do
-      :ok ->
-        :ok
-
-      :connected ->
-        raise "#{holder} took #{app}'s database from this server and answers the network's relay, but it didn't answer this server within #{waited} ms, and no other server could be asked, so this server doesn't take it back. Check this server's connection, then try again."
-
-      # This server is stopping, or not one of its network's yet, so it takes no lease that others would then come
-      # to it for: the call goes to one of the servers that are, which takes it.
-      :not_up ->
-        Call.forward(call, OneCore.Apps.servers(whose))
-        held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
-        raise "This server is starting or stopping, so it doesn't take a database over, #{held}, and no other server took it. Try again in a moment."
-
-      # This server's own copy failed just now, and it handed the lease on: a call asked here is passed to another of
-      # the servers acting for whoever the database is, which takes the lease and runs it, and one passed on here is
-      # answered as one this server would pass on again, so the server that passed it takes the lease (`Call.forward/2`).
-      :failed ->
-        Call.forward(call, OneCore.Apps.servers(whose))
-        raise "This server's copy of #{app}'s database failed just now, so it handed its lease on, and no other server took it. Try again in a moment."
-    end
+  # What whoever asked is told of a call whose database couldn't be reached, by the name they know its app by.
+  defp unreachable(call) do
+    app = OneCore.Apps.version(call.app_artifact)
+    raise "#{(app && app.title) || call.app} couldn't be reached just now. Try again in a moment."
   end
 
   @doc """
