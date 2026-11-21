@@ -155,6 +155,34 @@ async function play(built, scene, name, motion, hz, folder) {
     if (first < 0) failed.push("what it follows doesn't move")
     else if (hidden >= 0) failed.push(`${JSON.stringify(motion.holds)} isn't drawn at frame ${hidden + 1} (${frames[hidden].at} ms), while what moves is on its way (frames ${first + 1} to ${last + 1})`)
   }
+  // The last frame any of what `apart` names is drawn in and the one after, where they've been handed back, look the
+  // same around each of them in the first (its box, grown by 12 pt for a badge at its corner), within a level of each
+  // colour: apps flown back into a folder's square are handed to it unseen, as an iPhone's come to rest on the picture
+  // they stay on.
+  if (motion.seamless) {
+    const last = frames.findLastIndex((frame) => frame.apart?.length)
+    if (!motion.apart) failed.push("`seamless` reads `apart`, which it hasn't")
+    else if (last < 0 || last + 1 >= frames.length) failed.push(`what's apart is ${last < 0 ? "never drawn" : "never handed back"}`)
+    else {
+      const [flown, handed] = [frames[last], frames[last + 1]].map((frame) => PNG.sync.read(Buffer.from(frame.png, "base64")))
+      const k = flown.width / scene.size[0]
+      let worst = { by: 0, count: 0 }
+      for (const box of flown.width === handed.width ? frames[last].apart : []) {
+        const [left, right, top, bottom] = [box.x - 12, box.x + box.width + 12, box.y - 12, box.y + box.height + 12].map((point) => Math.round(point * k))
+        let [by, count] = [0, 0]
+        for (let y = Math.max(top, 0); y < Math.min(bottom, flown.height); y++)
+          for (let x = Math.max(left, 0); x < Math.min(right, flown.width); x++) {
+            const at = (y * flown.width + x) * 4
+            const most = Math.max(...[0, 1, 2].map((channel) => Math.abs(flown.data[at + channel] - handed.data[at + channel])))
+            if (most > 1) count++
+            by = Math.max(by, most)
+          }
+        if (by > worst.by) worst = { by, count, box }
+      }
+      if (flown.width !== handed.width) failed.push("the frames either side of its hand-back aren't the same size")
+      else if (worst.by > 1) failed.push(`${worst.count} pixels around ${rect(worst.box)} change by up to ${worst.by} levels at frame ${last + 2} (${frames[last + 1].at} ms), where what's apart is handed back, from the frame before`)
+    }
+  }
   // No two icons of what `apart` names (apps, each box's middle three fifths across, at its top, as wide as that) cover each
   // other by more than a tenth of the smaller, in any frame: apps flying from one place to another don't cross over each other.
   if (motion.apart) {
