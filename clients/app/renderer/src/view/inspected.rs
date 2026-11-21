@@ -410,7 +410,7 @@ impl Screen {
     /// (`mutations`), how long its JS thread ran (`script_ms`), how long it took to lay out (`layout_ms`) and to style,
     /// lay out and paint all told (`paint_ms`), how many times it painted (`painted`: none where nothing changed, more
     /// than one where it painted again before the display's refresh), its thread's CPU time drawing those frames for
-    /// the GPU (`draw_ms`), and, as `renderer` last drew it, its draw calls (`draws`), what its GPU did (`work`,
+    /// the GPU (`draw_ms`), and, as `renderer` last drew it, its draw calls and render passes (`draws`, `passes`), what its GPU did (`work`,
     /// `Renderer::work`), its GPU's time by its timestamps of its passes, where it takes them, once it's waited for
     /// (`gpu_ms`, `Renderer::finish`: a frame that draws everything again costs it there, on a software GPU too), and
     /// what its atlas holds (`atlas`).
@@ -425,6 +425,7 @@ impl Screen {
             "painted": cost.painted,
             "draw_ms": ms(renderer.drawing()),
             "draws": renderer.draws(),
+            "passes": renderer.passes(),
             "work": renderer.work(),
             "atlas": renderer.sprite_atlas().usage(),
         });

@@ -6,6 +6,7 @@ impl Renderer {
         self.drew = web_time::Instant::now();
         self.atlas.before_frame();
         self.draws.set(0);
+        self.passes.set(0);
         self.work.set(Work { uploaded: self.atlas.uploaded(), ..Work::default() });
         if let Some(stamps) = &mut self.stamps {
             stamps.begin(&self.device);
@@ -278,17 +279,7 @@ impl Renderer {
         if run.is_empty() && !matches!(load, wgpu::LoadOp::Clear(_)) {
             return;
         }
-        let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-            label: None,
-            color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                view,
-                depth_slice: None,
-                resolve_target: None,
-                ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
-            })],
-            timestamp_writes: self.stamps.as_ref().filter(|_| !run.is_empty()).and_then(|stamps| stamps.pass(false)),
-            ..Default::default()
-        });
+        let mut pass = self.pass(encoder, view, load, self.stamps.as_ref().filter(|_| !run.is_empty()).and_then(|stamps| stamps.pass(false)));
         pass.set_bind_group(0, globals, &[]);
         for (at, blurred) in run {
             let at = *at;

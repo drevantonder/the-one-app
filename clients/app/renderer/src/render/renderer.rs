@@ -114,8 +114,9 @@ pub struct Renderer {
     blurred: std::collections::HashMap<u64, (wgpu::TextureView, bool)>,
     /// Each atlas texture's bind group, as of the atlas's having made so many textures.
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
-    /// How many draw calls the last frame made (`draws`).
+    /// How many draw calls and render passes the last frame made (`draws`, `passes`).
     draws: std::cell::Cell<u32>,
+    passes: std::cell::Cell<u32>,
     /// What the last frame's GPU did (`Work`).
     work: std::cell::Cell<Work>,
     /// Its thread's time on a CPU drawing since it was last asked (`drawing`).
@@ -290,6 +291,7 @@ impl Renderer {
             blurred: Default::default(),
             atlas_groups: Default::default(),
             draws: Default::default(),
+            passes: Default::default(),
             work: Default::default(),
             on_cpu: Default::default(),
             stamps: Stamps::new(&context.device, &context.queue),
@@ -399,6 +401,23 @@ impl Renderer {
 
     fn drew(&self) {
         self.draws.set(self.draws.get() + 1);
+    }
+
+    /// How many render passes the last frame made: each costs a driver command lists of its own (wgpu-core records a
+    /// pass and its barriers in two), which Intel's Direct3D 12 driver took 1 to 2 ms each to make ready on a Surface.
+    pub fn passes(&self) -> u32 {
+        self.passes.get()
+    }
+
+    /// Begins a render pass drawing into `view`, `load`ing it first, counted (`passes`).
+    fn pass<'e>(&self, encoder: &'e mut wgpu::CommandEncoder, view: &wgpu::TextureView, load: wgpu::LoadOp<wgpu::Color>, timestamp_writes: Option<wgpu::RenderPassTimestampWrites<'_>>) -> wgpu::RenderPass<'e> {
+        self.passes.set(self.passes.get() + 1);
+        encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+            label: None,
+            color_attachments: &[Some(wgpu::RenderPassColorAttachment { view, depth_slice: None, resolve_target: None, ops: wgpu::Operations { load, store: wgpu::StoreOp::Store } })],
+            timestamp_writes,
+            ..Default::default()
+        })
     }
 
     /// What the last frame's GPU did, the same on any GPU, as the inspector's `profile` and `replay` say it: how many

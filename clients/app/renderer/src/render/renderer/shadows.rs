@@ -78,19 +78,10 @@ impl Renderer {
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
         let globals = self.pipelines.layouts.globals(buffer, globals, gamma);
         {
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: &view,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
-                })],
-                // No timestamps: on an iPhone's GPU a tile drawn in a pass that took them was kept as if wholly covered,
-                // its shadow a dark square round what casts it, for as long as the tile was kept; it's drawn once a
-                // shadow's shape, no frame's cost.
-                ..Default::default()
-            });
+            // No timestamps: on an iPhone's GPU a tile drawn in a pass that took them was kept as if wholly covered, its
+            // shadow a dark square round what casts it, for as long as the tile was kept; it's drawn once a shadow's
+            // shape, no frame's cost.
+            let mut pass = self.pass(encoder, &view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), None);
             pass.set_pipeline(&self.pipelines.tiles().0);
             pass.set_bind_group(0, &globals, &[]);
             pass.set_bind_group(1, instances, &[instance.0 as u32]);

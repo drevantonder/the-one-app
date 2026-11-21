@@ -39,6 +39,9 @@ pub struct Frames {
     pub gpu: Option<Duration>,
     /// Of `gpu`, its blurs': what's behind a backdrop's glass.
     pub blur: Option<Duration>,
+    /// The 95th percentile and the most of a frame's render passes (`Renderer::passes`).
+    pub passes: u32,
+    pub most_passes: u32,
     /// The first long frame, what it took, and the frame after the longest interval, where that's long.
     pub first_long: Option<Frame>,
     pub longest_gap: Option<(Duration, Frame)>,
@@ -59,6 +62,8 @@ pub struct Frame {
     pub gpu: Option<Duration>,
     /// Of `gpu`, its blurs': what's behind a backdrop's glass.
     pub blur: Option<Duration>,
+    /// Its render passes, all its renderers' (`Renderer::passes`).
+    pub passes: u32,
     /// Since the frame before, this thread's time applying what its page changed, and in the loop's turns, the
     /// frame's own among them: where a long gap's time went on this thread, or that it went elsewhere.
     pub applied: Duration,
@@ -152,6 +157,12 @@ impl Timing {
             present: at(frames.iter().map(|frame| frame.present).collect(), 0.95),
             gpu: (!gpu.is_empty()).then(|| at(gpu, 0.95)),
             blur: (!blur.is_empty()).then(|| at(blur, 0.95)),
+            passes: {
+                let mut passes: Vec<u32> = frames.iter().map(|frame| frame.passes).collect();
+                passes.sort_unstable();
+                passes[((passes.len() - 1) as f32 * 0.95).round() as usize]
+            },
+            most_passes: frames.iter().map(|frame| frame.passes).max().unwrap_or(0),
         })
     }
 }

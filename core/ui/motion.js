@@ -580,7 +580,7 @@ async function play(built, scene, name, motion, hz, folder) {
     writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
     const shown = await presentThere(at, folder, scene, events)
     const ms = (value) => `${value} ms`
-    const lines = shown.said.map((round, n) => `  ${hz} Hz presented, round ${n + 1}: ${round.frames} frames, p95 painting ${ms(round.paint_ms)}, drawing ${ms(round.draw_ms)} (waiting for an image ${ms(round.acquire_ms)}, submitting ${ms(round.submit_ms)}, presenting ${ms(round.present_ms)}), GPU ${ms(round.gpu_ms)}`)
+    const lines = shown.said.map((round, n) => `  ${hz} Hz presented, round ${n + 1}: ${round.frames} frames, p95 painting ${ms(round.paint_ms)}, drawing ${ms(round.draw_ms)} (waiting for an image ${ms(round.acquire_ms)}, submitting ${ms(round.submit_ms)}, presenting ${ms(round.present_ms)}), GPU ${ms(round.gpu_ms)}, render passes p95 ${round.passes} (most ${round.most_passes})`)
     if (!shown.said.length) lines.push(`  ${hz} Hz presented: nothing said: ${shown.stderr.trim().split("\n").at(-1)}`)
     if (shown.failed) {
       process.exitCode = 1

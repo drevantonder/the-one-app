@@ -135,17 +135,7 @@ impl Renderer {
                 }],
             });
             let texture = self.texture(from);
-            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: None,
-                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
-                    view: into,
-                    depth_slice: None,
-                    resolve_target: None,
-                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
-                })],
-                timestamp_writes: self.stamps.as_ref().and_then(|stamps| stamps.pass(true)),
-                ..Default::default()
-            });
+            let mut pass = self.pass(encoder, into, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), self.stamps.as_ref().and_then(|stamps| stamps.pass(true)));
             let (left, top, width, height) = region(at, halved(size, at));
             if width == 0 || height == 0 {
                 continue;

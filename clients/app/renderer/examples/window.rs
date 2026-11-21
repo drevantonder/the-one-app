@@ -58,6 +58,7 @@ fn main() -> anyhow::Result<()> {
                     "p50_ms": ms(frames.p50), "p95_ms": ms(frames.p95), "longest_ms": ms(frames.longest), "long": frames.long,
                     "paint_ms": ms(frames.paint), "draw_ms": ms(frames.draw), "acquire_ms": ms(frames.acquire),
                     "submit_ms": ms(frames.submit), "present_ms": ms(frames.present), "gpu_ms": frames.gpu.map(ms),
+                    "passes": frames.passes, "most_passes": frames.most_passes,
                 });
                 let _ = to.send(Some(said));
             }
