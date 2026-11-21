@@ -95,8 +95,9 @@ pub struct Renderer {
     /// `Queue::submit`), and to hand its image to the system to show (`Queue::present`).
     submitted: web_time::Duration,
     presented: web_time::Duration,
-    /// Whether the GPU is still on the frame it submitted last (`Queue::on_submitted_work_done`).
-    working: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    /// How many frames it's submitted, and how many of them the GPU has finished (`Queue::on_submitted_work_done`).
+    frames: u64,
+    finished: std::sync::Arc<std::sync::atomic::AtomicU64>,
 }
 
 
@@ -215,7 +216,8 @@ impl Renderer {
             acquired: Default::default(),
             submitted: Default::default(),
             presented: Default::default(),
-            working: Default::default(),
+            frames: 0,
+            finished: Default::default(),
         }
     }
 
@@ -435,7 +437,17 @@ impl Renderer {
     /// each frame a GPU slower than the display is given (the web's on a CPU, SwiftShader's, had a page that moves for
     /// good pile up frames till a screenshot waited forever). A native surface's next image already waits for it.
     pub fn working(&self) -> bool {
-        self.working.load(std::sync::atomic::Ordering::Acquire)
+        self.finished() < self.frames
+    }
+
+    /// How many frames it's submitted, and how many of them the GPU has finished, which the web's settle waits for
+    /// (`platform::web`'s `settle`).
+    pub fn frames(&self) -> u64 {
+        self.frames
+    }
+
+    pub fn finished(&self) -> u64 {
+        self.finished.load(std::sync::atomic::Ordering::Acquire)
     }
 
     /// A texture of `size` in its target's format, for `usage`: one it let go of lately (`spare`), else made.

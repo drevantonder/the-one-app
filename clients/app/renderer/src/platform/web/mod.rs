@@ -117,8 +117,10 @@ fn call(name: &str, argument: &JsValue) {
     })
 }
 
-/// Runs what's queued in a microtask, if one isn't on its way already.
-fn soon() {
+/// Runs what's queued in a microtask, if one isn't on its way already: as a job comes, and as the GPU finishes a frame,
+/// which a window waiting to draw its next (`Renderer::working`) or a `settle` waiting for it to show (`host::shown`)
+/// waits for.
+pub(crate) fn soon() {
     if !SOON.replace(true) {
         wasm_bindgen_futures::spawn_local(async { turn() });
     }
@@ -132,17 +134,22 @@ fn turn() {
     if TURNING.replace(true) {
         return soon();
     }
-    let (due, semantics, selected) = WINDOWS.with_borrow_mut(|windows| {
-        let Some(windows) = windows.as_mut() else { return (None, None, None) };
+    let (due, semantics, selected, frames) = WINDOWS.with_borrow_mut(|windows| {
+        let Some(windows) = windows.as_mut() else { return (None, None, None, None) };
         while let Some(job) = JOBS.with_borrow_mut(VecDeque::pop_front) {
             job(windows);
         }
         windows.turn();
-        let screen = windows.windows.get(&WINDOW).and_then(|window| window.screen.as_ref().ok());
+        let window = windows.windows.get(&WINDOW);
+        let screen = window.and_then(|window| window.screen.as_ref().ok());
         let (semantics, selected) = (screen.map(semantics), screen.and_then(Screen::selection_text));
-        (windows.due(), semantics, selected)
+        let frames = window.and_then(|window| window.renderer.as_ref()).map(|renderer| (renderer.frames(), renderer.finished()));
+        (windows.due(), semantics, selected, frames)
     });
     TURNING.set(false);
+    if let Some((frames, finished)) = frames {
+        host::shown(frames, finished);
+    }
     // The ARIA tree follows the semantic tree, where it changed.
     if let Some(semantics) = semantics.filter(|semantics| SPOKEN.with_borrow(|spoken| spoken != semantics)) {
         call("semantics", &js_sys::JSON::parse(&semantics).unwrap_or(JsValue::NULL));

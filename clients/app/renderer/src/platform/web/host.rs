@@ -19,6 +19,9 @@ use crate::{Appearance, Screen};
 thread_local! {
     /// What each `settle` waiting resolves, by its number, and the last number given.
     static SETTLING: RefCell<(u32, std::collections::HashMap<u32, js_sys::Function>)> = RefCell::new((0, std::collections::HashMap::new()));
+    /// Each `settle` answered, with what resolves it, and the frame it waits for the GPU to finish (`shown`): the
+    /// frames its window had submitted at the end of the turn it was answered in.
+    static SHOWING: RefCell<Vec<(js_sys::Function, JsValue, Option<u64>)>> = const { RefCell::new(Vec::new()) };
     /// The page's place in itself it was opened at, a link's fragment, which a native host tells it in its host
     /// context (`link`).
     static LINK: RefCell<String> = const { RefCell::new(String::new()) };
@@ -80,7 +83,10 @@ pub fn component(styles: String) -> Result<(), JsError> {
 
 /// Resolves once nothing on the page, or its frames' pages, is pending (what it asked, a picture fetched or decoding,
 /// what moves), with what settled says, as the inspector's `settle` answers natively (`Screen::inspect`), or at
-/// `deadline` ms with what still is: what a harness waits for before it takes a picture (core/ui's scenes.js).
+/// `deadline` ms with what still is: what a harness waits for before it takes a picture (core/ui's scenes.js). The
+/// picture is the canvas, so it resolves once the frame that drew what settled is on it too, which the GPU finished
+/// (`shown`), where a native harness paints its picture afresh: on SwiftShader, two of the browser's frames after the
+/// page settled still showed the frame before it, without the shapes a widget draws once it's laid out.
 #[wasm_bindgen]
 pub fn settle(deadline: f64) -> js_sys::Promise {
     js_sys::Promise::new(&mut |resolve, _| {
@@ -97,7 +103,9 @@ pub fn settle(deadline: f64) -> js_sys::Promise {
                         request,
                         Box::new(move |answer| {
                             if let Some(resolve) = SETTLING.with_borrow_mut(|(_, waiting)| waiting.remove(&number)) {
-                                let _ = resolve.call1(&JsValue::NULL, &js_sys::JSON::parse(&answer["result"].to_string()).unwrap_or(JsValue::NULL));
+                                let answer = js_sys::JSON::parse(&answer["result"].to_string()).unwrap_or(JsValue::NULL);
+                                SHOWING.with_borrow_mut(|showing| showing.push((resolve, answer, None)));
+                                soon();
                             }
                         }),
                     )
@@ -187,4 +195,19 @@ pub fn message(message: JsValue) {
             });
         })
     });
+}
+
+/// After a turn of the windows' loop, where its window had submitted `frames` and the GPU had finished `finished` of
+/// them: each `settle` answered waits for the frames submitted by the end of the turn it was answered in, and is
+/// resolved once they're finished.
+pub(super) fn shown(frames: u64, finished: u64) {
+    let done: Vec<_> = SHOWING.with_borrow_mut(|showing| {
+        for (.., frame) in showing.iter_mut() {
+            frame.get_or_insert(frames);
+        }
+        showing.extract_if(.., |(.., frame)| frame.is_some_and(|frame| frame <= finished)).collect()
+    });
+    for (resolve, answer, _) in done {
+        let _ = resolve.call1(&JsValue::NULL, &answer);
+    }
 }
