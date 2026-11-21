@@ -87,15 +87,29 @@ pub(super) fn respond(
         return None;
     }
     // Its page logs its errors as an MCP App logs to its host, and Telemetry hears them as its app's, as a web view's
-    // (`exception` in clients/app/page/util.js).
+    // (`exception` in clients/app/page/util.js), with where it threw and its stack in the app's source, by its bundles'
+    // sourcemaps, which are read by name as only this asks for them (`Views::file`).
     if method == "notifications/message" && message["params"]["level"] == "error" {
-        let data = &message["params"]["data"];
+        let data = message["params"]["data"].clone();
         let app = state.lock().expect("nothing panics holding it").entrypoint.split('/').next().unwrap_or_default().to_owned();
-        let error: String = data["message"].as_str().unwrap_or_default().chars().take(500).collect();
-        let path = data["file"].as_str().and_then(|file| Url::parse(file).ok()).map(|file| file.path().to_owned());
-        if let Ok(views) = crate::views() {
-            views.client.report(json!({"name": "exception", "error": error, "attributes": {"code.file.path": path, "code.line.number": data["line"], "one.app": app}}));
-        }
+        crate::spawn(async move {
+            let Ok(views) = crate::views() else { return };
+            let error: String = data["message"].as_str().unwrap_or_default().chars().take(500).collect();
+            let stack = data["stack"].as_str().unwrap_or_default();
+            let mut maps = std::collections::HashMap::new();
+            for file in renderer::js::stack_files(stack) {
+                if let Ok((_, map)) = views.file(&format!("{file}.map")).await {
+                    maps.insert(file, map);
+                }
+            }
+            let (stack, place) = renderer::js::source_mapped(stack, &maps);
+            let (path, line) = match &place {
+                Some(place) => (Some(place.file.clone()), json!(place.line)),
+                None => (data["file"].as_str().and_then(|file| Url::parse(file).ok()).map(|file| file.path().to_owned()), data["line"].clone()),
+            };
+            let stack = (!stack.is_empty()).then_some(stack);
+            views.client.report(json!({"name": "exception", "error": error, "attributes": {"code.file.path": path, "code.line.number": line, "exception.stacktrace": stack, "one.app": app}}));
+        });
         return None;
     }
     // Its page has drawn what it asked for as it opened, which its opening is timed to.

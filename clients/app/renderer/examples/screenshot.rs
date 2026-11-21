@@ -147,12 +147,17 @@ fn main() -> anyhow::Result<()> {
     let clock = flag("--time-zone").map_or_else(Clock::fixed, |zone| Clock::fixed_in(&zone));
     let js = Thread::start(&page, files, None, clock.clone(), touch)?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
+    let (page_folder, page_ui) = (folder.clone(), ui.clone());
     let asked: renderer::Asked = Box::new(move |message, _| {
         if message["method"] == "notifications/message" && message["params"]["level"] == "error" {
             let data = &message["params"]["data"];
             let message = data["message"].as_str().unwrap_or_default();
             if !expected.iter().any(|words| message.contains(words.as_str())) {
-                throwing.borrow_mut().push(format!("{message} ({}:{})", data["file"].as_str().unwrap_or("?"), data["line"]));
+                // Where it threw, in the page's source, by its bundles' sourcemaps beside them, as a client tells Telemetry.
+                let stack = data["stack"].as_str().unwrap_or_default();
+                let maps = renderer::js::stack_files(stack).into_iter().filter_map(|file| Some((file, std::fs::read(local(&page_folder, page_ui.as_deref(), &Url::parse(&format!("{file}.map")).ok()?)).ok()?))).collect();
+                let place = renderer::js::source_mapped(stack, &maps).1.map(|place| format!("{}:{}", place.file, place.line));
+                throwing.borrow_mut().push(format!("{message} ({})", place.unwrap_or_else(|| format!("{}:{}", data["file"].as_str().unwrap_or("?"), data["line"]))));
             }
         }
         let answers = answering.borrow();
@@ -1140,14 +1145,18 @@ fn built(folder: &std::path::Path, ui: Option<PathBuf>) -> anyhow::Result<(Url, 
 
 /// The page at `page` of what's built in `folder`, which is where the page's addresses start from: its module, its
 /// files, and its own styles' tokens, its tables loaded.
+/// Where a page's file is here: the UI library's in `ui`, the rest in its built folder.
+fn local(folder: &std::path::Path, ui: Option<&std::path::Path>, url: &Url) -> PathBuf {
+    match (url.path().strip_prefix("/ui/client/"), ui) {
+        (Some(file), Some(ui)) => ui.join(file),
+        _ => folder.join(url.path().trim_start_matches('/')),
+    }
+}
+
 fn built_page(folder: &std::path::Path, page: &std::path::Path, ui: Option<PathBuf>) -> anyhow::Result<(Url, Files, u32)> {
     let root = folder.to_owned();
     let mut files: Files = Box::new(move |url: &Url| {
-        let path = url.path();
-        let file = match (path.strip_prefix("/ui/client/"), &ui) {
-            (Some(file), Some(ui)) => ui.join(file),
-            _ => root.join(path.trim_start_matches('/')),
-        };
+        let file = local(&root, ui.as_deref(), url);
         std::fs::read_to_string(&file).map_err(|error| anyhow::anyhow!("{}: {error}", file.display()))
     });
     let html = std::fs::read_to_string(page)?;

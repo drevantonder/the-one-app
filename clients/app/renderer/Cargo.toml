@@ -60,6 +60,8 @@ thread-priority = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 resvg = { version = "0.47", default-features = false, features = ["text"] }
 parley = { version = "0.13", features = ["system"] }
+# A page's error's stack in its source, by its bundle's sourcemap (`js::source_mapped`).
+sourcemap = "9.3"
 # QuickJS, with its module loader: a page's module imports the UI library's. Its async runtime runs what the Web APIs
 # below answer with a promise.
 rquickjs = { version = "0.14", features = ["loader", "futures"] }
