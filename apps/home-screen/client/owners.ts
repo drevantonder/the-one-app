@@ -16,8 +16,10 @@ export interface Owner extends Pages {
 }
 
 /// You, everyone, then each of your groups, in the order they're listed. A network with nothing that keeps groups
-/// has none. Yours and everyone's are asked for beside the groups, which they don't wait on.
-export const owners = createMemo(async () => {
+/// has none. Yours and everyone's are asked for beside the groups, which they don't wait on. Asked again and not
+/// answered, as while a server restarts, it's what it was, as a phone's Home Screen stays: only a Home Screen that
+/// never had an answer says why.
+export const owners = createMemo(async (was?: Owner[]) => {
   // An app with no screen of its own is listed only if it has a section in Settings, which opening it shows, as macOS
   // opens a menu-bar app's preferences: its own page, or a section of the sidebar (a device's page isn't about it).
   const sections = json<{ sections: { app: string; in: string }[] }>("settings_sections").then(({ sections }) => new Set(sections.filter((section) => section.in !== "device").map((section) => section.app)), () => new Set<string>())
@@ -32,8 +34,8 @@ export const owners = createMemo(async () => {
       }),
     }))
   const groups = json<{ groups: { group: string; called: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string; called: string }[] => [])
-  const [yours, everyone, theirs] = await Promise.all([pages({ name: "You" }), pages({ subject: "network", name: "Everyone" }), groups.then((groups) => Promise.all(groups.map(({ group, called }) => pages({ subject: group, name: called }))))])
-  return [yours, everyone, ...theirs]
+  const all = Promise.all([pages({ name: "You" }), pages({ subject: "network", name: "Everyone" }), groups.then((groups) => Promise.all(groups.map(({ group, called }) => pages({ subject: group, name: called }))))])
+  return all.then(([yours, everyone, theirs]) => [yours, everyone, ...theirs], (error) => was ?? Promise.reject(error))
 })
 changed(() => refresh(owners))
 

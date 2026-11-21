@@ -64,7 +64,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   /// host drags them too. What's over Home and not its pages, the owner pill and the dots, goes as far with it, as an
   /// iPhone's dots go with its last page.
   const sectionsX = () => {
-    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(downY() / Math.max(1, room().height))))
+    const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(downY() / room().height)))
     return Math.max(0, xOf(owner)[0]() - (dragged() ?? 0) - Math.max(0, homes(owner).length - 1) * room().width)
   }
 

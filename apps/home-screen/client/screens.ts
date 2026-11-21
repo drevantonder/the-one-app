@@ -13,10 +13,12 @@ export function createScreens(props: { owners: Owner[] }) {
   // + and Done, and the pages' overview, fade out as they go, at the settle pace.
   const [editBar, editBarGoing] = lingering(editingNow, 200)
   const [overview, overviewGoing] = lingering(() => editingNow() && state().matches({ editing: "overview" }) && editing(), 200)
-  // The room the pages have: the window, or in the launcher, a page in its card.
+  // The room the pages have: the window, or in the launcher, a page in its card. A window with no size, as a phone's
+  // system lays one out from nothing for a moment, keeps the room it had: nothing shows in none, and where the pages
+  // are is a share of it, which none made NaN, and the owner pill and the dots threw on it until the app was closed (21 Nov).
   createEffect(
     () => ({ size: viewport(), safe: safeArea(), launcher: launcher() }),
-    ({ size, safe, launcher }) => void setRoom(launcher ? launcherRoom(safe) : measure(size.width, size.height, safe)),
+    ({ size, safe, launcher }) => void ((launcher || (size.width && size.height)) && setRoom(launcher ? launcherRoom(safe) : measure(size.width, size.height, safe))),
   )
 
   /// Each owner's Home pages as they're drawn: the ones they keep shown, or while they're edited, as they're edited,
