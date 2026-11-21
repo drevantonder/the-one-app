@@ -81,15 +81,21 @@ pub fn component(styles: String) -> Result<(), JsError> {
     Ok(())
 }
 
-/// Resolves once nothing on the page, or its frames' pages, is pending (what it asked, a picture fetched or decoding,
-/// what moves), with what settled says, as the inspector's `settle` answers natively (`Screen::inspect`), or at
-/// `deadline` ms with what still is: what a harness waits for before it takes a picture (core/ui's scenes.js). The
-/// picture is the canvas, so it resolves once the frame that drew what settled is on it too, which the GPU finished
-/// (`shown`), where a native harness paints its picture afresh: on SwiftShader, two of the browser's frames after the
-/// page settled still showed the frame before it, without the shapes a widget draws once it's laid out.
+/// What the inspector answers to `request` (a line of its protocol, `{"v":1,"op":"query","text":"Sync"}`), as a native
+/// window's does (`Screen::inspect`), for a harness (core/ui's scenes.js): its `result`, or the error it said. `settle`
+/// resolves once nothing on the page, or its frames' pages, is pending (what it asked, a picture fetched or decoding,
+/// what moves), or at `deadline` ms with what still is. The picture is the canvas, so it resolves once the frame that
+/// drew what settled is on it too, which the GPU finished (`shown`), where a native harness paints its picture afresh:
+/// on SwiftShader, two of the browser's frames after the page settled still showed the frame before it, without the
+/// shapes a widget draws once it's laid out.
 #[wasm_bindgen]
-pub fn settle(deadline: f64) -> js_sys::Promise {
+pub fn inspect(request: String) -> js_sys::Promise {
+    let mut request = match crate::inspect::Request::parse(&request) {
+        Ok(request) => Some(request),
+        Err(why) => return js_sys::Promise::reject(&JsValue::from_str(&why.to_string())),
+    };
     js_sys::Promise::new(&mut |resolve, _| {
+        let Some(request) = request.take() else { return };
         let number = SETTLING.with_borrow_mut(|(next, waiting)| {
             *next += 1;
             waiting.insert(*next, resolve);
@@ -97,7 +103,6 @@ pub fn settle(deadline: f64) -> js_sys::Promise {
         });
         let _ = Native::get().map(|native| {
             native.run(move |windows| {
-                let request = crate::inspect::Request { id: Value::Null, op: "settle".into(), inputs: serde_json::Map::from_iter([("deadline".to_owned(), Value::from(deadline))]) };
                 windows.with(WINDOW, |screen| {
                     screen.inspect(
                         request,

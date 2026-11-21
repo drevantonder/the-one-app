@@ -45,7 +45,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, copied, env, library, pageFolder, phone, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, library, monospaced, pageFolder, phone, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -269,12 +269,12 @@ async function web(browser, serve, key, scene, folder) {
       }, EDGE)
     : { words: [], names: [] }
   if (drawn) writeFileSync(join(folder, "web-text.txt"), words.join("\n") + "\n")
-  // The texts a scene's checks say are code (`expect.monospace`) are as wide a character as each other in its ARIA tree
+  // The texts a scene's checks say are code (`expect.monospace`) advance as one monospace face does in the web's inspector
   // too, as the native check has it: the web draws them in the same face, bundled with it, and not the browser's own.
   const code = [...new Set(Object.values(scene.checks ?? {}).flat().flatMap((step) => step?.expect?.monospace ?? []))]
-  const advances = drawn && code.length ? await frame.evaluate((texts) => texts.map((text) => [...document.querySelectorAll("#semantics span")].find((node) => node.textContent === text)?.getBoundingClientRect().width / [...text].length), code) : []
-  if (advances.length && (advances.some((advance) => !advance) || Math.max(...advances) - Math.min(...advances) > 0.05)) {
-    problems.push(`its code's characters are ${advances.map((advance, at) => `${advance?.toFixed(2) ?? "not drawn"} px (${code[at]})`).join(", ")} wide: not one monospace face`)
+  const spaced = drawn && code.length ? monospaced((await frame.evaluate(() => /** @type {any} */ (globalThis).inspector.query({ text: "" }))).nodes, code) : undefined
+  if (spaced) {
+    problems.push(`its code: ${spaced}`)
     process.exitCode = 1
   }
   const jumped = drawn && scene.wheel && (await notched(page, frame, scene.wheel))

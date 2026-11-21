@@ -28,7 +28,7 @@
 //!   `file:line` of the JSX that made it, where its build says, an input's `editing` state as the host has it, what a
 //!   person sees of it as the last frame drew it (`opacity`, with what it's in, and `seen`, how much of its box is in
 //!   the window, not clipped away), whether it has the keyboard (`focused`), a text's whether it was cut short with an ellipsis (`cut`), and
-//!   the words of each line it wrapped to (`lines`).
+//!   the words of each line it wrapped to (`lines`) and how far each glyph of them advances (`advances`, in points).
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
 //! - `profile` (`at`, ms from now, in order: `[0, 80, 200, 400]` unless given; `snap`: false for no pictures) →
 //!   `{frames, time, paused}`: the clock paused and stepped to each time, as `clock` steps it, and the frame there

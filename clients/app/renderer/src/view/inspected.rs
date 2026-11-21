@@ -150,6 +150,9 @@ impl Screen {
                                     node["lines"] = json!(lines);
                                 }
                             }
+                            // How far each glyph advances, line by line, as it was laid out, in points: what makes a face monospace.
+                            let advances: Vec<Vec<f32>> = paragraph.lines.iter().map(|line| line.glyphs.iter().map(|(_, _, glyph)| (glyph.advance * 1000.0).round() / 1000.0).collect()).collect();
+                            node["advances"] = json!(advances);
                         }
                     }
                 }

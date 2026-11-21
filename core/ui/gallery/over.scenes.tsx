@@ -182,6 +182,7 @@ export default {
   "Over the page/A tool's error in full": {
     alone: true,
     taps: ["Sync", "Details"],
+    checks: { "The error's code is in a monospace face": [{ expect: { monospace: ["notes_sync: connection refused (os error 111)"] } }] },
     render: () => <Button onPress={() => toast(new Error("Couldn't reach the network\n\nnotes_sync: connection refused (os error 111)"))}>Sync</Button>,
   },
   "Over the page/Alert": {

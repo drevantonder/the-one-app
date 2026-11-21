@@ -152,19 +152,8 @@ export function requests(steps, folder, answers = {}) {
             return broken.length ? [...new Set(broken)].join(", ") : undefined
           },
         })
-      // Every text named is drawn in a monospace face: each as wide per character as the others, as a code view's
-      // columns line up, which the proportional face's narrow i and wide m don't.
-      if (monospace)
-        out.push({
-          request: { op: "query", text: "" },
-          judge: (answer) => {
-            const found = monospace.map((text) => (answer?.result?.nodes ?? []).find((node) => node.name === text && node.rect))
-            const missing = monospace.filter((_, at) => !found[at])
-            if (missing.length) return `${missing.map((text) => `"${text}"`).join(", ")} isn't drawn`
-            const advances = found.map((node, at) => node.rect.width / [...monospace[at]].length)
-            return Math.max(...advances) - Math.min(...advances) > 0.05 && `its characters are ${advances.map((advance, at) => `${advance.toFixed(2)} pt (${monospace[at]})`).join(", ")} wide: not one monospace face`
-          },
-        })
+      // Every text named is drawn in a monospace face (`monospaced`).
+      if (monospace) out.push({ request: { op: "query", text: "" }, judge: (answer) => monospaced(answer?.result?.nodes ?? [], monospace) })
       // What's named drawn clear of what `from` names, as a floating control (a page's arrow) is clear of the content it
       // isn't about: no two of them, both in sight, share any of their boxes.
       if (apart)
@@ -390,4 +379,17 @@ export const unlike = (answer, folder) => {
   if (!differ) return
   if (folder && kept) for (const [name, png] of [["kept", kept], ["afresh", afresh]]) writeFileSync(join(folder, `${name}.png`), Buffer.from(png, "base64"))
   return `the frame drawn on what it kept differs from one drawn afresh in ${differ} of ${of} pixels${box ? `, from ${box.x},${box.y} ${box.width}×${box.height} px` : ""}`
+}
+
+/// Why the texts named, among a query's `nodes`, aren't in one monospace face, if they aren't: every glyph of them
+/// advances as far as every other, as a code view's columns line up, which the proportional face's narrow i and wide m
+/// don't, even in one text alone. Natively and on the web alike (`scenes.js`).
+export function monospaced(nodes, texts) {
+  const found = texts.map((text) => nodes.find((node) => node.name === text && node.rect))
+  const missing = texts.filter((_, at) => !found[at])
+  if (missing.length) return `${missing.map((text) => `"${text}"`).join(", ")} isn't drawn`
+  const advances = found.flatMap((node) => (node.advances ?? []).flat()).filter((advance) => advance > 0)
+  if (!advances.length) return "its glyphs' advances aren't said"
+  const [least, most] = [Math.min(...advances), Math.max(...advances)]
+  return most - least > 0.05 && `its glyphs advance from ${least.toFixed(2)} to ${most.toFixed(2)} pt: not one monospace face`
 }
