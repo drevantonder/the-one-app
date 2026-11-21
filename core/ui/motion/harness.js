@@ -68,9 +68,7 @@ export async function presentThere(at, folder, scene, played, taps) {
   cpSync(join(folder, "answers.json"), join(staged, "answers.json"))
   writeFileSync(join(staged, "played.json"), JSON.stringify(played))
   writeFileSync(join(staged, "before.jsonl"), taps.map((tap, id) => JSON.stringify({ v: 1, id: id + 1, ...tap })).join("\n"))
-  const client = scene.answers?.["one/client"]
-  const panel = client?.launcher ? ["--panel", "16"] : []
-  const args = ["page", "--play", "played.json", "--before", "before.jsonl", "--ui", `${base}\\ui`, "--answers", "answers.json", "--size", `${scene.size[0]}x${scene.size[1]}`, "--rounds", "3", ...panel]
+  const args = ["page", "--play", "played.json", "--before", "before.jsonl", "--ui", `${base}\\ui`, "--answers", "answers.json", "--size", `${scene.size[0]}x${scene.size[1]}`, "--rounds", "3", ...panel(scene)]
   writeFileSync(join(staged, "run.cmd"), ["@echo off", `cd /d "${run}"`, `"${base}\\screenshot.exe" ${args.map((arg) => `"${arg}"`).join(" ")} > said.txt 2> err.txt`, "echo %errorlevel% > exit.txt", `echo done> \\\\.\\pipe\\${name}`].join("\r\n"))
   writeFileSync(
     join(staged, "wait.ps1"),
@@ -104,17 +102,20 @@ export const panelled = (scene) => {
   return Boolean(client?.launcher)
 }
 
+/// The harness's flags that open `scene`'s window as the app does: a launcher as a panel with a computer's corners,
+/// 18 pt (clients/app/src/computer.rs `CORNER`), over the system's glass, in every harness alike.
+export const panel = (scene) => (panelled(scene) ? ["--panel", "18"] : [])
+
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
 export async function run(at, folder, scene, requests, seed = 0) {
   const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   const lines = requests.map((request, id) => JSON.stringify({ v: 1, id: id + 1, ...request })).join("\n")
-  const panel = panelled(scene) ? ["--panel", "0"] : []
   // Its pictures decode as slowly as on the slowest device of its kind: as this machine's CPU is to that one's, at
   // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
   const slower = hostScore && !ssh ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.reducedMotion ? ["--reduced-motion"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), ...(scene.latency ? ["--latency", String(scene.latency)] : []), "--time-zone", scene.timeZone ?? "UTC", ...(scene.hz ? ["--hz", String(scene.hz)] : []), ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
+  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.reducedMotion ? ["--reduced-motion"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), ...(scene.latency ? ["--latency", String(scene.latency)] : []), "--time-zone", scene.timeZone ?? "UTC", ...(scene.hz ? ["--hz", String(scene.hz)] : []), ...(seed ? ["--seed", String(seed)] : []), ...panel(scene), ...slower]
   if (ssh) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }

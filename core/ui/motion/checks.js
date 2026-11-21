@@ -99,7 +99,8 @@ const IMAGES_HIDDEN = 4096
 /// (`away`, which on an iPhone draws it in the other appearance and back for the app switcher, and puts a Mac's launcher
 /// away as it takes the keyboard, so it's summoned again, as its person does), the system's appearance switched, hidden
 /// under an app as a phone's root window is (a panel put away) and shown again, holding none of its window's images
-/// meanwhile, and on a computer its window made smaller. → why it failed, or nothing.
+/// meanwhile, and on a computer its window made smaller, but for a panel, which is as big as its page asks. → why it
+/// failed, or nothing.
 async function agrees(built, scene, folder) {
   mkdirSync(folder, { recursive: true })
   const at = pageFolder(built, scene.page, folder, scene.uses)
@@ -110,7 +111,7 @@ async function agrees(built, scene, folder) {
     ["back from the background", [{ op: "away", ms: 1000 }, ...(panelled(scene) ? [{ op: "summon" }] : [])]],
     [`switched to ${dark ? "Light" : "Dark"}`, [{ op: "appearance", dark: !dark }]],
     panelled(scene) ? ["put away and summoned again", [{ op: "put_away" }, { op: "memory" }, { op: "summon" }]] : ["hidden under an app and shown again", [{ op: "hide" }, { op: "memory" }, { op: "hide", hidden: false }]],
-    ...(scene.touch ? [] : [["made smaller", [{ op: "resize", width: scene.size[0] - 120, height: scene.size[1] - 80 }]]]),
+    ...(scene.touch || panelled(scene) ? [] : [["made smaller", [{ op: "resize", width: scene.size[0] - 120, height: scene.size[1] - 80 }]]]),
   ]
   const asked = [{ op: "clock", step: 1000 }, ...taps, ...changes.flatMap(([, ops]) => [...ops, rest, { op: "fresh" }]), crash]
   const done = await run(at, folder, scene, asked)

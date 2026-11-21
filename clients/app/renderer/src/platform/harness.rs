@@ -260,7 +260,20 @@ impl Windows {
     pub fn presented(&mut self, id: WindowId) -> Option<(u32, u32, Vec<u8>)> {
         let window = self.windows.get_mut(&id)?;
         let parts = window.parts.len();
-        let drawn = (0..parts).map(|at| window.renderer.as_mut().and_then(|renderer| renderer.read(at))).collect();
+        let drawn: Vec<_> = (0..parts).map(|at| window.renderer.as_mut().and_then(|renderer| renderer.read(at))).collect();
+        // A panel's part is masked to its rounded corners on a Mac and on Windows, and isn't on X11, so what it draws
+        // outside them is lost on one and a square box on the other.
+        for (part, drawn) in window.parts.iter().zip(&drawn).filter(|_| window.panel) {
+            if let Some((width, height, rgba)) = drawn
+                && let Some((x, y)) = cornered(part, *width, *height, rgba)
+            {
+                let bounds = part.bounds;
+                self.display.wrong(format!(
+                    "{}'s pane of the system's glass at {}x{} pt ({}, {}) draws in its {} pt corners (at {x}, {y} px of it), which a Mac masks away and X11 shows as a square box",
+                    window.title, bounds.size.width, bounds.size.height, bounds.origin.x, bounds.origin.y, part.radius
+                ));
+            }
+        }
         composed(window, drawn)
     }
 
@@ -536,6 +549,18 @@ fn composed(window: &Window, drawn: Vec<Option<(u32, u32, Vec<u8>)>>) -> Option<
         }
     }
     Some((width, height, rgba))
+}
+
+/// Where `part`, drawn `width` by `height` (`rgba`), has ink in a corner its rounding cuts away whole: the square at
+/// each, `radius` × (1 − 1/√2) across, less a pixel for its edge's smoothing, where a square box under it shows. (A
+/// layer moving in it can reach a pixel or two past its rounding elsewhere, as content masks are rectangles.)
+#[cfg(feature = "fake")]
+fn cornered(part: &Part, width: u32, height: u32, rgba: &[u8]) -> Option<(u32, u32)> {
+    let cut = ((part.radius * part.native.scale() * (1.0 - std::f32::consts::FRAC_1_SQRT_2)).floor() as u32).saturating_sub(1);
+    let ends = |length: u32| (0..cut.min(length)).chain(length.saturating_sub(cut).max(cut)..length);
+    ends(height)
+        .flat_map(|y| ends(width).map(move |x| (x, y)))
+        .find(|&(x, y)| rgba[((y * width + x) * 4 + 3) as usize] > 24)
 }
 
 /// The system's glass a panel is shown over, a flat grey of its Colour Mode here.

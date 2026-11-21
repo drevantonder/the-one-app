@@ -246,7 +246,12 @@ impl Painter<'_> {
         let scaled = |edges: Edges<f32>| Edges { top: edges.top * transform.scale, right: edges.right * transform.scale, bottom: edges.bottom * transform.scale, left: edges.left * transform.scale };
         // Shadows under it, the first nearest, then what shows through it, its fill and border, then shadows inside.
         if !root {
-            for shadow in look.shadows.iter().rev().filter(|shadow| !shadow.inset) {
+            // The system's own glass is a pane of its own under the page, which can't fade: what's fading is drawn
+            // with the renderer's own, which does, as it goes (an owner pill fading off with its pages). Its pane is a
+            // window, which the system shadows, so the page draws no shadow of its own under it, which its window
+            // would clip to a square box.
+            let system = matches!(look.material, Some((_, _, true))) && self.glass.is_some() && opacity >= 1.0;
+            for shadow in look.shadows.iter().rev().filter(|shadow| !shadow.inset && !system) {
                 self.shadow(shadow, bounds, radii, transform.scale, mask, opacity);
             }
             match look.app_region {
@@ -254,9 +259,7 @@ impl Painter<'_> {
                 Some(false) => self.kept_regions.push(bounds.intersect(&mask)),
                 None => {}
             }
-            // The system's own glass is a pane of its own under the page, which can't fade: what's fading is drawn
-            // with the renderer's own, which does, as it goes (an owner pill fading off with its pages).
-            if let (Some((_, _, true)), Some(glass)) = (look.material, self.glass.as_mut().filter(|_| opacity >= 1.0)) {
+            if let Some(glass) = self.glass.as_mut().filter(|_| system) {
                 glass.push(crate::platform::Glass { bounds: bounds.intersect(&mask), radius: radii.top_left, opacity });
                 if let Some(fill) = self.fill {
                     self.quad(bounds, mask, fill, Edges::default(), Hsla::default(), radii, false, opacity);

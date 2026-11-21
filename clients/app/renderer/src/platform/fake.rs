@@ -326,8 +326,12 @@ impl Display {
         self.summoned.take()
     }
 
+    /// Something the display showed that it mustn't have, once however often it showed it.
     pub(crate) fn wrong(&self, what: String) {
-        self.wrong.borrow_mut().push(what);
+        let mut wrong = self.wrong.borrow_mut();
+        if !wrong.contains(&what) {
+            wrong.push(what);
+        }
     }
 
     pub(crate) fn wrongs(&self) -> Vec<String> {

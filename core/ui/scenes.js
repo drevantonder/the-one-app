@@ -45,7 +45,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, copied, env, library, monospaced, pageFolder, phone, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, library, monospaced, pageFolder, panel, phone, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -373,7 +373,7 @@ function native(built, scene, folder, used) {
   // With a device to draw it too, each ends at rest with where every node is and a picture drawn afresh, to compare.
   const steps = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...Array.from({ length: Math.ceil(scene.wait / 1000) }, () => ({ op: "clock", step: 1000 })), { op: "query" }, { op: "query", frames: true }, ...(ssh ? DRAWN : [])]
   const requests = steps.map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
-  const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone, "--requests", "-"]
+  const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone, "--requests", "-", ...panel(scene)]
   const run = Bun.spawnSync(capped([harness, ...asked]), { stdin: new TextEncoder().encode(requests), env })
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: stopped(run.exitCode) ?? (run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing") }
   const nodes = JSON.parse(readFileSync(join(folder, "native.json"), "utf8"))
