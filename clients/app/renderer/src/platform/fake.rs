@@ -1,6 +1,6 @@
 //! A platform with nothing behind it, for a harness, as GPUI's `TestPlatform` and Flutter's test binding are: the same
 //! windows and the same loop (`Windows::turned`) as every host's, run against a stand-in for its display, whose
-//! input, display ticks and surfaces come from whoever drives it (`examples/screenshot.rs`), not from a system. Its
+//! input, display ticks and surfaces come from whoever drives it (`examples/screenshot/main.rs`), not from a system. Its
 //! windows draw offscreen, as a compositor would show them, and the picture last presented is read back from there.
 //! Built with the `fake` feature, in place of the system's platform.
 

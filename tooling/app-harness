@@ -2,7 +2,7 @@
 # The app harness: the app itself (its client, the channel its windows talk over, its launcher, a second start, an
 # update's restart) on the renderer's fake platform, its native windows drawn offscreen on a thread of their own
 # (`clients/app`'s `fake`), against a network on this machine (`tooling/network`), driven by the inspector as an agent
-# drives a device's. What the headless harness (`examples/screenshot.rs`) can't reach, as it draws one page with no
+# drives a device's. What the headless harness (`examples/screenshot/main.rs`) can't reach, as it draws one page with no
 # app around it.
 #
 #     tooling/app-harness <folder> [--seed <n>] [--phone] [<check>…]

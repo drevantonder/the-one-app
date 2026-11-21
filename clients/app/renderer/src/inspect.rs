@@ -1,6 +1,6 @@
 //! The inspector: how an agent or a test reads a native window and acts on it, as Rune's inspector protocol has it
 //! (github.com/anomalyco/rune, PLAN.md §6). Every native window serves it on a local socket of its own
-//! (`clients/app/src/native.rs`), and the headless harness (`examples/screenshot.rs`) answers the same requests, so
+//! (`clients/app/src/native.rs`), and the headless harness (`examples/screenshot/main.rs`) answers the same requests, so
 //! whatever drives one drives the other.
 //!
 //! # Protocol, version 1

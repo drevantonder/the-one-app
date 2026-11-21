@@ -42,7 +42,7 @@ use super::windows::start;
 /// seed (`ONE_SEED`), it's as busy as a loaded device's: one job in four waits up to 2 s for the thread, as a Surface's
 /// launcher waited 4.5 s to be made as the app started (21 Nov). Its screen is a phone's where `ONE_PHONE` says so
 /// (`Native::phone`). A harness that drives them itself, frame by frame, has
-/// them by `Windows::fake` instead (`examples/screenshot.rs`).
+/// them by `Windows::fake` instead (`examples/screenshot/main.rs`).
 #[cfg(feature = "fake")]
 fn start() -> anyhow::Result<Native> {
     let (sender, jobs) = std::sync::mpsc::channel::<Job>();

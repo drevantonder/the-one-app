@@ -47,7 +47,7 @@ impl Screen {
         }
         // A tap on a node waits for it, as Playwright's click does (actionability): for it to be there, drawn, still
         // and reached by a press there, a second at most unless `timeout` says, as the harness's taps do
-        // (examples/screenshot.rs).
+        // (examples/screenshot/main.rs).
         if request.op == "tap" && request.selects() {
             let deadline = Instant::now() + Duration::from_secs_f64(request.f64("timeout").unwrap_or(1000.0).max(0.0) / 1000.0);
             self.tapping.push(Tapping { deadline, request, reply, was: None });
