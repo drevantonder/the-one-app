@@ -906,7 +906,7 @@
           }
         },
         "once": {
-          "role": "button",
+          "role": "text",
           "name": "Weather"
         },
         "apart": {
@@ -939,7 +939,7 @@
           }
         },
         "once": {
-          "role": "button",
+          "role": "text",
           "name": "Weather"
         }
       }
@@ -2633,7 +2633,7 @@
           }
         },
         "once": {
-          "role": "button",
+          "role": "text",
           "name": "Weather"
         },
         "apart": {
@@ -2788,7 +2788,15 @@
         "gesture": {
           "moves": []
         },
-        "frameMs": 92
+        "frameMs": 92,
+        "apart": {
+          "role": "button",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        },
+        "seamless": true
       },
       "Close it": {
         "from": {
@@ -2804,9 +2812,17 @@
         },
         "keeps": "mid browser on WebGPU",
         "once": {
-          "role": "button",
+          "role": "text",
           "name": "Notes"
-        }
+        },
+        "apart": {
+          "role": "button",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        },
+        "seamless": true
       }
     }
   },
@@ -2833,7 +2849,7 @@
         },
         "keeps": "older iPhone",
         "once": {
-          "role": "button",
+          "role": "text",
           "name": "Notes"
         },
         "follow": {
@@ -2859,7 +2875,8 @@
             "role": "dialog",
             "name": "Productivity"
           }
-        }
+        },
+        "seamless": true
       },
       "Close it with less motion": {
         "from": {
@@ -2875,7 +2892,7 @@
         },
         "reducedMotion": true,
         "once": {
-          "role": "button",
+          "role": "text",
           "name": "Notes"
         },
         "follow": {

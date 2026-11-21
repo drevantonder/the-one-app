@@ -53,7 +53,7 @@ export const wait = (index: number) => Math.min(index, 2) * 40
 
 /// How a category's `count` apps are handed between its square and it: once they've all flown, or at once with less
 /// motion, when they jump.
-export const handed = (count: number) => [looks.handedAfter(800 + wait(count - 1)), reducedMotion() && looks.handing]
+export const handed = (count: number) => [looks.handedAfter(1000 + wait(count - 1)), reducedMotion() && looks.handing]
 
 /// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into, and each of its
 /// apps' icons in it (`apps`), which that app grows out of.
@@ -156,7 +156,6 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
                 onPress={opening(key, count)}
                 style={[looks.folder, looks.folderBox(laid().columnGap, laid().rowGap, laid().category, laid().padding.top, laid().padding.inline, laid().padding.bottom)]}
               >
-                <View aria-hidden="true" style={looks.tint} />
                 <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                   {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small away={away()} handed={handed(count())} />}
                 </For>
@@ -229,8 +228,9 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
 
 /// An app's icon in the App Library, `icon` across: a tap opens it, or for an app with no entrypoint, the App Store
 /// at its page, and a finger that holds it opens its menu; moving it carries it onto whichever owner's pages it's
-/// dropped on. In a category's square (`small`) its name is smaller, and it's handed over to its category opened as that
-/// says (`handed`), and not drawn while it's in it (`away`).
+/// dropped on. In a category's square (`small`) its name is smaller, and its icon is handed over to its category opened
+/// as that says (`handed`), and not drawn while it's in it (`away`); its name stays in the square, going as the category
+/// opens and coming back as its apps fly home, as the opened one's go and come, so nothing changes as they're handed back.
 function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: number; small?: boolean; away?: boolean; handed?: Styles }) {
   const badge = () => (opens(props.entrypoint) ? badgeOf(opens(props.entrypoint)!, props.owner) : undefined)
   const from = (event: Located): From => {
@@ -251,13 +251,13 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
       onPress={(event) => {
         if (tapping() && state().matches("nothing")) press(props.entrypoint, props.owner, false, from(event))
       }}
-      style={[looks.entry, props.small && [looks.entrySmall, props.handed], props.away && [looks.handing, looks.unseen]]}
+      style={[looks.entry, props.small && looks.entrySmall]}
     >
-      <View style={[looks.slots, looks.square(props.icon)]}>
+      <View style={[looks.slots, looks.square(props.icon), props.handed, props.away && [looks.handing, looks.unseen]]}>
         <Image src={src(props.entrypoint.icon)} alt="" style={[looks.iconImage(corner(props.icon)), looks.square(props.icon)]} />
         <Count count={badge()} />
       </View>
-      <Text style={[looks.name, props.small && looks.smallName]}>{props.entrypoint.name}</Text>
+      <Text style={[looks.name, props.small && [looks.smallName, props.away ? looks.unnamed : looks.named]]}>{props.entrypoint.name}</Text>
     </Pressable>
   )
 }

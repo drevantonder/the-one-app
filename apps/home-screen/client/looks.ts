@@ -22,7 +22,6 @@ export const looks = styles({
   miniature: { position: "relative", overflow: "hidden", borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.background, boxShadow: tokens.shadow.window },
   // An icon sinks under the finger, dimmed at once, for as long as it takes to hold, and comes back quickly.
   icon: { position: "relative", scale: { default: 1, pressed: 0.94 }, opacity: { default: 1, pressed: 0.85 }, transitionProperty: ["scale"], transition: tokens.motion.hold },
-  tint: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile, pointerEvents: "none" },
   round: { borderRadius: tokens.radius.window },
   // The launcher's search is bare words, with no box, magnifier or ring, as Raycast's is.
   bare: { flexGrow: 1, height: tokens.length.control, font: tokens.type.large, color: tokens.colour.label },
@@ -109,7 +108,7 @@ export const looks = styles({
   // between them in points, as iOS's are, and what's found.
   categories: (gap: number) => ({ flexDirection: "row", flexWrap: "wrap", gap }),
   category: { alignItems: "center", gap: tokens.grid[1.5], minWidth: 0 },
-  folder: { position: "relative", display: "grid", gridTemplateColumns: { repeat: 2 } },
+  folder: { position: "relative", display: "grid", gridTemplateColumns: { repeat: 2 }, borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
   folderBox: (columnGap: number, rowGap: number, size: number, paddingTop: number, paddingInline: number, paddingBottom: number) => ({ columnGap, rowGap, width: size, height: size, paddingTop, paddingInline, paddingBottom }),
   more: { display: "grid", gridTemplateColumns: { repeat: 2 }, gap: sizes.folderGap, alignSelf: "center", justifyContent: "center", marginInline: "auto" },
   categoryName: { font: tokens.type.caption, color: tokens.colour.secondaryLabel, lineClamp: 1 },
@@ -134,7 +133,8 @@ export const looks = styles({
   opening: { position: "absolute", overflow: "hidden", pointerEvents: "none" },
   unveiled: { opacity: 0 },
   // Its apps are handed from its square to it at once as it opens, and back once they've flown into the square again
-  // (`smooth` within half a point of it, 800 ms on), so each app is drawn once, never in both. A host that doesn't wait
+  // and arrived (`smooth` within a tenth of a point, where the renderer draws it at rest: 1000 ms on from as far as
+  // 1500 pt), so each app is drawn once, never in both, and the hand-back draws what was there. A host that doesn't wait
   // hands them back as it starts to close. With less motion they jump, so `handed` waits nothing.
   handedAfter: (ms: number) => ({ transitionProperty: ["opacity"], transitionDelay: ms }),
   handing: { transitionDelay: 0 },
