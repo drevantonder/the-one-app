@@ -159,7 +159,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
   /// The connection: video, connected to again when it's lost (as it is when the screen is resized), or else a
   /// picture each second while video is tried again, or else out of reach.
   const machine = setup({
-    types: {} as { context: { tries: number; unseen: number; why?: string | Error }; events: Happened },
+    types: {} as { context: { tries: number; unseen: number }; events: Happened },
     actors: {
       connect: fromPromise(({ signal }) => connect(signal)),
       // A picture every `every` ms, while the page is seen: each one that comes, or doesn't, is told.
@@ -175,10 +175,9 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
         return () => clearInterval(timer)
       }),
     },
-    // Why it isn't video: what went wrong connecting, or getting a picture. Each time it goes wrong, Telemetry's told
-    // too (`reportError`, which the page's client records), by what happened, then why.
+    // What went wrong connecting, or getting a picture, is Telemetry's (`reportError`, which the page's client
+    // records), by what happened, then why: a person reads only that it didn't show, never a tool's or a server's words.
     actions: {
-      why: assign({ why: ({ event }) => ("why" in event ? event.why : ((event as { error?: Error }).error ?? "")) }),
       tell: (_, what: string) => reportError(new Error(what)),
     },
     delays: { retry: ({ context }) => RETRIES[Math.min(context.tries, RETRIES.length - 1)] },
@@ -188,11 +187,11 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
     initial: "connecting",
     states: {
       connecting: {
-        invoke: { src: "connect", onDone: "live", onError: { target: "pictures", actions: ["why", { type: "tell", params: ({ event }) => `Live video didn't connect: ${said(event.error as Error)}` }] } },
+        invoke: { src: "connect", onDone: "live", onError: { target: "pictures", actions: { type: "tell", params: ({ event }) => `Live video didn't connect: ${said(event.error as Error)}` } } },
       },
       live: {
         id: "live",
-        entry: assign({ tries: 0, unseen: 0, why: undefined }),
+        entry: assign({ tries: 0, unseen: 0 }),
         on: {
           lost: { target: "reconnecting", actions: { type: "tell", params: "Live video was lost as it played" } },
           resized: "reconnecting",
@@ -202,7 +201,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
         invoke: {
           src: "connect",
           onDone: "live",
-          onError: { target: "pictures", actions: ["why", { type: "tell", params: ({ event }) => `Live video didn't connect again: ${said(event.error as Error)}` }] },
+          onError: { target: "pictures", actions: { type: "tell", params: ({ event }) => `Live video didn't connect again: ${said(event.error as Error)}` } },
         },
       },
       pictures: {
@@ -210,7 +209,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
         on: {
           looked: { actions: assign({ unseen: 0 }) },
           unseen: [
-            { guard: "lasting", target: "unreachable", actions: ["why", { type: "tell", params: ({ event }) => `The screen gave no picture either: ${said(event.why)}` }] },
+            { guard: "lasting", target: "unreachable", actions: { type: "tell", params: ({ event }) => `The screen gave no picture either: ${said(event.why)}` } },
             { actions: assign({ unseen: ({ context }) => context.unseen + 1 }) },
           ],
         },
@@ -404,8 +403,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
         <View style={[look.fill, look.state]}>
           <View style={look.middle}>
             <Problem
-              heading="Can't reach this screen"
-              text={state().context.why}
+              heading="Couldn't show this screen"
               action={
                 <Button variant="outline" onPress={() => connection.send({ type: "again" })}>
                   Try Again
@@ -438,13 +436,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       </Show>
       <View style={look.bar}>
         <Show when={state().matches("pictures")}>
-          {/* Why it fell back and what it shows are two things, said as two lines. */}
-          <View style={look.note}>
-            <Text>Live video didn't connect, so this updates each second.</Text>
-            <Show when={said(state().context.why)}>
-              <Text>{said(state().context.why)}</Text>
-            </Show>
-          </View>
+          <Text style={look.note}>Live video didn't connect, so this updates each second.</Text>
         </Show>
         <BarEnd value={true}>
           <Button variant="ghost" size="icon" aria-label={messages.fullScreen} onPress={toggle}>

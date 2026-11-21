@@ -1,6 +1,7 @@
-// `render` as a page calls it: its first screen, in an error boundary, so a page that throws while drawing shows what
-// failed and Try Again instead of a blank window. Once here for every page: the
-// primitives' own `render` (#primitives) draws it.
+// `render` as a page calls it: its first screen, in an error boundary, so a page that throws while drawing says it
+// can't show the page, with Try Again, instead of a blank window. What it threw is Telemetry's (the client's error
+// handler logs it, `bridge.ts`), never the person's. Once here for every page: the primitives' own `render`
+// (#primitives) draws it.
 import { Errored } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { render as draw } from "#primitives"
@@ -15,11 +16,10 @@ import { messages } from "./words.ts"
 export const render = (code: () => JSX.Element): (() => void) =>
   draw(() => (
     <Errored
-      fallback={(error, reset) => (
+      fallback={(_, reset) => (
         <Screen>
           <Problem
             heading={messages.cantShowPage}
-            text={error() as Error}
             action={
               <Button variant="outline" onPress={reset}>
                 {messages.tryAgain}

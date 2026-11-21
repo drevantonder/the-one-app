@@ -154,11 +154,13 @@ function strayRows(tree) {
 }
 
 /// What a screen's words may not say to a person: this codebase's own, as a build error's (`entrypoint`, `runtime_version`,
-/// a file and its line), or a tool's name (`computer-use_screenshot`, as a tool that didn't answer says it), which belong
-/// in Telemetry and to the agents. Each line of a scene's semantic tree that says one.
+/// a file and its line), an error's code (JSON-RPC's `-32601`, a system's `ECONNREFUSED`, Erlang's `{:error, :timeout}`,
+/// an HTTP status, an exception's name, `TypeError`), or a tool's name (`computer-use_screenshot`, as a tool that didn't
+/// answer says it), which belong in Telemetry and to the agents. Each line of a scene's semantic tree that says one.
 const INTERNAL = /entrypoint|runtime_version|\.[mc]?[jt]sx?:?\(?\d+[,:]\d+|\berror: /i
+const CODE = /(^|[^\d])-32\d{3}\b|\bE(CONN[A-Z]+|NOENT|TIMEDOUT|HOSTUNREACH|NETUNREACH|ADDRINUSE|PIPE|ACCES|PERM)\b|\{:error\b|:(econnrefused|nxdomain|timeout|closed|enoent)\b|\b(HTTP|status) [1-5]\d\d\b|\b[A-Z][a-z]+([A-Z][a-z]+)*Error\b/
 function internalWords(tree) {
-  return tree.split("\n").filter((line) => INTERNAL.test(line) || line.match(/[\w-]+_\w+/g)?.some((word) => tools.has(word))).map((line) => line.trim())
+  return tree.split("\n").filter((line) => INTERNAL.test(line) || CODE.test(line) || line.match(/[\w-]+_\w+/g)?.some((word) => tools.has(word))).map((line) => line.trim())
 }
 
 /// Presses what's named or says `name` on our renderer's canvas, as a person would: found in its ARIA tree

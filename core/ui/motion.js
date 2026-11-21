@@ -890,19 +890,12 @@ function requests(steps, folder) {
   return out
 }
 
-/// A page that threw while drawing shows `render`'s Problem, "Can't show this page", with the error under it, and nothing
-/// to press but Try Again, so what a check or the Tab walk finds there says nothing of the page. The request that finds it
-/// at a run's end, and from its answer, why the run failed, if it did.
+/// A page that threw while drawing shows `render`'s Problem, "Can't show this page", and nothing to press but Try Again,
+/// so what a check or the Tab walk finds there says nothing of the page; what it threw fails the harness's run (it's
+/// logged, as Telemetry has it). The request that finds it at a run's end, and from its answer, whether it did.
 const crash = { op: "query" }
-const crashed = (answer) => {
-  const nodes = answer?.result?.nodes ?? []
-  const heading = nodes.find((node) => node.name === messages.cantShowPage)
-  if (!heading) return
-  const said = (node) => node?.name ?? (node?.children ?? []).map((id) => said(nodes.find((other) => other.node === id))).join("")
-  const siblings = nodes.find((node) => node.children?.includes(heading.node))?.children ?? []
-  const error = said(nodes.find((node) => node.node === siblings[siblings.indexOf(heading.node) + 1]))
-  return `the page crashed, showing "${messages.cantShowPage}": ${error || "no error"}`
-}
+const crashed = (answer) =>
+  (answer?.result?.nodes ?? []).some((node) => node.name === messages.cantShowPage) ? `the page crashed, showing "${messages.cantShowPage}"` : undefined
 
 /// Plays each check of `scene`, once as it is and with each seed. → each check's name and how each run went.
 async function check(built, scene, folder) {

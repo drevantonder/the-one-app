@@ -33,7 +33,7 @@
 /// the language with `Intl`, and the Web APIs a Worker has (`URL`, `TextEncoder`, `crypto`, `structuredClone`,
 /// `AbortController`, events, streams, timers) but `fetch`, as `call()` reaches the network, so an npm package that runs
 /// in a Worker runs in it (core/ui/src/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
-/// the page, and a page that throws while drawing shows what failed and Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
+/// the page, and a page that throws while drawing says it can't show it, with Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is `onPress={() => ...}`, a `Pressable`'s, a `Button`'s and a `Row`'s, as React Native names it; what's
 /// typed `onChangeText={setText}`, Return in it `onSubmitEditing={save}`, a key `onKeyDown={(event) => event.key ===
 /// "Escape" && close()}`, and a choice, a switch's, a select's, a radio group's or tabs', `onValueChange={setChosen}`, told
