@@ -3,12 +3,14 @@
 // press shows an item beside the list (pushed over it on a phone), where Restore and Delete Now are rows of their own;
 // the same two are in its row's menu, and Delete All is for everything.
 import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js"
-import { call, changed, confirm, Empty, Image, List, Menu, Problem, Row, Screen, Skeleton, Spinner, Split, styles, Text, toast, tokens } from "ui"
+import { call, changed, confirm, Empty, Image, List, Menu, Problem, Row, Screen, Skeleton, Spinner, Split, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
   note: { color: tokens.colour.secondaryLabel, maxWidth: tokens.length.readable },
   wrong: { color: tokens.colour.red },
   icon: { width: tokens.length.sidebarIcon, height: tokens.length.sidebarIcon },
+  // The room the row's menu button has, so the spinner that takes its place is where its mark was.
+  working: { width: tokens.length.control, alignItems: "center" },
 })
 
 /** A deleted item, as `soft-delete_list` answers it. */
@@ -151,7 +153,7 @@ function Deleted(props: { items: Item[] }) {
                 current={open() === item().item}
                 onPress={() => setOpen(item().item)}
                 end={
-                  <Show when={item().state === "deleted"} fallback={<Spinner />}>
+                  <Show when={item().state === "deleted"} fallback={<View style={look.working}><Spinner /></View>}>
                     <Menu.Root onSelect={(value) => (value === "restore" ? restore(item()) : purge(item()))}>
                       <Menu.Trigger aria-label={`More for ${heading(item())}`} />
                       <Menu.Positioner>

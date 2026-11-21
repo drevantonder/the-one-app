@@ -190,19 +190,26 @@ export function requests(steps, folder, answers = {}) {
           },
         })
       }
-      // Every node named is drawn at the same place along its row: the same distance from the window's start, or its end,
-      // as controls at the end of rows are in a column.
-      if (aligned)
-        out.push({
-          request: { op: "query", ...selector(aligned.of) },
-          judge: (answer) => {
-            const nodes = (answer?.result?.nodes ?? []).filter((node) => node.rect && node.opacity > 0)
-            if (nodes.length < 2) return nodes.length ? undefined : `${named(aligned.of)} isn't drawn`
-            const place = (node) => (aligned.at === "start" ? node.rect.x : node.rect.x + node.rect.width)
-            const places = nodes.map(place)
-            return Math.max(...places) - Math.min(...places) > 1 && `${named(aligned.of)} is drawn at ${places.map((at) => Math.round(at)).join(", ")} pt, not at one place along its row`
-          },
-        })
+      // Every node named, and every one of `with` too, is drawn at the same place along its row: the same distance from
+      // the window's start, or its end, or its middle, as controls at the end of rows are in a column.
+      if (aligned) {
+        const taps = [aligned.of, ...(aligned.with ? [aligned.with] : [])]
+        const found = []
+        taps.forEach((tap, at) =>
+          out.push({
+            request: { op: "query", ...selector(tap) },
+            judge: (answer) => {
+              found[at] = (answer?.result?.nodes ?? []).filter((node) => node.rect && node.opacity > 0)
+              if (!found[at].length) return `${named(tap)} isn't drawn`
+              if (at < taps.length - 1) return
+              const nodes = found.flat()
+              const place = (node) => (aligned.at === "start" ? node.rect.x : aligned.at === "middle" ? node.rect.x + node.rect.width / 2 : node.rect.x + node.rect.width)
+              const places = nodes.map(place)
+              return nodes.length > 1 && Math.max(...places) - Math.min(...places) > 1 && `${taps.map(named).join(" and ")} are drawn at ${places.map((at) => Math.round(at)).join(", ")} pt, not at one place along their row`
+            },
+          }),
+        )
+      }
       // What's named is in the middle of the window across, within a point, as a lone column or an empty page's words are.
       if (centred) {
         let width

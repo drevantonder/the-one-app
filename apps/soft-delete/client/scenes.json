@@ -94,6 +94,23 @@
             }
           }
         }
+      ],
+      "The spinner of an item being deleted is where a row's menu button's mark is": [
+        {
+          "expect": {
+            "aligned": {
+              "of": {
+                "role": "button",
+                "name": "More for groceries"
+              },
+              "with": {
+                "role": "status",
+                "text": "Loading"
+              },
+              "at": "middle"
+            }
+          }
+        }
       ]
     }
   },

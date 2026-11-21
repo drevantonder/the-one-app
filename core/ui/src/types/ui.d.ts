@@ -493,8 +493,8 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * short with "…", or the one named (`whole`); these texts each as wide a character as the others, as a monospace face's
  * are (`monospace`: the texts, each on one line); no line of a text ending inside a run a pattern finds, as a date is kept
  * on one line (`unbroken`: a regular expression's source); what's named drawn to both of the window's edges (`bleeds`), as a
- * shelf is; every node named the same distance along its row from the window's end, or its start with `at: "start"`
- * (`aligned`: `{ of, at? }`), as controls at the end of rows form a column; nothing of what's named or inside it clipped away (`unclipped`), as a badge
+ * shelf is; every node named the same distance along its row from the window's end, or its start with `at: "start"`, or its middle with `at: "middle"`
+ * (`aligned`: `{ of, with?, at? }`), as controls at the end of rows form a column; nothing of what's named or inside it clipped away (`unclipped`), as a badge
  * overhanging its icon is drawn whole; what's named in the middle of the window across, within a point
  * (`centred`); nothing named so wider than `most` points (`widest`: `{ of, most }`); what's named standing off what's
  * around it by at least `least`:1, WCAG's contrast between the colour just outside its start and its first 4 points in,
@@ -508,7 +508,7 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * given in points, within one), so what comes in above it is seen not to push it, and a bar's glass is seen to reach the
  * window's edges, and how many times the page has asked for a tool (`asked`: `{ "<tool>": 1, "<tool> for <subject>": 2 }`),
  * as a check that it doesn't ask again. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unbroken?: string; monospace?: string[]; unclipped?: Tap; bleeds?: Tap; aligned?: { of: Tap; at?: "start" | "end" }; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; located?: Tap[]; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; asked?: Record<string, number>; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unbroken?: string; monospace?: string[]; unclipped?: Tap; bleeds?: Tap; aligned?: { of: Tap; with?: Tap; at?: "start" | "end" | "middle" }; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; located?: Tap[]; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; asked?: Record<string, number>; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
