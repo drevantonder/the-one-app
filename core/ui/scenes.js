@@ -197,7 +197,7 @@ async function press(frame, name) {
       await frames()
       box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
     }
-    await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), SETTLES_WITHIN_MS)
+    await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), HANGS_AFTER_MS)
     await frames()
     box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
   }
@@ -206,8 +206,10 @@ async function press(frame, name) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
 }
 
-/// The longest the web half waits for a scene to settle before it takes its picture anyway, saying what's pending.
-const SETTLES_WITHIN_MS = 10000
+/// The web half waits for what a scene's page has pending (a picture decoding, a frame, a transition), however long a loaded
+/// machine takes to draw it on the CPU (SwiftShader): its picture is of what it came to rest on, never of a moment on the
+/// way there. This is only for a page that hangs, which fails the scene, saying what's pending.
+const HANGS_AFTER_MS = 120000
 
 /// A scene drawn by our renderer on the web, in headless Chromium's WebGPU, as `web.png`, once its first frame is drawn
 /// and what moves as it opens has settled, on the native harness's clock, language and time zone, each tap pressed
@@ -229,13 +231,13 @@ async function web(browser, serve, key, scene, folder) {
   serve.hostWeb(`${key} (web)`, scene)
   await page.goto(serve.url(`${key} (web)`))
   const frame = await (await page.waitForSelector("#page")).contentFrame()
-  const drawn = await frame.waitForFunction(() => "drawn" in document.documentElement.dataset, null, { timeout: 20000 }).then(() => true, () => false)
+  const drawn = await frame.waitForFunction(() => "drawn" in document.documentElement.dataset, null, { timeout: HANGS_AFTER_MS }).then(() => true, () => false)
   // Each picture is taken once the renderer says nothing is pending, as the native harness's `settle`, and the frame
   // it drew last is on the screen.
   const settled = async () => {
-    const { settled, pending } = await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), SETTLES_WITHIN_MS)
+    const { settled, pending } = await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), HANGS_AFTER_MS)
     if (!settled) {
-      problems.push(`it didn't settle within ${SETTLES_WITHIN_MS} ms: ${JSON.stringify(pending)}`)
+      problems.push(`it hadn't settled after ${HANGS_AFTER_MS} ms: ${JSON.stringify(pending)}`)
       process.exitCode = 1
     }
     await frame.evaluate(() => new Promise((shown) => requestAnimationFrame(() => requestAnimationFrame(shown))))
@@ -295,7 +297,7 @@ async function notched(page, frame, at) {
   await page.mouse.move(box.x + at.x, box.y + at.y)
   for (let turns = 0; turns < 3; turns++) {
     // What the turn before moved has come to rest, so this one's moves are its own.
-    await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), SETTLES_WITHIN_MS)
+    await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), HANGS_AFTER_MS)
     const watched = frame.evaluate(
       () =>
         new Promise((done) => {
