@@ -123,10 +123,10 @@ impl Windows {
         false
     }
 
-    /// Steps each window springing from a swipe back let go, with the rail's spring, to now: one slid off closes.
+    /// Steps each window springing from a swipe back let go, with the rail's spring, to `at`, the time of the frame it's
+    /// shown in: one slid off closes.
     #[cfg(any(target_os = "ios", feature = "fake"))]
-    pub(super) fn slide(&mut self) {
-        let at = now();
+    pub(super) fn slide(&mut self, at: web_time::Instant) {
         let mut off = Vec::new();
         for (id, window) in &mut self.windows {
             let Some(slide) = window.slide.as_mut() else { continue };
@@ -150,9 +150,10 @@ impl Windows {
         }
     }
 
-    /// Steps each window's pull let go, and each opening: home, every app's window closes; back, it's as it was.
+    /// Steps each window's pull let go, and each opening, to `at`, the time of the frame it's shown in: home, every app's
+    /// window closes; back, it's as it was.
     #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
-    pub(super) fn spring(&mut self) {
+    pub(super) fn spring(&mut self, at: web_time::Instant) {
         let mut home = false;
         let mut back = false;
         for window in self.windows.values_mut() {
@@ -160,7 +161,7 @@ impl Windows {
             let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
             // An opening waits on its icon for its window's first frame, which a slow GPU takes a while to show.
             let Some(pull) = window.pull.as_mut().filter(|pull| pull.springing() && !(pull.opens() && window.frames == 0)) else { continue };
-            let (moved, still) = pull.step(Size { width: room.width.0, height: room.height.0 }, icon, reduced);
+            let (moved, still) = pull.step(Size { width: room.width.0, height: room.height.0 }, icon, reduced, at);
             match still {
                 Some(1.0) => home = true,
                 Some(_) => {

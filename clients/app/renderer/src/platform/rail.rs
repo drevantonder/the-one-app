@@ -106,9 +106,9 @@ impl Pull {
         self.velocity_in = Velocity::default();
     }
 
-    /// The spring starts now, as its window first shows something.
-    pub fn shown(&mut self) {
-        self.stepped = super::now();
+    /// The spring starts at `at`, the time of the frame its window first shows something in.
+    pub fn shown(&mut self, at: Instant) {
+        self.stepped = at;
     }
 
     pub fn finger(&self) -> u64 {
@@ -164,12 +164,13 @@ impl Pull {
         true
     }
 
-    /// Steps the spring to now: → the window as it then is, and whether it's still, where it was going (1 home).
-    pub fn step(&mut self, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool) -> (Moved, Option<f32>) {
+    /// Steps the spring to `at`, the time of the frame it's shown in, as what moves on the window's page is: → the window
+    /// as it then is, and whether it's still, where it was going (1 home). Stepped at the time the loop turned, a 120 Hz
+    /// link's tick heard 3 ms late moved it a step and a third, and the next two thirds of one.
+    pub fn step(&mut self, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool, at: Instant) -> (Moved, Option<f32>) {
         let Some(target) = self.target else { return (moved(self.p, size, icon, reduced, self.straight), None) };
-        let now = super::now();
-        let dt = now.duration_since(self.stepped).as_secs_f32();
-        self.stepped = now;
+        let dt = at.saturating_duration_since(self.stepped).as_secs_f32();
+        self.stepped = at;
         let still;
         (self.p, self.velocity, still) = spring(self.p, self.velocity, target, dt);
         (moved(self.p, size, icon, reduced, self.straight), still.then_some(target))

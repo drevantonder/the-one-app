@@ -20,13 +20,11 @@ impl Windows {
             Some(at) => (refresh * 5 / 4).saturating_sub(since(at)),
             None => shows(self.vsync, refresh, self.framed).saturating_duration_since(now()),
         });
-        // A pull's spring steps at a 120 Hz display's frames.
-        let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due).into_iter().chain(self.recording.as_ref().map(|recording| recording.until.saturating_duration_since(now()))).min();
         let idle = self.renderers().filter_map(Renderer::idle_in);
         // A change held for the refresh its window's last frame shows on (`turned`), where the display says nothing yet.
         let held = self.windows.values().filter(|window| !self.ticking() && window.dirty && window.on_screen()).filter_map(|window| window.presented).map(|at| shows(self.vsync, refresh, at).saturating_duration_since(now()));
-        screens.chain(showing).chain(blank).chain(frame).chain(pulled).chain(check).chain(idle).chain(held).min()
+        screens.chain(showing).chain(blank).chain(frame).chain(check).chain(idle).chain(held).min()
     }
 
     /// Whether its windows are a phone's: each the whole screen, an app's over the Home Screen, which it opens out of.
@@ -58,10 +56,13 @@ impl Windows {
     }
 
     /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
-    /// for one (`requestAnimationFrame`).
+    /// for one (`requestAnimationFrame`), or a finger pulls it home, as a page dragged asks for a frame with each move,
+    /// so the display's link is going as it's let go and its spring steps on its ticks. With the link stopped (a window
+    /// moved draws nothing), a pull let go just before a refresh drew its first step for that refresh, and the loop's
+    /// own clock its next for the refresh after: a frame held, at 120 Hz.
     pub(super) fn framing(&self) -> bool {
         self.check.as_ref().is_some_and(conformance::Check::moving)
-            || self.windows.values().any(|window| window.on_screen() && (window.moving || (window.dirty && window.working()) || window.slide.is_some() || window.pull.as_ref().is_some_and(rail::Pull::springing) || matches!(window.cover, Cover::Fading(..)) || window.screen.as_ref().is_ok_and(Screen::framing)))
+            || self.windows.values().any(|window| window.on_screen() && (window.moving || (window.dirty && window.working()) || window.slide.is_some() || window.pull.as_ref().is_some_and(|pull| pull.pulling() || pull.springing()) || matches!(window.cover, Cover::Fading(..)) || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
@@ -137,10 +138,6 @@ impl Windows {
                 renderer.idle();
             }
         }
-        #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
-        self.spring();
-        #[cfg(any(target_os = "ios", feature = "fake"))]
-        self.slide();
         // The display showed a frame: what moves on a window on screen is drawn again, and its page's
         // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
         let framing = self.framing();
@@ -167,6 +164,13 @@ impl Windows {
             Some(vsync) => vsync + refresh.mul_f64(((at - vsync).as_secs_f64() / refresh.as_secs_f64()).round()),
             None => at,
         });
+        // A window a gesture let go, or an app's opening out of its icon, is moved where its spring is at that time too.
+        #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
+        if let Some(time) = time {
+            self.spring(time);
+            #[cfg(any(target_os = "ios", feature = "fake"))]
+            self.slide(time);
+        }
         // When the display showed the frame before, which a frame presented since was drawn after (`presented`).
         let before = shown.map(|at| std::mem::replace(&mut self.showed, at));
         if let Some(at) = shown {
@@ -307,7 +311,7 @@ impl Windows {
                     let mut opening = rail::Pull::opening();
                     let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
                     let room = window.room();
-                    let (moved, _) = opening.step(Size { width: room.width.0, height: room.height.0 }, window.icon, reduced);
+                    let (moved, _) = opening.step(Size { width: room.width.0, height: room.height.0 }, window.icon, reduced, time.unwrap_or_else(now));
                     self.display.set_moved(&window.parts[0].native, moved);
                     window.pull = Some(opening);
                 }
@@ -483,7 +487,7 @@ impl Windows {
             if window.frames == 1
                 && let Some(opening) = window.pull.as_mut().filter(|pull| pull.opens())
             {
-                opening.shown();
+                opening.shown(time.unwrap_or_else(now));
             }
             if self.check.is_some() {
                 self.record.present();
