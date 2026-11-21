@@ -401,8 +401,9 @@ defmodule OneCore.Call do
   """
   def run_elsewhere(ask, principal, forwarded, {owner, servers}, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    elsewhere(ask, principal, servers -- [Server.key()])
-    raise Servers.off(what, owner, servers)
+    others = servers -- [Server.key()]
+    elsewhere(ask, principal, others)
+    raise Servers.off(what, owner, others)
   end
 
   @doc """
