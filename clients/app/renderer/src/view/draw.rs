@@ -114,6 +114,14 @@ impl Screen {
             let screen = &mut child.screen;
             (screen.theme, screen.appearance, screen.reduced_motion, screen.touch) = (self.theme, self.appearance, self.reduced_motion, self.touch);
             screen.active = self.active && self.focus.focused == Some(*id);
+            // What of the window's own safe area its frame reaches, as an iframe's `env(safe-area-inset-*)` is: its page keeps clear of the part under it.
+            let (rect, insets) = (child.rect, self.insets);
+            screen.insets = Edges {
+                top: (insets.top - rect.origin.y).max(0.0),
+                left: (insets.left - rect.origin.x).max(0.0),
+                bottom: (insets.bottom - (self.room.height - rect.origin.y - rect.size.height)).max(0.0),
+                right: (insets.right - (self.room.width - rect.origin.x - rect.size.width)).max(0.0),
+            };
             // A page that says it's another height has its frame laid out again.
             if child.height != screen.content_height {
                 child.height = screen.content_height;

@@ -363,7 +363,7 @@ function native(built, scene, folder, used) {
   // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   // With a device to draw it too, each ends at rest with where every node is and a picture drawn afresh, to compare.
-  const steps = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...Array.from({ length: Math.ceil(scene.wait / 1000) }, () => ({ op: "clock", step: 1000 })), { op: "query" }, ...(ssh ? DRAWN : [])]
+  const steps = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...Array.from({ length: Math.ceil(scene.wait / 1000) }, () => ({ op: "clock", step: 1000 })), { op: "query" }, { op: "query", frames: true }, ...(ssh ? DRAWN : [])]
   const requests = steps.map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone, "--requests", "-"]
   const run = Bun.spawnSync(capped([harness, ...asked]), { stdin: new TextEncoder().encode(requests), env })
@@ -376,8 +376,9 @@ function native(built, scene, folder, used) {
   writeFileSync(join(folder, "native.txt"), tree)
   const measured = run.stderr.toString().match(/^measured (.*)$/m)
   const said = answered(run.stdout.toString())
-  const queried = said.at(ssh ? -DRAWN.length - 1 : -1)?.result?.nodes ?? []
-  const unsafe = scene.safeArea && underTheDevice(queried, scene.size[1], insets(scene.safeArea))
+  const after = ssh ? DRAWN.length : 0
+  const queried = said.at(-after - 2)?.result?.nodes ?? []
+  const unsafe = scene.safeArea && underTheDevice(said.at(-after - 1)?.result?.nodes ?? [], scene.size[1], insets(scene.safeArea))
   const squeezed = squeezedWords(queried)
   const overflowing = overflowingWords(queried, scene.size[0])
   // The words in sight, as the last frame drew them: each text and name of the semantic tree whose node, or the nearest
@@ -409,29 +410,39 @@ const insets = ([top, right, bottom, left]) => ({ top, right, bottom, left })
 /// content does. Under the status bar, what's scrolled there is meant to be, as under a bar, and so is what covers the
 // whole window, as a menu's backdrop that closes it does. → what's wrong, a line each.
 function underTheDevice(nodes, height, { top, bottom }) {
-  const byId = new Map(nodes.map((node) => [node.node, node]))
-  const parent = new Map(nodes.flatMap((node) => (node.children ?? []).map((child) => [child, node])))
-  const above = (node) => {
-    const all = []
-    for (let up = parent.get(node.node); up; up = parent.get(up.node)) all.push(up)
-    return all
+  // A page's nodes have its own ids (`in` says which frames it's in), so each page is read by itself, a frame's with
+  // what's around its frame.
+  const pages = Map.groupBy(nodes, (node) => JSON.stringify(node.in ?? []))
+  const read = (path, outside) => {
+    const here = pages.get(JSON.stringify(path)) ?? []
+    const byId = new Map(here.map((node) => [node.node, node]))
+    const parent = new Map(here.flatMap((node) => (node.children ?? []).map((child) => [child, node])))
+    const above = (node) => {
+      const all = []
+      for (let up = parent.get(node.node); up; up = parent.get(up.node)) all.push(up)
+      return [...all, ...outside]
+    }
+    // What scrolls: a scroll view, or the window itself where what's in it is taller, as a browser's document is; and
+    // whether it's scrolled, where what's in the one starts above it, or the other's top is above the window's.
+    const scrolls = (node) => node.kind === "scroll" || (!parent.has(node.node) && node.rect?.height > height + 0.5)
+    const scrolled = (node) => (node.kind === "scroll" ? (node.children ?? []).some((child) => byId.get(child)?.rect?.y < node.rect.y - 0.5) : node.rect.y < -0.5)
+    const said = (node) => node.name ?? node.role ?? node.kind
+    return [
+      ...here
+        // A control, or words but a control's own, which it's said for.
+        .filter((node) => node.rect && node.opacity > 0 && node.seen > 0 && (node.actions || (node.kind === "text" && !above(node).some((up) => up.actions))))
+        .flatMap((node) => {
+          const { y, height: tall } = node.rect
+          const over = above(node).filter(scrolls)
+          if (y <= 0.5 && y + tall >= height - 0.5) return []
+          if (y < top - 0.5 && y + tall > 0 && !over.some(scrolled)) return [`"${said(node)}" is drawn at y ${Math.round(y)}, under the status bar, whose safe area ends at ${top}`]
+          if (y + tall > height - bottom + 0.5 && y < height && !over.length) return [`"${said(node)}" is drawn down to y ${Math.round(y + tall)}, under the home indicator, whose safe area starts at ${height - bottom}`]
+          return []
+        }),
+      ...here.filter((node) => node.kind === "frame").flatMap((frame) => read([...path, frame.node], [...above(frame), frame])),
+    ]
   }
-  // What scrolls: a scroll view, or the window itself where what's in it is taller, as a browser's document is; and
-  // whether it's scrolled, where what's in the one starts above it, or the other's top is above the window's.
-  const scrolls = (node) => node.kind === "scroll" || (!parent.has(node.node) && node.rect?.height > height + 0.5)
-  const scrolled = (node) => (node.kind === "scroll" ? (node.children ?? []).some((child) => byId.get(child)?.rect?.y < node.rect.y - 0.5) : node.rect.y < -0.5)
-  const said = (node) => node.name ?? node.role ?? node.kind
-  return nodes
-    // A control, or words but a control's own, which it's said for.
-    .filter((node) => node.rect && node.opacity > 0 && node.seen > 0 && (node.actions || (node.kind === "text" && !above(node).some((up) => up.actions))))
-    .flatMap((node) => {
-      const { y, height: tall } = node.rect
-      const over = above(node).filter(scrolls)
-      if (y <= 0.5 && y + tall >= height - 0.5) return []
-      if (y < top - 0.5 && y + tall > 0 && !over.some(scrolled)) return [`"${said(node)}" is drawn at y ${Math.round(y)}, under the status bar, whose safe area ends at ${top}`]
-      if (y + tall > height - bottom + 0.5 && y < height && !over.length) return [`"${said(node)}" is drawn down to y ${Math.round(y + tall)}, under the home indicator, whose safe area starts at ${height - bottom}`]
-      return []
-    })
+  return read([], [])
 }
 
 /// A row's words given less than half of its width while they are cut short or wrapped: a control or a value beside

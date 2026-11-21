@@ -127,36 +127,9 @@ impl Screen {
             }
             "tree" => self.inspected_tree(),
             "query" => {
-                let mut found = inspect::query(&self.tree, &self.rects, request);
-                // An input's editing state as the host has it, which is ahead of what its app set.
-                for node in found["nodes"].as_array_mut().into_iter().flatten() {
-                    let Some(id) = node["node"].as_u64() else { continue };
-                    if let Some(field) = self.editing.fields.get(&id) {
-                        node["editing"] = json!(field.value());
-                    }
-                    if let Some((opacity, seen)) = self.sight(id) {
-                        node["opacity"] = json!((opacity * 1000.0).round() / 1000.0);
-                        node["seen"] = json!((seen * 1000.0).round() / 1000.0);
-                    }
-                    node["focused"] = json!(self.focus.focused == Some(id));
-                    // A text cut short with an ellipsis as it was last drawn, as a check finds a name that didn't fit.
-                    if let Some(kept) = self.layout.kept.get(&id) {
-                        if let Some((_, paragraph)) = &self.layout.leaf(kept.node).paragraph {
-                            node["cut"] = json!(paragraph.cut);
-                            // Where it wrapped: each line's words, where the node's name is its text, as a check finds a date broken in two.
-                            if let Some(name) = node["name"].as_str() {
-                                let lines: Vec<&str> = paragraph.lines.iter().filter_map(|line| name.get(line.start..line.end).map(str::trim_end)).collect();
-                                if lines.len() == paragraph.lines.len() {
-                                    node["lines"] = json!(lines);
-                                }
-                            }
-                            // How far each glyph advances, line by line, as it was laid out, in points: what makes a face monospace.
-                            let advances: Vec<Vec<f32>> = paragraph.lines.iter().map(|line| line.glyphs.iter().map(|(_, _, glyph)| (glyph.advance * 1000.0).round() / 1000.0).collect()).collect();
-                            node["advances"] = json!(advances);
-                        }
-                    }
-                }
-                found
+                let mut found = Vec::new();
+                self.queried_in(request, (0.0, 0.0), &[], &mut found);
+                json!({"nodes": found})
             }
             "tap" => {
                 // As a test clicks: the point, or a node's middle where that reaches it as the pointer finds it
@@ -360,6 +333,57 @@ impl Screen {
         // The window's own scene is older than what was drawn here, so its next frame is painted afresh.
         self.seen = None;
         Ok(json!({"frames": frames, "time": clock.now(), "paused": true}))
+    }
+
+    /// The nodes the inspector's `query` matches in this page, each with what this screen knows of it, as the last frame drew it,
+    /// placed in the window where this page is drawn (`at`). With `frames`, those in each frame's page too (`path`, the frames it's
+    /// in, outermost first), whose node ids are its own.
+    fn queried_in(&self, request: &Request, at: (f32, f32), path: &[Id], out: &mut Vec<Value>) {
+        let mut found = inspect::query(&self.tree, &self.rects, request);
+        // An input's editing state as the host has it, which is ahead of what its app set.
+        for node in found["nodes"].as_array_mut().into_iter().flatten() {
+            let Some(id) = node["node"].as_u64() else { continue };
+            if let Some(field) = self.editing.fields.get(&id) {
+                node["editing"] = json!(field.value());
+            }
+            if let Some((opacity, seen)) = self.sight(id) {
+                node["opacity"] = json!((opacity * 1000.0).round() / 1000.0);
+                node["seen"] = json!((seen * 1000.0).round() / 1000.0);
+            }
+            node["focused"] = json!(self.focus.focused == Some(id));
+            // A text cut short with an ellipsis as it was last drawn, as a check finds a name that didn't fit.
+            if let Some(kept) = self.layout.kept.get(&id) {
+                if let Some((_, paragraph)) = &self.layout.leaf(kept.node).paragraph {
+                    node["cut"] = json!(paragraph.cut);
+                    // Where it wrapped: each line's words, where the node's name is its text, as a check finds a date broken in two.
+                    if let Some(name) = node["name"].as_str() {
+                        let lines: Vec<&str> = paragraph.lines.iter().filter_map(|line| name.get(line.start..line.end).map(str::trim_end)).collect();
+                        if lines.len() == paragraph.lines.len() {
+                            node["lines"] = json!(lines);
+                        }
+                    }
+                    // How far each glyph advances, line by line, as it was laid out, in points: what makes a face monospace.
+                    let advances: Vec<Vec<f32>> = paragraph.lines.iter().map(|line| line.glyphs.iter().map(|(_, _, glyph)| (glyph.advance * 1000.0).round() / 1000.0).collect()).collect();
+                    node["advances"] = json!(advances);
+                }
+            }
+            if let Some(rect) = node.get_mut("rect").and_then(Value::as_object_mut) {
+                for (edge, by) in [("x", at.0), ("y", at.1)] {
+                    if let Some(was) = rect.get(edge).and_then(Value::as_f64) {
+                        rect.insert(edge.into(), json!(was + f64::from(by)));
+                    }
+                }
+            }
+            if !path.is_empty() {
+                node["in"] = json!(path);
+            }
+        }
+        out.extend(found["nodes"].as_array().cloned().unwrap_or_default());
+        if request.inputs.get("frames").and_then(Value::as_bool) == Some(true) {
+            for (id, child) in &self.frames {
+                child.screen.queried_in(request, (at.0 + child.rect.origin.x, at.1 + child.rect.origin.y), &[path, &[*id]].concat(), out);
+            }
+        }
     }
 
     /// What a person sees of `id` as the last frame drew it: how opaque it's drawn, with what it's in, and how much of

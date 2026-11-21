@@ -23,7 +23,7 @@
 //!   decode or come), the longest a picture took from being asked for to its window having it to draw, and the bytes
 //!   its JS holds, and its frames' pages', collected first, as a browser's heap snapshot is.
 //! - `tree` → `{tree}`: the semantic tree (`Tree::semantics`), as a screen reader reads it, each node with its `rect`.
-//! - `query` (a selector, and `descendants`: true for everything inside each match too) → `{nodes}`: each node that matches, with its `node`, `kind`, `role`, `name`, `rect`, the
+//! - `query` (a selector, and `descendants`: true for everything inside each match too, and `frames`: true for the nodes in each frame's page too, each `in` the frames it's in, outermost first, its ids its page's own and its `rect` where it's drawn in the window) → `{nodes}`: each node that matches, with its `node`, `kind`, `role`, `name`, `rect`, the
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the
 //!   `file:line` of the JSX that made it, where its build says, an input's `editing` state as the host has it, what a
 //!   person sees of it as the last frame drew it (`opacity`, with what it's in, and `seen`, how much of its box is in
