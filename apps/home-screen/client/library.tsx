@@ -52,7 +52,7 @@ export const openedCategory = (library: Category[], key: string) =>
 export const wait = (index: number) => Math.min(index, 2) * 40
 
 /// How a category's `count` apps are handed between its square and it: once they've all flown, or at once with less
-/// motion, when they jump.
+/// motion, when they cross-fade.
 export const handed = (count: number) => [looks.handedAfter(1000 + wait(count - 1)), reducedMotion() && looks.handing]
 
 /// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into, and each of its

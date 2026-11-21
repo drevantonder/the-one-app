@@ -1,5 +1,5 @@
 import { createEffect, createMemo, createSignal, For } from "solid-js"
-import { covers, keydown, Pressable, type Rect, ScrollView, Text, View, viewport } from "ui"
+import { covers, keydown, Pressable, reducedMotion, type Rect, ScrollView, Text, View, viewport } from "ui"
 import { type Entrypoint } from "./types.ts"
 import { looks } from "./looks.ts"
 import { home, room, tapping, windowWidth } from "./store.ts"
@@ -57,10 +57,11 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
   // Each app is drawn on its icon in its square, as it was drawn when it was pressed, while it's closed, as large as
   // that is. A scale is around its middle, and its icon is at its top, in the middle across.
   const square = () => places[props.made] ?? { apps: [] }
+  // With less motion they stay where they are and fade, as an iPhone's folder's do, not jump onto it as they go.
   const flight = (index: number) => {
     const at = measured()?.[index]
     const icon = square().apps[index]
-    return props.open || !at || !icon ? undefined : { at, icon, scale: Math.max(icon.width / ICON, 0.01) }
+    return props.open || reducedMotion() || !at || !icon ? undefined : { at, icon, scale: Math.max(icon.width / ICON, 0.01) }
   }
   const flown = (index: number) => {
     const flying = flight(index)
