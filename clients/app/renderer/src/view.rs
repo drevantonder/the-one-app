@@ -509,6 +509,16 @@ impl Screen {
         self.js.crashed()
     }
 
+    /// Waits for its app's JS, and each frame's, to run all it's been sent, applying none of what it posts: for a harness,
+    /// whose loop asks whether its page wants a frame (`framing`) of what it's run, never of how far its thread has got.
+    #[cfg(feature = "fake")]
+    pub fn ran(&self) {
+        self.js.wait();
+        for child in self.frames.values() {
+            child.screen.ran();
+        }
+    }
+
     /// Waits for its app's JS to run all it's been sent, and what the host answers at once of what that asked, applying
     /// what it posts: for a harness, which draws what a step left once it's done. → whether anything came.
     pub fn idle(&mut self) -> bool {

@@ -123,6 +123,8 @@ impl Windows {
             self.wait();
             self.input(id, part, input);
         }
+        #[cfg(feature = "fake")]
+        self.ran();
         for window in self.windows.values_mut() {
             if let Some(renderer) = window.renderer.as_mut()
                 && renderer.idle_in().is_some_and(|due| due.is_zero())
@@ -525,6 +527,8 @@ impl Windows {
             self.catch_up(id);
         }
         self.pressed();
+        #[cfg(feature = "fake")]
+        self.ran();
         // The display's frames are wanted while something moves, and while a change waits for its next tick; a link
         // just started, or stopped, hasn't ticked.
         let waiting = held || (ticking && self.windows.values().any(|window| window.on_screen() && window.dirty));

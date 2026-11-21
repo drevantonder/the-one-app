@@ -73,6 +73,18 @@ impl Windows {
         came
     }
 
+    /// Each window's page has run all it's been sent, none of what it posted applied (`Screen::ran`): the loop asks then
+    /// whether a page wants a frame, the same each time. Asked while its thread still ran what the turn sent it, a frame
+    /// was wanted or not by how quick that thread was, which started the display's link a refresh earlier or later from
+    /// run to run (a list flung, its 6th frame 312.45840 pt or 312.45847 down).
+    pub(super) fn ran(&self) {
+        for window in self.windows.values() {
+            if let Ok(screen) = &window.screen {
+                screen.ran();
+            }
+        }
+    }
+
     /// The display refreshes now, its link saying so to the loop on its turn where it ticks (`set_link`). A panel just
     /// put on the screen with nothing drawn on it (a page that hadn't drawn yet) is wrong (`wrong`), as a host's
     /// compositor shows its window then, its backdrop an empty box, until the next frame.
@@ -87,6 +99,27 @@ impl Windows {
             if !drawn {
                 self.display.wrong(format!("{} was put on the screen with nothing drawn on it", window.title));
             }
+        }
+    }
+
+    /// The display's next refresh comes, on its own clock: the fake platform's time moves on to it (`run`), and its link
+    /// ticks there, as a host's display does only on its refreshes. Ticked at whatever time a request came, the loop
+    /// counted the display's refreshes from a moment it never refreshed at (`Windows::vsync`), and a change it held for
+    /// the next was drawn between two, out of step with every frame after it.
+    pub fn refresh_next(&mut self) {
+        let refresh = self.display.refresh().as_secs_f64() * 1000.0;
+        let now = fake::time();
+        let at = (now / refresh).round();
+        let next = match (now - at * refresh).abs() < 0.001 {
+            true if self.display.refreshed() != Some(at as i64) => now,
+            true => (at + 1.0) * refresh,
+            false => ((now / refresh).floor() + 1.0) * refresh,
+        };
+        self.run(next - now);
+        let at = (fake::time() / refresh).round() as i64;
+        if self.display.refreshed() != Some(at) {
+            self.display.reached(at);
+            self.tick();
         }
     }
 

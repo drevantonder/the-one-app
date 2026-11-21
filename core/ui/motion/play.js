@@ -275,6 +275,20 @@ async function play(built, scene, name, motion, hz, folder) {
 }
 
 
+/// What two plays of a motion, in `first` and `again`, drew differently: the first frame where its time, where what moved
+/// was, what it counted or its picture isn't the same, or nothing. What each cost isn't drawn, and may differ.
+function differently(first, again) {
+  const [one, two] = [first, again].map((folder) => JSON.parse(readFileSync(join(folder, "frames.json"), "utf8")).frames)
+  if (one.length !== two.length) return `${one.length} frames, then ${two.length}`
+  const drawn = ["at", "x", "y", "rect", "scroll", "gone", "drawn", "count", "shows", "holds", "apart", "windows"]
+  for (let n = 0; n < one.length; n++) {
+    const key = drawn.find((key) => JSON.stringify(one[n][key]) !== JSON.stringify(two[n][key]))
+    if (key) return `frame ${n + 1} (${one[n].at} ms) has its ${key} ${JSON.stringify(one[n][key])}, then ${JSON.stringify(two[n][key])}`
+    const picture = (folder) => readFileSync(join(folder, "frames", `${String(n).padStart(3, "0")}.png`))
+    if (!picture(first).equals(picture(again))) return `frame ${n + 1} (${one[n].at} ms) is drawn otherwise`
+  }
+}
+
 /// Every motion played, by its folder, for the contact sheet: a round that plays some keeps the rest.
 const rows = new Map()
 
@@ -294,17 +308,30 @@ export async function round(targets) {
     for (const scene of scenes) scene.from = target.endsWith("core/ui/gallery") ? target : join(target, "client")
     // Each motion at each rate on a harness of its own, a few at once.
     const jobs = scenes.flatMap((scene) => Object.entries(scene.motions).filter(([, played]) => !keeping || played.keeps).flatMap(([motion, played]) => rates.map((hz) => ({ scene, motion, played, hz }))))
+    const folderOf = ({ scene, motion, hz, again }) => join(out, name, scene.name.replace(/[^\w.-]+/g, "-"), motion.replace(/[^\w.-]+/g, "-"), `${hz}hz${again ? "-again" : ""}`)
+    // The harness draws the same frames for the same build each time, however busy the machine: the first motion is
+    // played again, on a harness of its own beside the others, and any frame it draws otherwise fails the round, as a
+    // frame clock or input that went by the wall clock does (the App Library's category opening, at 60 Hz, drew the icon
+    // flying at y 547.40 or 543.75 in its 6th frame, by how busy the machine was).
+    if (jobs.length && !present) jobs.push({ ...jobs[0], again: true })
     const results = []
     // One at a time on a device, whose GPU each frame's time is of.
     const together = ssh ? 1 : 4
     for (let at = 0; at < jobs.length; at += together)
-      results.push(...(await Promise.all(jobs.slice(at, at + together).map(({ scene, motion, played, hz }) => play(built, scene, motion, played, hz, join(out, name, scene.name.replace(/[^\w.-]+/g, "-"), motion.replace(/[^\w.-]+/g, "-"), `${hz}hz`)).then((result) => ({ scene, motion, ...result }))))))
+      results.push(...(await Promise.all(jobs.slice(at, at + together).map((job) => play(built, job.scene, job.motion, job.played, job.hz, folderOf(job)).then((result) => ({ ...job, ...result }))))))
     let heading
-    for (const result of results) {
+    for (const result of results.filter((result) => !result.again)) {
       const title = `${name} · ${result.scene.name} · ${result.motion}`
       if (title !== heading) said.push((heading = title))
       said.push(result.said)
       if (result.row) rows.set(result.row.folder, result.row)
+    }
+    const again = results.find((result) => result.again)
+    const otherwise = again?.row && results[0].row && differently(folderOf(results[0]), folderOf(again))
+    if (again && !otherwise) said.push(`${name} · ${again.scene.name} · ${again.motion}, ${again.hz} Hz, played twice: the same frames`)
+    if (otherwise) {
+      process.exitCode = 1
+      said.push(`${name} · ${again.scene.name} · ${again.motion}, ${again.hz} Hz, played twice, FAILS: ${otherwise}`)
     }
   }
   contactSheet([...rows.values()])

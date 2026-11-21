@@ -378,7 +378,7 @@ fn main() -> anyhow::Result<()> {
         loop {
             between(windows);
             windows.wait();
-            windows.tick();
+            windows.refresh_next();
             let turning = std::time::Instant::now();
             windows.turn();
             worst_turn.set(worst_turn.get().max(turning.elapsed()));
