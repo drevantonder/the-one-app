@@ -40,10 +40,26 @@ impl Painter<'_> {
     }
 
     /// An image, scaled to fit its box keeping its shape, as GPUI's `img` is by default, decoded for its box as it
-    /// rests (`Transform::rest`), and not at all where it doesn't show. One that's broken (not found, or that failed to
-    /// decode every time it was tried) fills its box in a quiet grey, as a browser marks a broken image, never nothing.
+    /// rests (`Transform::rest`). One that doesn't show yet (made ahead, faded out) is decoded for its box as it's laid
+    /// out, unscaled, and put in the atlas on the frame that's decoded, so the frame it first shows on uploads nothing
+    /// (a category's icons as it opened, 4.4 ms of a mid laptop's WebGPU frame). One that's broken (not found, or that
+    /// failed to decode every time it was tried) fills its box in a quiet grey, as a browser marks a broken image, never
+    /// nothing.
     pub(in crate::view) fn paint_image(&mut self, node: &Node, content: Bounds<f32>, transform: Transform, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
-        let Some(src) = node.str("src").filter(|_| opacity > 0.0) else { return };
+        let Some(src) = node.str("src") else { return };
+        if opacity <= 0.0 {
+            let fetched = self.fetched;
+            if let Some(src) = Some(src).filter(|src| src.starts_with("data:")).or_else(|| fetched.get(src)?.as_deref())
+                && transform.scale > 0.0
+            {
+                let laid_out = |length: f32| (length / transform.scale * self.scale).round() as u32;
+                let device = Size { width: laid_out(content.size.width), height: laid_out(content.size.height) };
+                if device.width > 0 && device.height > 0 && !self.pictures.broken(src) {
+                    self.pictures.get(self.atlas, src, device);
+                }
+            }
+            return;
+        }
         let broken = |painter: &mut Self| painter.quad(content, mask, colour_token("quinary-label", painter.conditions), Edges::default(), Hsla::default(), radii, false, opacity);
         // One by an address is drawn once its window has fetched it, as a `data:` address.
         let src = match self.fetched.get(src) {
