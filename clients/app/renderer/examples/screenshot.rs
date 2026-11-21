@@ -457,7 +457,10 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
             std::thread::sleep(windows.due().unwrap_or(std::time::Duration::from_millis(10)).min(std::time::Duration::from_millis(100)));
+            // The display refreshes meanwhile, as a device's does, its clock still: what the page posted since the last
+            // frame (an answer its JS thread ran a moment after it) is drawn, not left changed and undrawn.
             windows.wait();
+            windows.tick();
             windows.turn();
         }
         let answer = answered.borrow_mut().take();
