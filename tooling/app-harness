@@ -38,7 +38,10 @@
 # `--seed` picks the moments things happen at, the same each time for the same seed. `--phone` runs a phone's app
 # instead (`clients/app`'s `phone`): Tauri's, its event loop and its page (in WebKitGTK), and its native windows a
 # phone's (`Native::phone`), each the whole of a 390 × 844 screen, the launcher its Home Screen, the root window under
-# every app's, which its system can close, where a computer's is a panel it only puts away. It needs what
+# every app's, which its system can close, where a computer's is a panel it only puts away. A phone has no checks of a
+# second start that hands a `one:` link to the app running (`reopen`, `loading`), which a phone's system does and
+# Tauri's phone app on Linux can't (each start is an app of its own, which never ends), nor of the windows a
+# computer's update opens again (`stale`, `open`, `ONE_REOPEN`): it refuses them. It needs what
 # `tooling/network` does, and `xvfb-run`, `dbus-run-session` and ImageMagick's `import`, as the app's event loop is
 # GTK's on Linux.
 set -euo pipefail
@@ -57,6 +60,14 @@ while (($#)); do
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
+computers_only=" reopen stale loading open "
+if [[ -n $phone ]]; then
+  for name in "${checks[@]}"; do
+    [[ $computers_only != *" $name "* ]] ||
+      { echo "$name is a computer's check: a phone's app here can't be handed a \`one:\` link, or open windows again after an update" >&2 && exit 1; }
+  done
+  ((${#checks[@]})) || checks=(start closed unopened reloaded cached restart updated twice blank)
+fi
 ((${#checks[@]})) || checks=(start reopen closed unopened reloaded stale cached restart updated twice blank loading open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
