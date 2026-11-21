@@ -1,5 +1,5 @@
 {
-  "about": "The devices motion.js judges a frame's work against (bun motion.js --tiers). Each tier's CPU is its Geekbench 6 single-core score, and its GPU its GFXBench Manhattan 3.1 offscreen fps (1080p), from the sources beside them; `measured` is what calibrate.js measured a real device's GPU take for each kind of work, which a tier's time is that device's scaled by their GPUs' scores. `scale` is its device pixels a point; `hz` its display's frames a second.",
+  "about": "The devices motion.js judges a frame's work against (bun motion.js --tiers). Each tier's CPU is its Geekbench 6 single-core score, and its GPU its GFXBench Manhattan 3.1 offscreen fps (1080p), from the sources beside them; `measured` is what calibrate.js measured a real device's GPU take for each kind of work, which a tier's time is that device's scaled by their GPUs' scores, and its CPU take to draw a frame for the GPU (`draw`: each render pass and draw call, making and submitting their command lists), scaled by their CPUs'. `scale` is its device pixels a point; `hz` its display's frames a second.",
   "tiers": [
     {
       "name": "low-end Android",
@@ -75,27 +75,34 @@
     "surface": {
       "gpu": {
         "costs": {
-          "quads": 1.308,
-          "shadows": 0,
-          "sprites": 5.026,
-          "backdrops": 15.85,
-          "rasters": 1.652,
-          "copied": 1.305,
-          "draws": 0.02772,
-          "uploaded": 110
+          "quads": 1.129,
+          "shadows": 2.251,
+          "sprites": 4.69,
+          "backdrops": 0.4889,
+          "rasters": 0,
+          "copied": 0,
+          "draws": 0,
+          "uploaded": 0
         },
-        "constant": 0.4987,
-        "error": 0.35,
-        "frames": 386,
-        "scenes": 57
+        "constant": 0,
+        "error": 0.22,
+        "frames": 1164,
+        "scenes": 96
       },
-      "paint_ms": 0.11,
+      "paint_ms": 0.49,
       "open": {
         "about": "An app window's opening, from the app's log after an update restart (20 Nov, shaders as DXIL): window_ms its system's window and renderer once its pipelines are compiled (the median of 24 to 135 ms), pipelines_ms the pipelines a kind of window draws with, which the first window after a start waited for (401 to 563 ms)",
         "window_ms": 40,
         "pipelines_ms": 550
       },
-      "on": "2026-11-20"
+      "on": "2026-11-21",
+      "draw": {
+        "costs": {
+          "passes": 0.06068,
+          "draws": 0.008259
+        },
+        "constant": 0.5557
+      }
     }
   }
 }

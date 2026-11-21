@@ -2,7 +2,7 @@
 import { PNG } from "pngjs"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, relative } from "node:path"
-import { against, only, out, present, rates, ssh } from "./options.js"
+import { against, keeping, only, out, present, rates, ssh } from "./options.js"
 import { build, pageFolder } from "./pages.js"
 import { device, devices, hostScore, judge } from "./tiers.js"
 import { presentThere, run, scenesOf } from "./harness.js"
@@ -37,6 +37,7 @@ async function play(built, scene, name, motion, hz, folder) {
     const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
     writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
     const shown = await presentThere(at, folder, scene, played, taps.filter((tap) => tap.op !== "clock"))
+    writeFileSync(join(folder, "presented.json"), JSON.stringify(shown.said))
     const said = (value) => `${value} ms`
     const lines = shown.said.map((round, n) => `  ${hz} Hz presented, motion ${n + 1}: ${round.frames} frames, p95 painting ${said(round.paint_ms)}, drawing ${said(round.draw_ms)} (waiting for an image ${said(round.acquire_ms)}, submitting ${said(round.submit_ms)}, presenting ${said(round.present_ms)}), GPU ${said(round.gpu_ms)}, render passes p95 ${round.passes} (most ${round.most_passes})`)
     if (!shown.said.length) lines.push(`  ${hz} Hz presented: nothing said: ${shown.stderr.trim().split("\n").at(-1)}`)
@@ -282,7 +283,7 @@ export async function round(targets) {
     // A trace a motion plays is beside its scenes.
     for (const scene of scenes) scene.from = target.endsWith("core/ui/gallery") ? target : join(target, "client")
     // Each motion at each rate on a harness of its own, a few at once.
-    const jobs = scenes.flatMap((scene) => Object.entries(scene.motions).flatMap(([motion, played]) => rates.map((hz) => ({ scene, motion, played, hz }))))
+    const jobs = scenes.flatMap((scene) => Object.entries(scene.motions).filter(([, played]) => !keeping || played.keeps).flatMap(([motion, played]) => rates.map((hz) => ({ scene, motion, played, hz }))))
     const results = []
     // One at a time on a device, whose GPU each frame's time is of.
     const together = ssh ? 1 : 4

@@ -1,6 +1,6 @@
 // Plays every scene's gestures (its `motions`) on a native host's headless harness, frame by frame, on its paused
 // clock: `bun motion.js [<folder>…] [--scene <words>] [--hz 60,120] [--out <dir>] [--against <dir>] [--dark]
-// [--release] [--watch] [--ssh <host> --harness <its build of the harness>]` in core/ui, after `bun build.js` and `cargo
+// [--release] [--watch] [--keeps] [--ssh <host> --harness <its build of the harness>]` in core/ui, after `bun build.js` and `cargo
 // build -p renderer --example screenshot --features fake` (`--release` too for `--release`, whose costs are a shipped
 // build's). `--ssh` plays them on a real device instead, as calibrate.js draws there (a Windows one's harness built with
 // `cargo xwin build --release … --target x86_64-pc-windows-msvc`, which draws with Direct3D 12 over ssh), at its tier's
@@ -30,10 +30,10 @@
 // and it says, motion by motion, how many frames it took to come to rest and how many went over their budget, and how
 // many each kind of device would drop (devices.json's tiers: a low-end Android phone, an older and a current iPhone, a
 // laptop's Intel GPU at 4K, a browser's WebGPU), from each frame's work, the same on any device, as calibrate.js
-// measured a real one's GPU take for it and as the tier's CPU and GPU score beside this machine's and that one's. With
-// `--against` (an earlier run's `--out`), each is compared with that run's: how far apart the curves come, at most, and
-// how much of the filmstrips differs (`changed.png`). `index.html` in `--out` is a contact sheet of them all, before
-// and after side by side. `--watch` plays them again as their app, the gallery or the UI library changes, a folder's
+// measured a real one's GPU and its drawing take for it and as the tier's CPU and GPU score beside this machine's and
+// that one's. With `--against` (an earlier run's `--out`), each is compared with that run's: how far apart the curves
+// come, at most, and how much of the filmstrips differs (`changed.png`). `--keeps` plays only the motions that keep a
+// tier (`keeps`). `index.html` in `--out` is a contact sheet of them all, before and after side by side. `--watch` plays them again as their app, the gallery or the UI library changes, a folder's
 // own motions alone where only it changed, each round said with how long it took.
 //
 // `--checks` plays each scene's checks instead (`checks`, the `CheckStep` type): what people do with it, as the UI
@@ -74,7 +74,7 @@ if (import.meta.main) {
   // `--watch` plays what it builds again as it changes.
   if (!flag("--watch")) setHarness(copied(ssh ? undefined : harness, out) ?? harness)
   // A debug build's CPU is several times a shipped one's.
-  if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's, so devices are judged by their GPU alone: --release judges their CPU and JS too")
+  if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's, so devices are judged by their GPU and drawing, as measured, alone: --release judges their painting and JS too")
   if (!hostScore && !ssh) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
   const started = performance.now()
   if (checking) {

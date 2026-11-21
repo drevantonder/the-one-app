@@ -13,6 +13,8 @@ export const out = resolve(option("--out") ?? join(root, "target", "motion"))
 export const against = option("--against") && resolve(option("--against"))
 export const rates = (option("--hz") ?? "60,120").split(",").map(Number)
 export const only = option("--scene")?.toLowerCase()
+/// Only the motions that keep a tier (`keeps`), which calibrate.js checks the tiers' model against a device by.
+export const keeping = flag("--keeps")
 export const dark = flag("--dark")
 export const checking = flag("--checks")
 export const seeds = Number(option("--seeds") ?? 3)
