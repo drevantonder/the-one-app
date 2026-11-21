@@ -96,6 +96,7 @@ impl Windows {
                 shown: false,
                 panel,
                 visible: false,
+                hidden: false,
                 summoned: None,
                 left: None,
                 chrome: None,

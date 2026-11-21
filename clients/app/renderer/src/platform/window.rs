@@ -42,9 +42,9 @@ pub(super) fn fit(screen: &mut Screen, native: &NativeWindow, id: WindowId, room
 }
 
 impl Window {
-    /// Whether it's on screen: shown, and for a panel, summoned.
+    /// Whether it's on screen: shown, not hidden, and for a panel, summoned.
     pub(super) fn on_screen(&self) -> bool {
-        self.shown && (!self.panel || self.visible)
+        self.shown && !self.hidden && (!self.panel || self.visible)
     }
 
     /// How big its page is laid out: a panel's as its page asked, the rest as big as their window.

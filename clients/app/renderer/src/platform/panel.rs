@@ -65,13 +65,20 @@ impl Windows {
     }
 
     /// Hides window `id`, or shows it again, as a phone's root window is while the page over it shows an app it
-    /// draws itself.
+    /// draws itself. Hidden, it isn't drawn, and its renderers let go of their images as a panel's put away do
+    /// (`Renderer::put_away`): a phone's system does nothing with a window hidden (an iPhone's Home Screen kept its
+    /// three images, 36 MB at 3x, under every app).
     pub fn hide(&mut self, id: WindowId, hidden: bool) {
         let Some(window) = self.windows.get_mut(&id) else { return };
+        window.hidden = hidden;
         if hidden {
+            for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
+                renderer.put_away();
+            }
             self.display.put_away(&window.parts[0].native, false);
         } else {
-            window.dirty = true;
+            // Drawn as it shows, though nothing it shows changed: its images went as it was hidden.
+            (window.dirty, window.unshown) = (true, true);
             self.display.show(&window.parts[0].native);
         }
     }

@@ -16,7 +16,8 @@
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. What a person does (`tap`, `hover`, `key`,
 //! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, a panel's `put_away` and `summon`, the
-//! device's `back`, the system's `appearance` switched and the window's `resize`)
+//! window's `hide`, as a phone's root window under an app, the device's `back`, the system's `appearance` switched and
+//! the window's `resize`)
 //! comes as the display's input, each event at its own time, a click held down 80 ms,
 //! and what it presses scrolled into sight first, as Playwright's click does. Its clock is paused: `clock`'s `step`
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
@@ -564,8 +565,9 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's. And what the
 /// platform's keyboard was told (`keyboard`), and what its menu for text and magnifier were asked to show, with the
 /// handles drawn (`text_selection`), which only the fake platform knows; the system's appearance switched
-/// (`appearance`), the window resized (`resize`), and its last frame beside one drawn afresh (`fresh`).
-const INPUT: [&str; 20] = ["tap", "hover", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard", "text_selection", "appearance", "resize", "fresh"];
+/// (`appearance`), the window resized or hidden (`resize`, `hide`), its last frame beside one drawn afresh (`fresh`),
+/// and what its windows hold (`memory`, `Windows::memory`).
+const INPUT: [&str; 22] = ["tap", "hover", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "hide", "back", "keyboard", "text_selection", "appearance", "resize", "fresh", "memory"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -751,6 +753,14 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             windows.run(0.0);
             Ok(json!({}))
         }
+        // Hidden while the page over it shows an app, as a phone's root window is (`Windows::hide`), or shown again
+        // (`hidden` false).
+        "hide" => {
+            windows.hide(id, request.inputs.get("hidden").and_then(Value::as_bool) != Some(false));
+            windows.run(0.0);
+            Ok(json!({}))
+        }
+        "memory" => Ok(windows.memory()),
         // The device's Back, as Android's Back key is (`Windows::back`): what's open over the page shuts, or the window
         // leaves; `went` is whether it took it.
         "back" => {

@@ -298,6 +298,10 @@ impl Windows {
                 }
                 continue;
             }
+            // Hidden (`hide`), it's drawn again as it shows, where a frame would make again the images it let go of.
+            if window.hidden {
+                continue;
+            }
             let (width, height) = (device.width.0 as u32, device.height.0 as u32);
             if ticking && window.presented && window.summoned.is_none() {
                 continue;

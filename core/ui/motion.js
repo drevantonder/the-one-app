@@ -975,11 +975,17 @@ const unlike = (answer, folder) => {
   return `the frame drawn on what it kept differs from one drawn afresh in ${differ} of ${of} pixels${box ? `, from ${box.x},${box.y} ${box.width}×${box.height} px` : ""}`
 }
 
+/// How much of a window's images (its surface's, as `Renderer::memory` counts three, the frame it kept and spare ones,
+/// its backdrops' and blurs) its renderers hold, as `memory` answers: hidden, a 1×1 surface's at most.
+const images = (answer) => (answer?.result?.windows ?? []).flatMap((window) => window.renderers).reduce((all, held) => all + held.surface + held.kept + held.spare + held.backdrop, 0)
+const IMAGES_HIDDEN = 4096
+
 /// A scene drawn the same however it came to be, as a frame drawn on what was kept from frames before must be, by what
 /// changes under a page that isn't its own: opened and at rest, then after the app's been in the background and back
 /// (`away`, which on an iPhone draws it in the other appearance and back for the app switcher, and puts a Mac's launcher
-/// away as it takes the keyboard, so it's summoned again, as its person does), the system's appearance switched, and on
-/// a computer its window made smaller. → why it failed, or nothing.
+/// away as it takes the keyboard, so it's summoned again, as its person does), the system's appearance switched, hidden
+/// under an app as a phone's root window is (a panel put away) and shown again, holding none of its window's images
+/// meanwhile, and on a computer its window made smaller. → why it failed, or nothing.
 async function agrees(built, scene, folder) {
   mkdirSync(folder, { recursive: true })
   const at = pageFolder(built, scene.page, folder, scene.uses)
@@ -989,6 +995,7 @@ async function agrees(built, scene, folder) {
     ["at rest", []],
     ["back from the background", [{ op: "away", ms: 1000 }, ...(panelled(scene) ? [{ op: "summon" }] : [])]],
     [`switched to ${dark ? "Light" : "Dark"}`, [{ op: "appearance", dark: !dark }]],
+    panelled(scene) ? ["put away and summoned again", [{ op: "put_away" }, { op: "memory" }, { op: "summon" }]] : ["hidden under an app and shown again", [{ op: "hide" }, { op: "memory" }, { op: "hide", hidden: false }]],
     ...(scene.touch ? [] : [["made smaller", [{ op: "resize", width: scene.size[0] - 120, height: scene.size[1] - 80 }]]]),
   ]
   const asked = [{ op: "clock", step: 1000 }, ...taps, ...changes.flatMap(([, ops]) => [...ops, rest, { op: "fresh" }]), crash]
@@ -998,6 +1005,9 @@ async function agrees(built, scene, folder) {
   if (crashed(answers.at(-1))) return crashed(answers.at(-1))
   let n = 0
   for (const [what, ops] of changes) {
+    const memory = ops.findIndex((op) => op.op === "memory")
+    const held = memory < 0 ? 0 : images(answers[n + memory])
+    if (held > IMAGES_HIDDEN) return `${what}: hidden, it still holds ${(held / 1e6).toFixed(1)} MB of images its window's size (its surface's, the frame it kept, its blurs)`
     n += ops.length + 1
     const own = join(folder, what.replace(/[^\w.-]+/g, "-"))
     mkdirSync(own, { recursive: true })

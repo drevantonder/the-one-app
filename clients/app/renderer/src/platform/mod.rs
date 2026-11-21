@@ -319,6 +319,8 @@ struct Window {
     /// A panel's: whether it's showing, and since when it was asked to, until its frame is drawn.
     panel: bool,
     visible: bool,
+    /// Hidden while the page over it shows an app (`hide`), as a phone's root window is: not drawn, its images let go of.
+    hidden: bool,
     summoned: Option<web_time::Instant>,
     /// When a panel last went as something else took the keyboard (`showing`).
     left: Option<web_time::Instant>,
