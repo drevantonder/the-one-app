@@ -120,17 +120,24 @@ impl Views {
     /// list, as a page loads none of them (a sourcemap), is read by name from the same version.
     pub(crate) async fn file(&self, address: &str) -> anyhow::Result<(String, Vec<u8>)> {
         let address = Url::parse(address)?;
-        let file = address.path().trim_start_matches('/');
         // A large file a tool answered with, which the client keeps, at the address the answer gave an app for it.
-        if let Some(path) = file.strip_prefix(".file/") {
+        if let Some(path) = address.path().trim_start_matches('/').strip_prefix(".file/") {
             return self.client.file(path).ok_or_else(|| anyhow::anyhow!("this client keeps no such file"));
         }
+        let (resource, subject) = self.resource(&address).await?;
+        self.read(&resource, subject.as_deref()).await
+    }
+
+    /// The file an app's page names at `address` (`file`), as the server lists it, `ui://<app>/<code>/<path>`, which
+    /// never changes, and whoever it's listed for, as what it loaded (`stale`).
+    pub(crate) async fn resource(&self, address: &Url) -> anyhow::Result<(String, Option<String>)> {
+        let file = address.path().trim_start_matches('/');
         let none = || anyhow::anyhow!("no app here has {file}");
         let (name, path) = file.split_once('/').ok_or_else(none)?;
         // `<app>@<version>` is that version's file, as the edge has it for a browser: an icon a page shows, by what's
         // in it (`ui://icons/<sha256>/…`), which never changes.
         if let Some((name, code)) = name.split_once('@') {
-            return self.read(&format!("ui://{name}/{code}/{path}"), None).await;
+            return Ok((format!("ui://{name}/{code}/{path}"), None));
         }
         let app = address.host_str().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
         // Android's and Windows' web views name the app after the scheme, in a host's name.
@@ -144,7 +151,7 @@ impl Views {
         if resources(&listed).any(|listed| listed == resource) {
             self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.clone());
         }
-        self.read(&resource, subject.as_deref()).await
+        Ok((resource, subject))
     }
 
     /// The open apps loaded against a version of their app, or a build of the UI library, that `changed` says

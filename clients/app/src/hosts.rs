@@ -343,6 +343,17 @@ pub(crate) async fn file(address: &str) -> Result<Value, String> {
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))
 }
 
+/// The file at `address`, an app's for an app's window (`file`), as what it is never changes: the version it's of
+/// (`Views::resource`), or for the client's own pages, the client's, which is the same while it runs.
+pub(crate) async fn resource(address: &str) -> Result<String, String> {
+    if address.starts_with(crate::native::CLIENT) {
+        return Ok(address.to_owned());
+    }
+    let address = url::Url::parse(address).map_err(|error| error.to_string())?;
+    let (resource, _) = crate::views()?.resource(&address).await.map_err(|error| format!("{error:#}"))?;
+    Ok(resource)
+}
+
 /// What an app's native window changes of this device (`client({ ... })` in the UI library), answered as the window
 /// page answers a web view's (`respond` in bridge.js): its person signs it out, a phone's push tries again, a phone's
 /// Settings page opens, it becomes a server or stops being one, or it takes its update.

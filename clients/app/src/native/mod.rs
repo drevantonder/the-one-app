@@ -116,7 +116,7 @@ struct Page {
     module: Url,
     trusted: bool,
     /// The UI library's tables, and its app's styles where it has them.
-    tables: Vec<String>,
+    tables: Vec<Table>,
     /// Its name and icon, as a `data:` address, as its app lists them, for the window's title.
     name: Option<String>,
     icon: Option<String>,
@@ -178,19 +178,45 @@ fn listed_name(resource: &Value) -> Option<String> {
     resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned)
 }
 
-/// The tables at `addresses`, or none where one needs a runtime version this program hasn't, so its page is a web
-/// view's.
-async fn tables(addresses: &[Url]) -> anyhow::Result<Option<Vec<String>>> {
+/// A table a page is drawn with (`Page::tables`): the file it is, by the version it's of, which never changes
+/// (`hosts::resource`), and what's in it, where it isn't loaded already (`LOADED`).
+struct Table {
+    file: String,
+    text: Option<String>,
+}
+
+/// The tables loaded, each by its file (`Table`), so a page opened on what's loaded already reads and parses none
+/// again, where every open did both: a Surface's opens took about 60 ms (p50) to read them alone. The token table
+/// loaded now, which another replaces (`renderer::tokens::load_table`), and each style table loaded, which stay
+/// (`renderer::load_styles`), with its page's own tokens' number where it's a page's (`renderer::tokens::load_page`).
+/// A new build of the UI library or an app is new files, which are loaded as its pages open.
+static LOADED: Mutex<(Option<String>, Vec<(String, u32)>)> = Mutex::new((None, Vec::new()));
+
+/// Whether table `at` of a page's, `file`, is loaded: its token table, if it's the one loaded now; another, if it's
+/// been loaded.
+fn loaded(at: usize, file: &str) -> bool {
+    let loaded = LOADED.lock().expect("nothing panics holding it");
+    if at == 0 { loaded.0.as_deref() == Some(file) } else { loaded.1.iter().any(|(known, _)| known == file) }
+}
+
+/// The tables at `addresses`, those not loaded already read, or none where one needs a runtime version this program
+/// hasn't, so its page is a web view's.
+async fn tables(addresses: &[Url]) -> anyhow::Result<Option<Vec<Table>>> {
     let mut tables = Vec::new();
-    for table in addresses {
-        let file = crate::hosts::file(table.as_str()).await.map_err(|error| anyhow::anyhow!("{table} didn't load: {error}"))?;
-        let file = BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes())?;
-        let text = String::from_utf8(file)?;
+    for (at, table) in addresses.iter().enumerate() {
+        let file = crate::hosts::resource(table.as_str()).await.map_err(|error| anyhow::anyhow!("{table} didn't load: {error}"))?;
+        if loaded(at, &file) {
+            tables.push(Table { file, text: None });
+            continue;
+        }
+        let read = crate::hosts::file(table.as_str()).await.map_err(|error| anyhow::anyhow!("{table} didn't load: {error}"))?;
+        let read = BASE64.decode(read["body"].as_str().unwrap_or_default().as_bytes())?;
+        let text = String::from_utf8(read)?;
         let v = serde_json::from_str::<Value>(&text).map(|table| table["v"].as_u64().unwrap_or(0)).unwrap_or(0);
         if v > u64::from(renderer::RUNTIME_VERSION) {
             return Ok(None);
         }
-        tables.push(text);
+        tables.push(Table { file, text: Some(text) });
     }
     Ok(Some(tables))
 }
@@ -517,7 +543,7 @@ fn open_window(view: &str, options: WindowOptions, on_event: impl FnMut(Event) +
 /// its own, and where its device is with its network, as a page asks as it opens. → it, its page's own tokens
 /// (`load`), and the Colour Mode chosen on its device, if one was.
 #[allow(clippy::too_many_arguments)]
-async fn start_page(view: &str, entrypoint: &str, subject: Option<&str>, module: &Url, page: Url, tables: &[String], to: &UnboundedSender<Value>, asked: &Arc<Mutex<HashMap<String, Asked>>>) -> anyhow::Result<(Started, u32, Option<String>)> {
+async fn start_page(view: &str, entrypoint: &str, subject: Option<&str>, module: &Url, page: Url, tables: &[Table], to: &UnboundedSender<Value>, asked: &Arc<Mutex<HashMap<String, Asked>>>) -> anyhow::Result<(Started, u32, Option<String>)> {
     let tokens_page = load(tables)?;
     Opening::step(view, "tables loaded");
     let begun = self::started(entrypoint, subject, to.clone(), asked.clone(), module, page);
@@ -552,20 +578,30 @@ fn attach(window: &Arc<OnceLock<WindowId>>, screen: impl FnOnce() -> anyhow::Res
     Ok(attached)
 }
 
-/// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles.
-/// → the number of its page's own tokens, where its styles have them, which are its screen's alone
-/// (`tokens::load_page`).
-fn load(tables: &[String]) -> anyhow::Result<u32> {
-    if let [tokens, styles @ ..] = tables {
-        renderer::tokens::load_table(tokens)?;
-        for styles in styles {
-            renderer::load_styles(styles)?;
+/// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles,
+/// those not loaded already (`LOADED`). → the number of its page's own tokens, where its styles have them, which are
+/// its screen's alone (`tokens::load_page`).
+fn load(tables: &[Table]) -> anyhow::Result<u32> {
+    let mut loaded = LOADED.lock().expect("nothing panics holding it");
+    let mut page = 0;
+    for (at, Table { file, text }) in tables.iter().enumerate() {
+        match (at, text) {
+            (0, Some(tokens)) => {
+                renderer::tokens::load_table(tokens)?;
+                loaded.0 = Some(file.clone());
+            }
+            (_, Some(styles)) => {
+                renderer::load_styles(styles)?;
+                let own = if at == 2 { renderer::tokens::load_page(styles)? } else { 0 };
+                loaded.1.push((file.clone(), own));
+            }
+            (_, None) => {}
+        }
+        if at == 2 {
+            page = loaded.1.iter().find(|(known, _)| known == file).map_or(0, |(_, own)| *own);
         }
     }
-    Ok(match tables {
-        [_, _, own] => renderer::tokens::load_page(own)?,
-        _ => 0,
-    })
+    Ok(page)
 }
 
 /// What makes the pages a window's frames show, each another app's page in a sandbox of its own (`frame`): only a
