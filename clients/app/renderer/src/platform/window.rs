@@ -4,10 +4,9 @@ use super::*;
 /// and device and of its window's title row (`WindowOptions::title_row`), and the windows' thread woken as its page
 /// posts.
 #[cfg_attr(not(any(target_os = "linux", target_os = "windows")), allow(unused_variables))]
-pub(super) fn fit(screen: &mut Screen, native: &NativeWindow, id: WindowId, room: Size<Pixels>, root: bool, title_row: bool, pressure: Pressure) {
+pub(super) fn fit(screen: &mut Screen, native: &NativeWindow, id: WindowId, room: Size<Pixels>, rail: bool, title_row: bool, pressure: Pressure) {
     screen.room = Size { width: room.width.0, height: room.height.0 };
-    // A phone's app window has the rail's home line; its Home Screen doesn't.
-    screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !root;
+    screen.rail = rail;
     screen.appearance = appearance();
     screen.reduced_motion = reduced_motion();
     screen.pressure = pressure;

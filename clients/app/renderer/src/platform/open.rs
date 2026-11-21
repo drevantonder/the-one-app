@@ -52,8 +52,9 @@ impl Windows {
     /// Window `id`, opened while its page started (`opening`), shows its page now, `screen`. → whether it was such a
     /// window and is still open.
     pub fn attach(&mut self, id: WindowId, mut screen: Screen) -> bool {
+        let rail = self.windows.get(&id).is_some_and(|window| self.rail(window.root));
         let Some(window) = self.windows.get_mut(&id).filter(|window| window.pending) else { return false };
-        fit(&mut screen, &window.parts[0].native, id, window.room(), window.root, window.title_row, self.pressure);
+        fit(&mut screen, &window.parts[0].native, id, window.room(), rail, window.title_row, self.pressure);
         screen.when_unused.append(&mut window.when_unused);
         screen.unused();
         (window.screen, window.pending, window.dirty) = (Ok(screen), false, true);
@@ -82,7 +83,7 @@ impl Windows {
             // Its page is laid out in the room its window has from its first frame, which only the window knows: a
             // phone's is its screen whatever it was asked to be, and a computer's app opens where it was left.
             let room = if options.panel.is_some() { options.size } else { native.size() };
-            fit(screen, &native, id, room, options.root, options.title_row, self.pressure);
+            fit(screen, &native, id, room, self.rail(options.root), options.title_row, self.pressure);
         }
         let rendering = web_time::Instant::now();
         let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };

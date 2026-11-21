@@ -4,7 +4,7 @@ impl Windows {
     /// A finger on window `id`, as its platform says, which the rail's line takes where it lands on it (`rail`): it
     /// drives the window's move home from then on, and the first to land keeps it, another on the line meanwhile
     /// ignored. → whether it's the line's, which the window's page doesn't hear.
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
     pub(crate) fn line(&mut self, id: WindowId, finger: u64, at: crate::geometry::Point<f32>, phase: crate::view::touch::Phase) -> bool {
         let Some(window) = self.windows.get_mut(&id) else { return false };
         let (room, icon) = (window.room(), window.icon);
@@ -69,7 +69,7 @@ impl Windows {
         if let Some(recording) = &mut self.recording {
             recording.input(id, serde_json::json!({"kind": "touch", "phase": format!("{phase:?}").to_lowercase(), "finger": finger, "x": at.x, "y": at.y}), happened);
         }
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
         if self.line(id, finger, at, phase) {
             return false;
         }

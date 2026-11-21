@@ -182,8 +182,13 @@ impl Windows {
         ids
     }
 
-    /// Each window on the screen, bottom first: its id, its title, how it's drawn over what's under it, whether it
-    /// shows its snapshot, and the room its page was last told and the room it has, in points.
+    /// The window on top of the screen, which a finger lands on.
+    pub fn top(&self) -> Option<WindowId> {
+        self.stacked().last().copied()
+    }
+
+    /// Each window on the screen, bottom first: its id, its title, how it's drawn over what's under it and how far it's
+    /// slid across, whether it shows its snapshot, and the room its page was last told and the room it has, in points.
     pub fn composed(&self) -> serde_json::Value {
         let listed: Vec<serde_json::Value> = self
             .stacked()
@@ -197,6 +202,7 @@ impl Windows {
                     "window": id,
                     "title": window.title,
                     "moved": {"scale": moved.scale, "x": moved.x, "y": moved.y, "opacity": moved.opacity, "dim": moved.dim},
+                    "slid": window.parts[0].native.slid(),
                     "snapshot": window.picture.is_some(),
                     "covered": window.cover.opacity(),
                     "starting": window.screen.as_ref().is_ok_and(Screen::starting),
@@ -210,7 +216,8 @@ impl Windows {
 
     /// The screen as its compositor shows it: each window on it what it last presented, over those under it, grown and
     /// moved about its middle, as opaque and with corners as round as it's moved to, what's under it dimmed by its
-    /// `dim` (`rail::Moved`), as an iPhone's Core Animation draws its card: its width, height and pixels.
+    /// `dim` (`rail::Moved`), as an iPhone's Core Animation draws its card, and slid across as a swipe back slides it
+    /// (`NativeWindow::slide`): its width, height and pixels.
     pub fn screen(&mut self) -> Option<(u32, u32, Vec<u8>)> {
         let stacked = self.stacked();
         let first = *stacked.first()?;
@@ -218,6 +225,7 @@ impl Windows {
         for id in stacked.into_iter().skip(1) {
             let scale = self.windows[&id].parts[0].native.scale();
             let (moved, _) = self.windows[&id].parts[0].native.composed();
+            let across = moved.x + self.windows[&id].parts[0].native.slid();
             let Some((w, h, drawn)) = self.presented(id) else { continue };
             for pixel in rgba.chunks_exact_mut(4) {
                 for channel in &mut pixel[..3] {
@@ -228,7 +236,7 @@ impl Windows {
             let (middle_x, middle_y) = (w as f32 / 2.0, h as f32 / 2.0);
             let corner = moved.corner * scale;
             for (y, x) in (0..height).flat_map(|y| (0..width).map(move |x| (y, x))) {
-                let from_x = middle_x + (x as f32 + 0.5 - middle_x - moved.x * scale) / moved.scale;
+                let from_x = middle_x + (x as f32 + 0.5 - middle_x - across * scale) / moved.scale;
                 let from_y = middle_y + (y as f32 + 0.5 - middle_y - moved.y * scale) / moved.scale;
                 if from_x < 0.0 || from_y < 0.0 || from_x >= w as f32 || from_y >= h as f32 {
                     continue;

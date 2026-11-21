@@ -30,12 +30,17 @@ impl Windows {
     }
 
     /// Whether its windows are a phone's: each the whole screen, an app's over the Home Screen, which it opens out of.
-    #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
     pub(super) fn on_phone(&self) -> bool {
         #[cfg(feature = "fake")]
         return self.display.is_phone();
         #[cfg(not(feature = "fake"))]
         cfg!(any(target_os = "android", target_os = "ios"))
+    }
+
+    /// Whether a window, the root window or not, has the rail's home line: a phone's app's, over its Home Screen. The
+    /// headless harness draws a phone's page alone too, with no Home Screen under it to go home to, which has none.
+    pub(super) fn rail(&self, root: bool) -> bool {
+        self.on_phone() && !root && (cfg!(not(feature = "fake")) || self.windows.values().any(|window| window.root))
     }
 
     /// Whether the display says when it shows each frame, and has within the last refresh and a quarter since its

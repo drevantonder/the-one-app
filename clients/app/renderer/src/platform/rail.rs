@@ -100,7 +100,7 @@ impl Pull {
 
     /// Finger `finger`, landing on the line at `at`, takes an opening from where it's got to, as iOS's swipe home
     /// takes an app still zooming open: it follows the finger from there.
-    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios", feature = "fake")), allow(dead_code))]
     pub fn take(&mut self, finger: u64, at: Point<f32>) {
         (self.finger, self.start, self.from, self.target, self.velocity) = (finger, at, self.p, None, 0.0);
         self.velocity_in = Velocity::default();

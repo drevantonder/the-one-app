@@ -428,7 +428,9 @@ fn main() -> anyhow::Result<()> {
             if seed != 0 && request.op != "clock" {
                 windows.run(windows.random(50) as f64);
             }
-            let answered = input(&mut windows, id, &request);
+            // On a phone's screen, it's the window on top's, an app's over the Home Screen, as a finger lands on it.
+            let top = windows.top().unwrap_or(id);
+            let answered = input(&mut windows, top, &request);
             println!("{}", renderer::inspect::answer(&request.id, answered));
             continue;
         }
