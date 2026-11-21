@@ -1,4 +1,4 @@
-import { Button, History, List, ListStyle, Menu, Row, type Scenes, Screen, Section, Split, styles, Text, View } from "ui"
+import { Button, Empty, History, List, ListStyle, Menu, Row, type Scenes, Screen, Section, Split, styles, Text, View } from "ui"
 
 const look = styles({ window: { height: 720 }, narrow: { height: 475 }, phone: { height: 844 } })
 
@@ -87,6 +87,21 @@ export default {
     size: [1100, 720],
     render: () => <View style={look.window}><Split pick="Pick a device to see it." detail={<Screen heading="Alex's Laptop" back><Text>Its page.</Text></Screen>}><Devices /></Split></View>,
     checks: { "Beside its list it says what to pick": [{ expect: { text: "Pick a device to see it." } }, { expect: { gone: "Its page." } }] },
+  },
+  // A list with nothing in it has nothing to pick, so its detail side says nothing and the list's own line stands
+  // alone, as Mail's and Finder's do.
+  "Screens/A split with an empty list": {
+    alone: true,
+    layout: "fullscreen",
+    size: [1100, 720],
+    render: () => (
+      <View style={look.window}>
+        <Split pick="Pick a destination to see its backups." detail={<Screen heading="Alex's Laptop" back><Text>Its page.</Text></Screen>}>
+          <Screen heading="Backups"><Empty>Nothing is backed up yet.</Empty></Screen>
+        </Split>
+      </View>
+    ),
+    checks: { "Its own line stands alone": [{ expect: { text: "Nothing is backed up yet." } }, { expect: { gone: "Pick a destination to see its backups." } }, { expect: { gone: "Its page." } }] },
   },
   "Screens/A large title": {
     alone: true,

@@ -145,6 +145,8 @@ const Edge = createContext<() => { start: boolean; end: boolean }>(() => ({ star
  * detail beside its list, or a page or a part of one with no screen around it (an app that couldn't show its first
  * screen, an empty Home page), as iOS's ContentUnavailableView is. In a screen's parts, it's one of them. */
 export const Middle = createContext<() => boolean>(() => true)
+/// Where an `Empty` in a split's list side says it's there, so the split's detail side has nothing to pick.
+export const Blank = createContext<(change: number) => void>(() => {})
 
 /// `<Screen heading="Notes" action={<Button>Add</Button>}>...</Screen>`: a whole view of an app: a bar across its
 /// top that stays as what's under it scrolls, with its `heading` and what it does (`action`: its one main button, or a
@@ -343,7 +345,8 @@ const open: (() => void)[] = []
 /// back, Escape, and the detail's Back button close it, or beside its list, where a detail has none, the list's: it
 /// calls `onClose`, and the app sets `open` false. Its list side's lists are one to the keyboard (`ListKeys`).
 /// Beside its list with nothing open, its detail side says `pick` ("Pick a repo to see its code."), as Mail says "No
-/// Message Selected", where the app has a list to pick from: it's left out where there's none.
+/// Message Selected", where the app has a list to pick from: it's left out where there's none, and where the list is
+/// empty (an `Empty` in it), when its detail side says nothing and the list's own line stands alone, as Mail's does.
 export function Split(props: { open?: boolean; onClose?: () => void; pick?: string; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
   const history = useContext(Went)
@@ -356,6 +359,8 @@ export function Split(props: { open?: boolean; onClose?: () => void; pick?: stri
   const listWidth = () => (sidebar ? sidebarWidth : Math.min(column, Math.max(columnMin, room() * 0.38)))
   // What's drawn as open, which follows `open` as a move.
   const [shown, setShown] = createSignal(false)
+  // How many `Empty` its list side shows.
+  const [blank, setBlank] = createSignal(0)
   const close = () => props.onClose?.()
 
   // Escape closes it, unless it's for something open over it, a sheet or a menu, or a split open in it, which closes
@@ -385,7 +390,9 @@ export function Split(props: { open?: boolean; onClose?: () => void; pick?: stri
           <Edge value={() => ({ start: edge().start, end: edge().end && !beside() })}>
           <Opened value={() => (props.open ? close : undefined)}>
             <Middle value={() => false}>
-              <ListKeys>{props.children}</ListKeys>
+              <Blank value={(change) => setBlank((count) => count + change)}>
+                <ListKeys>{props.children}</ListKeys>
+              </Blank>
             </Middle>
           </Opened>
           </Edge>
@@ -398,8 +405,10 @@ export function Split(props: { open?: boolean; onClose?: () => void; pick?: stri
             <History value={beside() ? history() : null}>
             <InDetail value={beside}>
               <Middle value={beside}>
-                <Show when={beside() && !props.open && props.pick} fallback={props.detail}>
-                  <Empty>{props.pick}</Empty>
+                <Show when={beside() && !props.open && (blank() || props.pick)} fallback={props.detail}>
+                  <Show when={!blank()}>
+                    <Empty>{props.pick}</Empty>
+                  </Show>
                 </Show>
               </Middle>
             </InDetail>

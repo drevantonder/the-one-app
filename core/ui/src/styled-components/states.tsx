@@ -1,12 +1,12 @@
 // An empty screen, what's coming, a problem, something under way and something starting: written once on the
 // drawing primitives (#primitives), the same on every host.
-import { createSignal, Show, useContext } from "solid-js"
+import { createEffect, createSignal, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, ScrollView, Text, View } from "#primitives"
 import { copy, touch } from "#bridge"
 import { ListStyle } from "./list.tsx"
 import { Button, Icon, Spinner } from "./button.tsx"
-import { Middle } from "./screen.tsx"
+import { Blank, Middle } from "./screen.tsx"
 import { messages, readable, whole } from "../words.ts"
 import { styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
@@ -116,6 +116,8 @@ const look = styles({
 /// there's an obvious first step.
 export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
   const middle = useContext(Middle)
+  const blank = useContext(Blank)
+  createEffect(() => true, () => (blank(1), () => blank(-1)))
   return (
     <View style={[look.state, middle() && look.middle, middle() && look.fill]}>
       <Text style={[look.grey, middle() && look.body]}>{props.children}</Text>

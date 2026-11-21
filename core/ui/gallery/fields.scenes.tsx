@@ -174,6 +174,25 @@ export default {
     ),
     checks: { "Its label ends at the middle of the window": [{ expect: { at: { of: "Colour Mode", x: 214, width: 330 } } }, { expect: { at: { of: "Light", x: 556 } } }] },
   },
+  // A text field, a picker and a toggle in a computer's pane, as macOS Settings' General pane draws them: each beside
+  // its label, so a field has room for what's typed in it.
+  "Fields/A text field, a picker and a toggle in a computer's form": {
+    alone: true,
+    layout: "fullscreen",
+    size: [1100, 720],
+    render: () => (
+      <Screen heading="Account">
+        <Field label="Name" hint="As people see it">
+          <Input placeholder="Your name" />
+        </Field>
+        <Field label="Fruit">
+          <Select.Root items={fruits} value="apple" />
+        </Field>
+        <Switch label="Notifications" hint="On this device" value />
+      </Screen>
+    ),
+    checks: { "Its text field is wide enough for a name": [{ expect: { widest: { of: { role: "textbox" }, most: 520 } } }] },
+  },
   // What people expect of a select, from the UI SDK's own tests (tests/specs/select.spec.ts at the commit select.ts
   // names).
   "Fields/A select chosen by its keys": { render: () => <Picked />, taps: [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Enter" }] },
