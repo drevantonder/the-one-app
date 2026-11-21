@@ -156,6 +156,21 @@ pub(super) enum Part {
     Sublayer(Sublayer),
 }
 
+/// What's positioned, or says its `zIndex`, in a stacking context, kept to be drawn after what's in its flow, as CSS
+/// draws it (`Painter::stacked`): where it'd have been drawn, as `paint` takes it, and how what it's in was turned and
+/// what was near.
+pub(super) struct Stacked {
+    pub(super) taffy_node: NodeId,
+    pub(super) offset: Point<f32>,
+    pub(super) transform: Transform,
+    pub(super) mask: Bounds<f32>,
+    pub(super) opacity: f32,
+    pub(super) parent: Option<Id>,
+    pub(super) pointer: bool,
+    pub(super) near: Bounds<f32>,
+    pub(super) turn: TransformationMatrix,
+}
+
 /// What's in a layer that's a layer of its own, and what it's painted with as the layer it's in rests.
 #[derive(Clone, Copy)]
 pub(super) struct Sublayer {
@@ -323,6 +338,11 @@ pub(super) struct Painter<'a> {
     pub(super) modal: Option<Id>,
     /// How what's painted now is turned, in the window: the `rotate`s of what it's in.
     pub(super) turn: TransformationMatrix,
+    /// What's positioned or says its `zIndex` in the stacking context being painted, by its `zIndex` (`auto`'s 0) and
+    /// where it is in the tree (`path`), drawn in that order after the rest of the context, as CSS 2.1's Appendix E
+    /// paints it; and where what's painted now is in the tree, by each node's place among its parent's children.
+    pub(super) stacked: std::collections::BTreeMap<(i32, Vec<u32>), Stacked>,
+    pub(super) path: Vec<u32>,
     /// A panel's: where its page asks for the system's own material, each a window of its own over the system's glass
     /// (`Glass`), rather than blurring what the page drew; and what the host fills them with where the system has no
     /// glass (Linux).

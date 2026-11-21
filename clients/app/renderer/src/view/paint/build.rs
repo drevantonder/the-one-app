@@ -134,7 +134,7 @@ impl Painter<'_> {
             Kind::Frame => Some(Measure::Frame { height: self.frames.get(&id).and_then(|child| child.screen.content_height) }),
             Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll | Kind::List | Kind::Video => None,
         };
-        let positioned = layout.position == taffy::style::Position::Absolute;
+        let positioned = layout.position != taffy::style::Position::Static;
         if look.will_change {
             self.layout.will_change.insert(id);
         } else {

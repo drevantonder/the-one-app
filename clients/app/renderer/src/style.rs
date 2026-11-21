@@ -47,7 +47,8 @@ pub struct Look {
     /// for, so one growing or shrinking on its way there is drawn from the same pixels, as iOS draws a layer's.
     pub rest_scale: f32,
     pub rotate: f32,
-    pub z_index: i32,
+    /// Its `zIndex`, or `None` for CSS's `auto`.
+    pub z_index: Option<i32>,
     /// Whether it takes the pointer, as its style says (`pointerEvents`), or as what it's in does (`None`), as CSS's
     /// `pointer-events` is inherited: a layer that says `none` lets presses through, and what in it says `auto` takes them.
     pub pointer_events: Option<bool>,
@@ -148,7 +149,7 @@ impl Default for Look {
             scale: 1.0,
             rest_scale: 1.0,
             rotate: 0.0,
-            z_index: 0,
+            z_index: None,
             pointer_events: None,
             touch_action: None,
             will_change: false,
@@ -612,7 +613,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         scale: number("scale").unwrap_or(1.0),
         rest_scale: number("scale").unwrap_or(1.0),
         rotate: number("rotate").unwrap_or(0.0),
-        z_index: number("zIndex").unwrap_or(0.0) as i32,
+        z_index: number("zIndex").map(|z| z as i32),
         pointer_events: word("pointerEvents").map(|events| events != "none"),
         app_region: word("appRegion").map(|region| region == "drag"),
         touch_action: match word("touchAction") {

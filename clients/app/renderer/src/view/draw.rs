@@ -263,6 +263,8 @@ impl Screen {
             window,
             modal: None,
             turn: TransformationMatrix::unit(),
+            stacked: Default::default(),
+            path: Vec::new(),
             glass: self.panel.map(|_| Vec::new()),
             fill: self.panel.filter(|panel| panel.fill).map(|_| colour_token("card", conditions)),
             drag_regions: Vec::new(),
@@ -427,6 +429,9 @@ impl Screen {
             tab_order.retain(|id| self.within(*id, modal));
         }
         tab_order.retain(|id| !self.tree.inert(*id));
+        // In the tree's order, as the DOM's Tab goes, however it was drawn (what's positioned is drawn after its flow).
+        let reached: HashSet<Id> = tab_order.drain(..).collect();
+        tab_order.extend(self.tree.preorder(0).filter(|id| reached.contains(id)));
         // The window's own notice action comes first, as it's first in it, unless a modal holds the keyboard.
         if modal.is_none() && self.chrome.action.is_some() {
             tab_order.insert(0, NOTICE_ACTION);

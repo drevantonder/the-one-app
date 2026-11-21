@@ -217,6 +217,16 @@ impl Tree {
         false
     }
 
+    /// `id` and everything in it, in the tree's order, as the DOM's `TreeWalker` walks it.
+    pub fn preorder(&self, id: Id) -> impl Iterator<Item = Id> + '_ {
+        let mut at = vec![id];
+        std::iter::from_fn(move || {
+            let id = at.pop()?;
+            at.extend(self.nodes.get(&id).into_iter().flat_map(|node| node.children.iter().rev()));
+            Some(id)
+        })
+    }
+
     /// What's going.
     pub fn going(&self) -> impl Iterator<Item = Id> + '_ {
         self.leaving.iter().copied()

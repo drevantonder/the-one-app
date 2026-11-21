@@ -148,6 +148,33 @@ impl Painter<'_> {
         self.turn = turn;
     }
 
+    /// Paints what's in a stacking context where it'd have been drawn, turned and near as it was.
+    fn paint_stacked(&mut self, stacked: Stacked) {
+        let (near, turn) = (self.near, self.turn);
+        (self.near, self.turn) = (stacked.near, stacked.turn);
+        self.paint(stacked.taffy_node, stacked.offset, stacked.transform, stacked.mask, stacked.opacity, stacked.parent, stacked.pointer);
+        (self.near, self.turn) = (near, turn);
+    }
+
+    /// Whether node `id` makes a stacking context, as CSS's does: the window; what's fixed; what says its `zIndex`
+    /// (each node here is positioned or a flex or grid item, where any `zIndex` makes one); and what's less than opaque,
+    /// moved, grown, turned, blurs what's behind it, moves by itself or is about to (`willChange`), or is drawn from a
+    /// layer of its own, which is moved and faded as a whole.
+    fn stacks(&self, id: Id, look: &Look, fixed: bool) -> bool {
+        id == 0
+            || fixed
+            || look.z_index.is_some()
+            || look.opacity < 1.0
+            || look.translate != (Offset::Px(0.0), Offset::Px(0.0))
+            || look.scale != 1.0
+            || look.rest_scale != 1.0
+            || look.rotate.rem_euclid(360.0) != 0.0
+            || look.material.is_some()
+            || look.animation.is_some()
+            || look.will_change
+            || self.layered.contains(&id)
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub(in crate::view) fn paint_node(&mut self, taffy_node: NodeId, offset: Point<f32>, transform: Transform, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
         let Ok(laid) = self.layout.taffy.layout(taffy_node).copied() else { return };
@@ -369,20 +396,22 @@ impl Painter<'_> {
                     }
                 }
                 self.placed.push((id, placed));
-                // Its children in order, those with a higher `zIndex` later, and positioned ones after the rest of theirs.
-                let mut children: Vec<(usize, NodeId, i32, bool)> = self
+                // Its children in CSS's painting order (CSS 2.1, Appendix E): those whose `zIndex` is below 0 first, then
+                // the rest of its flow in order. What's positioned or says its `zIndex` is drawn after its stacking
+                // context's flow, by `zIndex` and then the tree's order, as its stacking context's: this one's, where it
+                // makes one, or what it's in's (`Painter::stacked`).
+                let context = self.stacks(id, &look, self.layout.leaf(taffy_node).fixed);
+                let outer = context.then(|| std::mem::take(&mut self.stacked));
+                let mut children: Vec<(u32, NodeId, i32)> = self
                     .layout
                     .taffy
                     .children(taffy_node)
                     .unwrap_or_default()
                     .into_iter()
                     .enumerate()
-                    .map(|(at, child)| {
-                        let leaf = self.layout.leaf(child);
-                        (at, child, leaf.look.z_index, leaf.positioned)
-                    })
+                    .map(|(at, child)| (at as u32, child, self.layout.leaf(child).look.z_index.unwrap_or(0)))
                     .collect();
-                children.sort_by_key(|(at, _, z, positioned)| (*z, *positioned, *at));
+                children.sort_by_key(|(at, _, z)| ((*z).min(0), *at));
                 // What scrolls is near as far as it'd be scrolled into view, however tight what it's in clips: its box
                 // and what it's in, each grown by the margin. What only clips cuts what's near to it.
                 let inside = match (look.scrolls, look.clips) {
@@ -390,15 +419,34 @@ impl Painter<'_> {
                     (false, true) => around.intersect(&near),
                     (false, false) => around,
                 };
-                for (_, child, _, _) in children {
-                    if self.layout.leaf(child).fixed {
-                        let window = self.window;
-                        self.near = self.grown(window);
-                        self.paint(child, point(0.0, 0.0), Transform::NONE, window, 1.0, Some(id), pointer);
+                for (at, child, z) in children {
+                    let leaf = self.layout.leaf(child);
+                    let stacked = Stacked {
+                        taffy_node: child,
+                        offset: if leaf.fixed { point(0.0, 0.0) } else { child_offset },
+                        transform: if leaf.fixed { Transform::NONE } else { transform },
+                        mask: if leaf.fixed { self.window } else { child_mask },
+                        opacity: if leaf.fixed { 1.0 } else { opacity },
+                        parent: Some(id),
+                        pointer,
+                        near: if leaf.fixed { self.grown(self.window) } else { inside },
+                        turn: self.turn,
+                    };
+                    self.path.push(at);
+                    if z >= 0 && (leaf.positioned || leaf.look.z_index.is_some()) {
+                        self.stacked.insert((z, self.path.clone()), stacked);
                     } else {
-                        self.near = inside;
-                        self.paint(child, child_offset, transform, child_mask, opacity, Some(id), pointer);
+                        self.paint_stacked(stacked);
                     }
+                    self.path.pop();
+                }
+                if let Some(outer) = outer {
+                    while let Some(((_, path), stacked)) = self.stacked.pop_first() {
+                        let path = std::mem::replace(&mut self.path, path);
+                        self.paint_stacked(stacked);
+                        self.path = path;
+                    }
+                    self.stacked = outer;
                 }
                 self.near = around;
                 return;
