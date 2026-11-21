@@ -138,19 +138,26 @@ export default function SignInAndSecurity() {
             <List each={all().passkeys} keyed={(passkey) => passkey.id}>
           {(passkey) => {
             const only = () => all().passkeys.length === 1
+            // What it can do now, under its words on a phone; the trash after it there, and beside the words where it has none.
+            const set = () => passkey().prf_key === null
+            const allows = () => !set() && waiting(passkey()) && holds()
+            const trash = () => <Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />
             return (
               <Row
                 heading={passkey().name}
                 text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${date(passkey().added)}`}`}
+                end={set() || allows() ? undefined : trash()}
                 action={
-                  <>
-                    {passkey().prf_key === null ? (
-                      <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
-                    ) : waiting(passkey()) && holds() ? (
-                      <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
-                    ) : undefined}
-                    <Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />
-                  </>
+                  set() || allows() ? (
+                    <>
+                      {set() ? (
+                        <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
+                      ) : (
+                        <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
+                      )}
+                      {trash()}
+                    </>
+                  ) : undefined
                 }
               />
             )

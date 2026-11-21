@@ -80,6 +80,8 @@ const look = styles({
   // The row open beside its list is filled already, so the keyboard on it is the focus ring.
   openFocused: { boxShadow: { focused: tokens.shadow.focus } },
   after: { paddingStart: 0 },
+  // The words have the row's whole width, which an action then wraps under, as a phone's list gives them it.
+  full: { flexBasis: "100%" },
   settling: { transitionProperty: ["translateX", "width"], transition: tokens.motion.settle },
   words: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   // On a computer the grey words follow the heading on its line, as Raycast's subtitle does.
@@ -311,7 +313,8 @@ type RowProps = {
 /// `onPress` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
 /// split. `control` is a control before all of it, pressed apart from the row, as a checkbox that picks rows is, and
 /// `action` a button after all of it, pressed apart from the row, as Sign In is for an account that needs it; an action
-/// that would leave the words narrower than a menu goes under them. A ⋯ `Menu` in its `end` opens on a long press or a
+/// goes under the words under a finger in a narrow room, as a phone's rows keep their words wide, and elsewhere where it
+/// would leave them narrower than a menu. A ⋯ `Menu` in its `end` opens on a long press or a
 /// right-click on the row too, and its `destructive` item (Delete, Remove) shows as a finger swipes the row toward
 /// its start, as a phone's lists do: pressed, or swiped most of the way, it's done.
 export function Row(props: RowProps): JSX.Element {
@@ -356,6 +359,8 @@ export function Row(props: RowProps): JSX.Element {
   const beside = () => flat() && room() >= ROOMY
   const grouped = () => !touch() && style === "insetGrouped"
   const sidebar = () => !touch() && style === "sidebar"
+  // Under a finger in a narrow room an action goes under the words, which keep the row's width, never beside them.
+  const full = () => !!props.action && touch() && room() < ROOMY
   // A row that opens something says so with a chevron, as iOS's Settings does, but not in a computer's sidebar, whose
   // rows open beside it, or a plain list's.
   const opens = () => !!props.onPress && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
@@ -405,7 +410,7 @@ export function Row(props: RowProps): JSX.Element {
         <Show when={props.control}>{(control) => <View style={[look.control, moving()]}>{control()}</View>}</Show>
         <Show
           when={props.onPress}
-          fallback={<View style={[look.inside, !touch() && look.flatInside, flat() && !beside() && look.stackedInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
+          fallback={<View style={[look.inside, !touch() && look.flatInside, flat() && !beside() && look.stackedInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, full() && look.full, moving()]}>{inside()}</View>}
         >
           <Pressable
             role={inListbox ? undefined : "button"}
@@ -415,7 +420,7 @@ export function Row(props: RowProps): JSX.Element {
             onFocus={() => (keyboard?.onFocus(), chosen())}
             onBlur={keyboard?.onBlur}
             onPress={pressed}
-            style={[look.inside, look.pressable, !touch() && look.flatInside, flat() && !beside() && look.stackedInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, moving()]}>
+            style={[look.inside, look.pressable, !touch() && look.flatInside, flat() && !beside() && look.stackedInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, full() && look.full, moving()]}>
             {inside()}
           </Pressable>
         </Show>

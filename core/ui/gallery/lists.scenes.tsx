@@ -111,7 +111,7 @@ export default {
       <Row
         heading="With a control"
         control={<Checkbox aria-label="Done" value />}
-        action={
+        end={
           <Menu.Root>
             <Menu.Trigger aria-label="More" />
             <Menu.Positioner>

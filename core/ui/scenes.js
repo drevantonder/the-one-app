@@ -378,6 +378,7 @@ function native(built, scene, folder, used) {
   const said = answered(run.stdout.toString())
   const queried = said.at(ssh ? -DRAWN.length - 1 : -1)?.result?.nodes ?? []
   const unsafe = scene.safeArea && underTheDevice(queried, scene.size[1], insets(scene.safeArea))
+  const squeezed = squeezedWords(queried)
   // The words in sight, as the last frame drew them: each text and name of the semantic tree whose node, or the nearest
   // above it the inspector knows (a text in a line, a page in a frame), has some of its box in the window and isn't
   // see-through.
@@ -398,7 +399,7 @@ function native(built, scene, folder, used) {
   const every = (list) => list.flatMap((node) => [...(node.name ? [node.name] : []), ...every(node.children ?? [])])
   const all = [...every(Array.isArray(nodes) ? nodes : [nodes]), ...queried.filter((node) => node.kind === "raw-text" && node.name).map((node) => node.name)]
   writeFileSync(join(folder, "native-text.txt"), words.join("\n") + "\n")
-  return { tree, words, all, measured: measured && JSON.parse(measured[1]), unsafe, answers: said, at, asked, requests }
+  return { tree, words, all, measured: measured && JSON.parse(measured[1]), unsafe, squeezed, answers: said, at, asked, requests }
 }
 
 const insets = ([top, right, bottom, left]) => ({ top, right, bottom, left })
@@ -430,6 +431,26 @@ function underTheDevice(nodes, height, { top, bottom }) {
       if (y + tall > height - bottom + 0.5 && y < height && !over.length) return [`"${said(node)}" is drawn down to y ${Math.round(y + tall)}, under the home indicator, whose safe area starts at ${height - bottom}`]
       return []
     })
+}
+
+/// A row's words given less than half of its width while they are cut short or wrapped: a control or a value beside
+/// them took the room the words needed, where they'd have it whole on the row's own width. A control's own words (a
+/// button's label) aren't a row's. → what's wrong, a line each.
+const SQUEEZED = 0.5
+function squeezedWords(nodes) {
+  const byId = new Map(nodes.map((node) => [node.node, node]))
+  const parent = new Map(nodes.flatMap((node) => (node.children ?? []).map((child) => [child, node])))
+  return nodes.flatMap((node) => {
+    if (node.kind !== "text" || !node.rect || !(node.opacity > 0) || !(node.seen > 0) || !(node.cut || node.lines?.length > 1)) return []
+    const above = []
+    for (let up = parent.get(node.node); up; up = parent.get(up.node)) above.push(up)
+    const row = above.find((up) => up.role === "listitem")
+    if (!row?.rect || node.rect.width >= SQUEEZED * row.rect.width) return []
+    // Inside a control that's not most of the row (a button beside the words), the words are its own.
+    const control = above.slice(0, above.indexOf(row)).find((up) => up.actions)
+    if (control?.rect && control.rect.width < 0.5 * row.rect.width) return []
+    return [`"${node.name}" is ${Math.round(node.rect.width)} pt wide in a row ${Math.round(row.rect.width)} pt wide, ${node.cut ? "cut short" : `wrapped to ${node.lines.length} lines`}`]
+  })
 }
 
 /// What each scene ends with where a device draws it too: at rest, where each node is, and a picture drawn afresh.
@@ -542,6 +563,10 @@ for (const target of targets) {
     }
     for (const line of drawn.unsafe ?? []) {
       said.push(`  on a phone: ${line}`)
+      process.exitCode = 1
+    }
+    for (const line of drawn.squeezed ?? []) {
+      said.push(`  a row's words are squeezed: ${line}`)
       process.exitCode = 1
     }
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)

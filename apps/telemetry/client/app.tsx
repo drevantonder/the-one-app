@@ -376,8 +376,8 @@ function Telemetry(props: { all: Overview }) {
                 <Row
                   start={<View style={look.wrong}><Icon name="warning-circle" /></View>}
                   heading={failure().span ? named(failure().where, all().names) : failure().where}
-                  text={failure().message || "Failed"}
-                  end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at, "narrow")}`}
+                  text={`${failure().message || "Failed"}${failure().count > 1 ? ` · ${many(failure().count, "time")}` : ""}`}
+                  end={since(failure().at, "narrow")}
                   current={!!open()?.failure && keyOf(open()!.failure!) === keyOf(failure())}
                   onPress={() => setOpen({ failure: failure() })}
                 />

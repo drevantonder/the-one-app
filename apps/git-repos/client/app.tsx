@@ -618,8 +618,8 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
               <Row
                 heading={one().title}
                 text={line(one())}
-                end={
-                  <Show when={props.pushes}>
+                action={
+                  props.pushes ? (
                     <View style={look.actions}>
                       <Button variant="secondary" onPress={() => merge(one())}>
                         Merge
@@ -628,7 +628,7 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
                         Close
                       </Button>
                     </View>
-                  </Show>
+                  ) : undefined
                 }
               />
             )}

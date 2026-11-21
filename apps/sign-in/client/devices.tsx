@@ -391,12 +391,12 @@ function Things(props: { all: All; groups?: Groups }) {
                   start={<View style={look.glyph}><Icon name="gear-six" /></View>}
                   heading="Software Update"
                   text={said()!.busy ? <><Spinner /> {said()!.text}</> : said()!.text}
-                  end={
-                    <Show when={said()!.action}>
+                  action={
+                    said()!.action ? (
                       <Button variant="outline" loading={working() === "network"} onPress={press({ id: "network", here: false }, () => updateNow(props.all.who))}>
                         {said()!.action}
                       </Button>
-                    </Show>
+                    ) : undefined
                   }
                 />
               </Show>
