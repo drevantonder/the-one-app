@@ -334,15 +334,17 @@ defmodule Backups do
 
     # One with a backup under way or cut short is asked too, whatever the schedule: one under way says so, and one
     # cut short carries on. The clock calls every hour on the hour, and a backup that took a while finished after it.
-    made =
+    due =
       for destination <- destinations,
-          MapSet.member?(runs, destination["id"]) or (seconds && now - (last[destination["id"]] || 0) >= seconds * 1000 - 600_000) do
-        try do
-          with :running <- Run.back_up(call, destination), do: {:running, destination["name"]}
-        rescue
-          _failed -> {:failed, destination["name"]}
-        end
-      end
+          MapSet.member?(runs, destination["id"]) or (seconds && now - (last[destination["id"]] || 0) >= seconds * 1000 - 600_000),
+          do: destination
+
+    made =
+      Enum.zip_with(due, Run.each(call, due), fn
+        destination, :running -> {:running, destination["name"]}
+        destination, {:failed, _why} -> {:failed, destination["name"]}
+        _destination, backup -> backup
+      end)
 
     # Its timer goes once no backup is under way (`Backups.Run`).
     if transaction(call, &query(&1, "select 1 from runs")) == [],
@@ -591,12 +593,16 @@ defmodule Backups do
     destinations = transaction(call, fn db -> if inputs["destination"], do: named(db, inputs["destination"]), else: destinations(db) end)
     if destinations == [], do: raise("There's nowhere to back up to yet: add a destination first.")
     try do
-      %{
-        backups:
-          each(destinations, fn destination ->
-            with :running <- Run.back_up(call, destination), do: raise("It's backing up to #{destination["name"]} already.")
-          end)
-      }
+      made =
+        Enum.zip_with(destinations, Run.each(call, destinations), fn
+          destination, :running -> {:failed, "It's backing up to #{destination["name"]} already."}
+          _destination, made -> made
+        end)
+
+      case for({:failed, why} <- made, do: why) do
+        [] -> %{backups: made}
+        failed -> raise Enum.join(failed, "\n")
+      end
     after
       stand(call)
     end

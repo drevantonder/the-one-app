@@ -43,6 +43,76 @@ defmodule Backups.Run do
   def stale, do: @stale
 
   @doc """
+  Backs up to each of `destinations` at once, each in a process of its own, so one that's slow or stuck holds up
+  only its own, and gives what each one's `back_up/2` gave, or `{:failed, why}`, in their order. Each is waited for
+  as long as it says it's under way, every `@beat`, and stopped once it hasn't for `@stale`, as its row of `runs` is
+  then taken to have been cut short, which is kept as its problem.
+  """
+  def each(call, destinations) do
+    {trace, state, waiting} = {OpenTelemetry.Ctx.get_current(), OneCore.Call.State.id(), self()}
+
+    running =
+      for destination <- destinations, into: %{} do
+        task =
+          Task.Supervisor.async_nolink(OneCore.Asks, fn ->
+            OpenTelemetry.Ctx.attach(trace)
+            OneCore.Call.State.follow(state)
+            # Its beat tells `waiting` it's still under way (`beat/4`).
+            Process.put(__MODULE__, waiting)
+
+            try do
+              back_up(call, destination)
+            rescue
+              failed -> {:failed, Exception.message(failed)}
+            end
+          end)
+
+        {destination["id"], %{task: task, destination: destination, said: now()}}
+      end
+
+    made = waited(call, running, %{})
+    for destination <- destinations, do: made[destination["id"]]
+  end
+
+  defp waited(_call, running, made) when running == %{}, do: made
+
+  defp waited(call, running, made) do
+    {quietest, quiet} = Enum.min_by(running, fn {_id, run} -> run.said end)
+    refs = Map.new(running, fn {id, run} -> {run.task.ref, id} end)
+
+    receive do
+      {__MODULE__, :beat, id} when is_map_key(running, id) ->
+        waited(call, put_in(running[id].said, now()), made)
+
+      {ref, result} when is_map_key(refs, ref) ->
+        Process.demonitor(ref, [:flush])
+        waited(call, Map.delete(running, refs[ref]), Map.put(made, refs[ref], result))
+
+      {:DOWN, ref, :process, _pid, why} when is_map_key(refs, ref) ->
+        waited(call, Map.delete(running, refs[ref]), Map.put(made, refs[ref], {:failed, Exception.format_exit(why)}))
+    after
+      max(quiet.said + @stale - now(), 0) ->
+        Task.shutdown(quiet.task, :brutal_kill)
+
+        text =
+          "It said nothing for #{div(@stale, 60_000)} minutes, where a backup under way says so every " <>
+            "#{div(@beat, 1000)} seconds, so it was stopped. The next one carries on from where it was."
+
+        transaction(call, fn db ->
+          query(db, "insert or replace into problems (destination, at, kind, text) values (?, ?, 'backup', ?)", [
+            quietest,
+            System.os_time(:millisecond),
+            text
+          ])
+        end)
+
+        waited(call, Map.delete(running, quietest), Map.put(made, quietest, {:failed, "Couldn't back up to #{quiet.destination["name"]}: #{text}"}))
+    end
+  end
+
+  defp now, do: System.monotonic_time(:millisecond)
+
+  @doc """
   Backs up to `destination` now, and says what was sent and how long it took, or `:running` when a backup there is
   under way already. A failure is kept as its problem.
   """
@@ -95,7 +165,8 @@ defmodule Backups.Run do
   defp run(call, %{destination: destination} = opened, began) do
     id = destination["id"]
     OneCore.Call.changed(call)
-    beat = spawn_link(fn -> beat(call, id, began) end)
+    told = Process.get(__MODULE__)
+    beat = spawn_link(fn -> beat(call, id, began, told) end)
 
     try do
       {known, last, kept} =
@@ -228,8 +299,9 @@ defmodule Backups.Run do
 
   # Says the backup to `id` that began `at` is still under way, every `@beat`, for as long as the backup's process
   # runs: it's linked to it, so it ends with it, however that ends. It stops saying so once the database has moved
-  # to another server, and the backup finds that out at its next transaction.
-  defp beat(call, id, at) do
+  # to another server, and the backup finds that out at its next transaction. Each time, it tells `told` too, the
+  # process waiting for it, if any (`each/2`).
+  defp beat(call, id, at, told) do
     receive do
     after
       @beat ->
@@ -238,7 +310,10 @@ defmodule Backups.Run do
             transaction(call, &query(&1, "update runs set beat = ? where destination = ? and at = ?", [System.os_time(:millisecond), id, at]))
           end)
 
-        if said != :moved, do: beat(call, id, at)
+        if said != :moved do
+          if told, do: send(told, {__MODULE__, :beat, id})
+          beat(call, id, at, told)
+        end
     end
   end
 
