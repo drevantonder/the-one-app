@@ -1,7 +1,7 @@
 // The computer's launcher: its keys, its search floating over its card, and what the search found.
 import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js"
 import { Button, ScrollView, Empty, Icon, type Keyed, leave, reducedMotion, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
-import { along as alongOf, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
+import { along as alongOf, cell as cellOf, group, INSET, OVERHANG, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
 import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
 import { looks } from "./looks.ts"
@@ -351,8 +351,10 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
             <For each={props.owners} keyed={(owner) => owner.key}>
               {(owner, index) => {
                 const shown = () => index() === at().owner
+                // The strip clips what rolls above and below, from as far above the pages as their badges reach.
+                const overhang = () => OVERHANG * room().scale
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
-                  <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page, pages()[index()]?.length ?? 1), 0, PAGE, room().height)]}>
+                  <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page, pages()[index()]?.length ?? 1), overhang(), PAGE, room().height)]}>
                     <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
                       <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
                     </View>
@@ -364,7 +366,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                     role="region"
                     aria-label={owner().name}
                     inert={!shown() || undefined}
-                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(0, PILLS, room().width * Math.max(1, props.layout.homes(index()).length), room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(0, PILLS - overhang(), room().width * Math.max(1, props.layout.homes(index()).length), room().height + overhang()), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
                     {/* Each other owner's pages are lined up where the shown owner's are, ready for a roll to them. */}
                     <View style={[looks.track, looks.shifted(across() - xOf(index())[0]())]}>

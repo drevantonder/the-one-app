@@ -23,6 +23,9 @@ export const PAGE = 316
 export const ACROSS = 3
 export const INSET = 16
 export const PILLS = 52
+/** How far a badge overhangs its icon's top (`looks.count`: `tokens.grid[1.5]`, 6 points where a computer's root size is
+ * 16), as an iPhone's does, so what clips a computer's pages must reach that far above its first row, at the pages' scale. */
+export const OVERHANG = 6
 /** A grid's gaps, across and down, and the tallest a row is. */
 const COLUMN_GAP = 12
 const ROW_GAP = 16

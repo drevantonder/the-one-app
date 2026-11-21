@@ -1663,6 +1663,11 @@
       }
     },
     "checks": {
+      "A badge's full circle is drawn over its icon's top, not cut by the page's clip": [
+        { "expect": { "shown": "Notes" } },
+        { "expect": { "unclipped": { "role": "button", "name": "Tasks" } } },
+        { "expect": { "unclipped": { "role": "button", "name": "Mail" } } }
+      ],
       "A mouse's wheel turns a page a notch, on to the App Library and back, and never to another owner": [
         {
           "expect": {
