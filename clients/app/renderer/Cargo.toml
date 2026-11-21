@@ -204,7 +204,7 @@ accesskit = "0.25"
 # An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
 # no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.
 [target.'cfg(target_os = "ios")'.dependencies]
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "UIAccessibility", "UIApplication", "UIColor", "UIGeometry", "UIGestureRecognizer", "UIInterface", "UIKeyboardLayoutGuide", "UILayoutGuide", "UIPasteboard", "UIResponder", "UITrackingLayoutGuide", "UITraitCollection", "UIView", "UIViewController", "UIWindow"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "UIAccessibility", "UIApplication", "UIColor", "UIGeometry", "UIGestureRecognizer", "UIInterface", "UIKeyboardLayoutGuide", "UILayoutGuide", "UIPasteboard", "UIResponder", "UIScreen", "UITrackingLayoutGuide", "UITraitCollection", "UIView", "UIViewController", "UIWindow"] }
 # Its windows, fingers, safe area and lifecycle: tao's, whose event loop the app (Tauri's) runs; winit can't run
 # beside it, as it starts only by calling UIApplicationMain itself.
 tao = { version = "0.37", default-features = false }

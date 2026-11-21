@@ -118,6 +118,8 @@ thread_local! {
     /// Whether Choreographer has been asked for the next frame, and when the display showed the last one asked for.
     static ASKED: Cell<bool> = const { Cell::new(false) };
     static FRAMED: Cell<Option<Instant>> = const { Cell::new(None) };
+    /// The display's refresh interval, as it said once asked.
+    static REFRESH: Cell<Option<std::time::Duration>> = const { Cell::new(None) };
 }
 
 /// Choreographer's frame, on the UI thread: when it was shown, on CLOCK_MONOTONIC as `Instant` is, and the windows'
@@ -291,9 +293,15 @@ impl Display {
         }
     }
 
-    /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
-    pub fn refresh(&self) -> Option<std::time::Duration> {
-        None
+    /// The display's refresh interval, as it says (`Display.getRefreshRate`): 90 or 120 Hz on many phones.
+    pub fn refresh(&self) -> std::time::Duration {
+        if let Some(refresh) = REFRESH.get() {
+            return refresh;
+        }
+        let said = java(|env, host| env.call_static_method(<&JClass>::from(host.as_obj()), "refreshRate", "()F", &[])?.f()).filter(|hz| *hz > 0.0);
+        let refresh = said.map(|hz| std::time::Duration::from_secs_f64(1.0 / f64::from(hz)));
+        REFRESH.set(refresh);
+        refresh.unwrap_or(super::FRAME)
     }
 
     /// Whether it says when the display shows each frame: Choreographer does.

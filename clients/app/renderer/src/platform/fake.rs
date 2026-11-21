@@ -411,8 +411,8 @@ impl Display {
         super::Pressure::Nominal
     }
 
-    pub fn refresh(&self) -> Option<std::time::Duration> {
-        Some(self.refresh.get())
+    pub fn refresh(&self) -> std::time::Duration {
+        self.refresh.get()
     }
 
     /// It says when it shows each frame, as its driver ticks it.

@@ -3,7 +3,7 @@
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--reduced-motion] [--panel <corner>] [--measure] [--seed <n>]
-//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--memory <GB>] [--time-zone <IANA name>]
+//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--memory <GB>] [--time-zone <IANA name>] [--hz <n>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -46,6 +46,8 @@
 //! `--memory` gives its page the memory it would have on a device with that many GB, as a phone of 4 has 256 MB
 //! (`renderer::js::memory_limit`), so one that runs away runs out as soon as it would there.
 //! `--time-zone` has the page's clock show times in that time zone, as a device in it does: the clock is `UTC` otherwise.
+//! `--hz` is how often its display refreshes from the start, as a device's says before its first frame (60 unless it
+//! says): a `replay` at another rate plays at that one, then the display's is its own again.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
@@ -235,7 +237,8 @@ fn main() -> anyhow::Result<()> {
     let gpu = std::time::Instant::now();
     let resident = || memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
     let before = resident();
-    let mut windows = Windows::fake(scale, 60.0, clock.clone())?;
+    let hz: f64 = flag("--hz").and_then(|hz| hz.parse().ok()).unwrap_or(60.0);
+    let mut windows = Windows::fake(scale, hz, clock.clone())?;
     windows.prepared();
     // `--dark` is the system's, as a phone's or a computer's Dark mode is, which the app follows, so it can change.
     windows.appearance(if dark { Appearance::Dark } else { Appearance::Light });
@@ -932,7 +935,10 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
     };
     let length = samples.last().map_or(0.0, |(t, _)| *t);
-    windows.set_refresh(hz);
+    let own = windows.refresh();
+    if (own.as_secs_f64() * hz - 1.0).abs() > 1e-6 {
+        windows.set_refresh(hz);
+    }
     // With `frame_ms`, each frame takes that long to draw, as on a device others load, which presses it as a window's
     // late frames do.
     windows.set_frame_ms(request.f64("frame_ms").unwrap_or(0.0));
@@ -1060,7 +1066,9 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             break;
         }
     }
-    windows.set_refresh(60.0);
+    if windows.refresh() != own {
+        windows.set_refresh(1.0 / own.as_secs_f64());
+    }
     windows.set_frame_ms(0.0);
     windows.set_link(0, None);
     // What's tracked was there in some frame, or its selector matches nothing, which isn't a node that's gone.

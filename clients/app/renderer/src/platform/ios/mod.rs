@@ -33,7 +33,7 @@ use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
     UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIApplicationDidBecomeActiveNotification, UIApplicationState, UIPasteboard,
     UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
-    UIColor, UIGestureRecognizer, UIGestureRecognizerState, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow, UIWindowLevelNormal,
+    UIColor, UIGestureRecognizer, UIGestureRecognizerState, UIScreen, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow, UIWindowLevelNormal,
 };
 use tao::event::{Event, TouchPhase, WindowEvent};
 use tao::event_loop::EventLoopWindowTarget;
@@ -515,9 +515,15 @@ impl Display {
         crate::platform::pressure::apple()
     }
 
-    /// The display's refresh interval, as its link last said.
-    pub fn refresh(&self) -> Option<Duration> {
-        REFRESH.get()
+    /// The display's refresh interval, as its link last said, or before it's first ticked, the screen's fastest, which
+    /// the link asks for (`request_frame`): a ProMotion iPhone's 120 Hz.
+    pub fn refresh(&self) -> Duration {
+        REFRESH.get().unwrap_or_else(|| {
+            let fastest = MainThreadMarker::new().map_or(60, |main| UIScreen::mainScreen(main).maximumFramesPerSecond()).max(1);
+            let refresh = Duration::from_secs_f64(1.0 / fastest as f64);
+            REFRESH.set(Some(refresh));
+            refresh
+        })
     }
 
     /// When the display showed the frame asked for, once it has.

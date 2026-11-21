@@ -252,7 +252,7 @@ impl Windows {
     /// as a host's do. What each page sent is run before each turn (`wait`), and what a turn sent one (input that
     /// waited for it) is run and drawn at once, on a turn of its own, as its post wakes a host's loop (`posted`).
     pub fn run(&mut self, ms: f64) {
-        let refresh = self.display.refresh().unwrap_or(FRAME).as_secs_f64() * 1000.0;
+        let refresh = self.display.refresh().as_secs_f64() * 1000.0;
         let started = fake::time();
         let mut late = 0;
         loop {

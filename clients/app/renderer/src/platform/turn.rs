@@ -46,9 +46,10 @@ impl Windows {
         self.display.paced() && self.ticked.is_some_and(|at| since(at) < self.refresh() * 5 / 4)
     }
 
-    /// The display's refresh interval, as it says, or where it says nothing (yet), a 60 Hz display's.
-    pub(super) fn refresh(&self) -> std::time::Duration {
-        self.display.refresh().unwrap_or(FRAME)
+    /// The display's refresh interval, as it says: every platform's knows it before its first frame, so the loop's own
+    /// clock stands in at the display's pace from the first motion after it starts, never a 60 Hz display's on a 120.
+    pub fn refresh(&self) -> std::time::Duration {
+        self.display.refresh()
     }
 
     /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
@@ -484,7 +485,7 @@ impl Windows {
             let frame = frame_timing::Frame { at: now(), paint: painted - began, draw: painted.elapsed(), acquire, submit, present, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), passes, applied: Default::default(), turned: Default::default() };
             let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
-                self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));
+                self.deadlines.frame(frame_timing::Timing::long(interval, refresh));
             }
             if let Some(frames) = frames {
                 (window.on_event)(Event::Frames(frames));

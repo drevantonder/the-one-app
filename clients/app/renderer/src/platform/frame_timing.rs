@@ -28,7 +28,7 @@ pub struct Frames {
     /// the interval after its first frame).
     pub long: u32,
     pub long_at: Vec<u32>,
-    /// The display's interval: what it says, or else the median of these frames'.
+    /// The display's interval, as it says.
     pub refresh: Duration,
     /// The 95th percentile of each part of a frame (`Frame`).
     pub paint: Duration,
@@ -102,7 +102,7 @@ impl Timing {
 
     /// `frame` was drawn: `moving` says whether something on it still moves. → how long after the frame before it was,
     /// while something moves, and what its frames did, once it's still after moving.
-    pub(crate) fn drawn(&mut self, mut frame: Frame, moving: bool, refresh: Option<Duration>) -> (Option<Duration>, Option<Frames>) {
+    pub(crate) fn drawn(&mut self, mut frame: Frame, moving: bool, refresh: Duration) -> (Option<Duration>, Option<Frames>) {
         frame.applied = std::mem::take(&mut self.applied);
         frame.turned = std::mem::take(&mut self.turned);
         let interval = self.frames.last().map(|last| frame.at.duration_since(last.at));
@@ -123,7 +123,7 @@ impl Timing {
     }
 
     /// What its frames did, and it's ready for the next: none, under three frames.
-    pub(crate) fn end(&mut self, refresh: Option<Duration>) -> Option<Frames> {
+    pub(crate) fn end(&mut self, refresh: Duration) -> Option<Frames> {
         let kind = self.kind.take().unwrap_or("motion");
         let frames = std::mem::take(&mut self.frames);
         if frames.len() < 3 {
@@ -134,7 +134,6 @@ impl Timing {
             all.sort();
             all[((all.len() - 1) as f32 * quantile).round() as usize]
         };
-        let refresh = refresh.unwrap_or_else(|| at(between.clone(), 0.5));
         let long_at: Vec<u32> = (0..between.len() as u32).filter(|index| Timing::long(between[*index as usize], refresh)).collect();
         let gpu: Vec<Duration> = frames.iter().filter_map(|frame| frame.gpu).collect();
         let blur: Vec<Duration> = frames.iter().filter_map(|frame| frame.blur).collect();

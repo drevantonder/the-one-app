@@ -159,7 +159,7 @@ impl NativeWindow {
 struct Frames {
     shown: Mutex<Option<std::time::Instant>>,
     /// The display's refresh interval, as its link last said, or before it's ticked, its nominal one.
-    refresh: Mutex<Option<std::time::Duration>>,
+    refresh: Mutex<std::time::Duration>,
     ping: calloop::ping::Ping,
 }
 
@@ -184,7 +184,7 @@ impl DisplayLink {
             let output = unsafe { output.as_ref() };
             if output.videoRefreshPeriod > 0 && output.videoTimeScale > 0 {
                 let refresh = std::time::Duration::from_secs_f64(output.videoRefreshPeriod as f64 / f64::from(output.videoTimeScale));
-                *frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(refresh);
+                *frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = refresh;
             }
             frames.ping.ping();
             kCVReturnSuccess
@@ -201,7 +201,7 @@ impl DisplayLink {
         // display's 120 Hz, not 60.
         let nominal = unsafe { link.as_ref() }.nominal_output_video_refresh_period();
         if nominal.timeValue > 0 && nominal.timeScale > 0 {
-            *frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Duration::from_secs_f64(nominal.timeValue as f64 / f64::from(nominal.timeScale)));
+            *frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = std::time::Duration::from_secs_f64(nominal.timeValue as f64 / f64::from(nominal.timeScale));
         }
         Some(DisplayLink(link))
     }
@@ -219,7 +219,7 @@ impl Display {
         let (ping, source) = calloop::ping::make_ping()?;
         // The loop's turn reads what's queued (`events`).
         handle.insert_source(source, |_, _, _| {}).map_err(|error| anyhow::anyhow!("no queue for AppKit's events: {error}"))?;
-        let frames = Arc::new(Frames { shown: Mutex::new(None), refresh: Mutex::new(None), ping: ping.clone() });
+        let frames = Arc::new(Frames { shown: Mutex::new(None), refresh: Mutex::new(crate::platform::FRAME), ping: ping.clone() });
         let link = DisplayLink::new(&frames);
         Ok(Display { queue: Queue { inputs: Arc::default(), ping }, apps: Default::default(), link, frames })
     }
@@ -585,7 +585,7 @@ impl Display {
     }
 
     /// The display's refresh interval, as its link says.
-    pub fn refresh(&self) -> Option<std::time::Duration> {
+    pub fn refresh(&self) -> std::time::Duration {
         *self.frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
     }
 

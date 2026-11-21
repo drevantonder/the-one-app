@@ -104,6 +104,8 @@ pub struct Display {
     /// The root window, whose next frame Present is asked to say it showed, where the X server has Present (all do
     /// since 2013, Xwayland and Xvfb too); whether it's been asked, and when the last frame asked for was shown.
     present: Option<xproto::Window>,
+    /// The display's refresh interval, as RandR says its screen's rate.
+    refresh: std::time::Duration,
     asked: Cell<bool>,
     framed: Cell<Option<std::time::Instant>>,
     /// The desktop went light or dark since its windows were last told (`appearance_changes`).
@@ -273,6 +275,11 @@ impl Display {
             xcb.present_select_input(id, root, present::EventMask::COMPLETE_NOTIFY).ok()?.check().ok()?;
             Some(root)
         });
+        let rate = {
+            use x11rb::protocol::randr::ConnectionExt as _;
+            xcb.randr_get_screen_info(root).ok().and_then(|cookie| cookie.reply().ok()).map(|info| info.rate).filter(|rate| *rate > 0)
+        };
+        let refresh = rate.map_or(crate::platform::FRAME, |hz| std::time::Duration::from_secs_f64(1.0 / f64::from(hz)));
         let xcb = Rc::new(xcb);
         let xim = X11rbClient::init(Rc::clone(&xcb), screen, None).ok().map(|client| (client, XimHandler::new()));
         handle
@@ -313,6 +320,7 @@ impl Display {
             xim: RefCell::new(xim),
             ime: RefCell::default(),
             present,
+            refresh,
             asked: Cell::new(false),
             framed: Cell::new(None),
             appearance,
@@ -757,9 +765,8 @@ impl Display {
         crate::platform::Pressure::Nominal
     }
 
-    /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
-    pub fn refresh(&self) -> Option<std::time::Duration> {
-        None
+    pub fn refresh(&self) -> std::time::Duration {
+        self.refresh
     }
 
     /// Whether it says when it shows each frame (Present), so frames come as the display shows them.

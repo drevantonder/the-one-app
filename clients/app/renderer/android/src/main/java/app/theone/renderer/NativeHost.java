@@ -253,6 +253,11 @@ public final class NativeHost {
      * (Android 10's), light or moderate fair, severe serious and worse critical, and Battery Saver serious, as Android
      * has apps do less then.
      */
+    /** The display's refresh rate, in frames a second, or 0 before there's an activity to ask. */
+    static float refreshRate() {
+        return activity == null ? 0f : activity.getWindowManager().getDefaultDisplay().getRefreshRate();
+    }
+
     static int pressure() {
         android.os.PowerManager power = activity == null ? null : activity.getSystemService(android.os.PowerManager.class);
         if (power == null) return 0;

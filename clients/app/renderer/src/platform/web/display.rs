@@ -16,6 +16,11 @@ thread_local! {
     /// A frame asked for (`request_frame`), and when the browser last showed one.
     static ASKED: Cell<bool> = const { Cell::new(false) };
     static FRAMED: Cell<Option<web_time::Instant>> = const { Cell::new(None) };
+    /// The display's refresh interval, as the browser's frames show it: the shortest between two in a row (each frame's
+    /// `requestAnimationFrame` time is its display's, so they're a refresh or more apart), with the last one's time while
+    /// they come in a row. A browser says nothing else of it.
+    static REFRESH: Cell<Option<std::time::Duration>> = const { Cell::new(None) };
+    static LAST: Cell<Option<f64>> = const { Cell::new(None) };
 }
 
 thread_local! {
@@ -146,9 +151,8 @@ impl Display {
         PRESSURE.get()
     }
 
-    /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
-    pub fn refresh(&self) -> Option<std::time::Duration> {
-        None
+    pub fn refresh(&self) -> std::time::Duration {
+        REFRESH.get().unwrap_or(crate::platform::FRAME)
     }
 
     /// `requestAnimationFrame` says when each frame is shown.
@@ -157,8 +161,15 @@ impl Display {
     }
 
     pub fn request_frame(&self, wanted: bool) {
+        if !wanted {
+            LAST.set(None);
+        }
         if wanted && !ASKED.replace(true) {
-            let framed = Closure::once_into_js(|| {
+            let framed = Closure::once_into_js(|time: f64| {
+                if let Some(last) = LAST.replace(Some(time)).filter(|last| time - last > 1.0) {
+                    let between = std::time::Duration::from_secs_f64((time - last) / 1000.0);
+                    REFRESH.set(Some(REFRESH.get().map_or(between, |refresh| refresh.min(between))));
+                }
                 ASKED.set(false);
                 FRAMED.set(Some(web_time::Instant::now()));
                 soon();

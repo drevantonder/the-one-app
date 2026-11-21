@@ -44,7 +44,7 @@ async function play(built, scene, name, motion, hz, folder) {
   const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
   const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.shows ? { shows: { ...selector(motion.shows), includeHidden: true } } : {}), ...(motion.holds ? { holds: { ...selector(motion.holds), includeHidden: true } } : {}), ...(motion.apart ? { apart: { ...selector(motion.apart), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}), link: link(hz) }
   const started = performance.now()
-  const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
+  const ran = await run(at, folder, { ...scene, reducedMotion: motion.reducedMotion, hz }, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
   if (ran.failed || !answer?.result) {
     process.exitCode = 1

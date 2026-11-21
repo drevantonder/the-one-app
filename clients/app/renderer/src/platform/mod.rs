@@ -452,7 +452,8 @@ pub struct Windows {
     background: bool,
 }
 
-/// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
+/// A 60 Hz display's refresh: the fake platform's own thread's (`native`), and where a system has no display to ask
+/// (a Mac's with none attached, a browser before it's shown two frames in a row).
 const FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 /// Now, as the windows' loop tells the time a frame or an input came: the system's, or on the fake platform its

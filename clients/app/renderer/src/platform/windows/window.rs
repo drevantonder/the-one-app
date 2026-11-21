@@ -49,6 +49,8 @@ pub struct Display {
     queue: Queue,
     cursors: RefCell<HashMap<Cursor, HCURSOR>>,
     frames: std::sync::Arc<Frames>,
+    /// The display's refresh interval, as the compositor says (`DwmGetCompositionTimingInfo`).
+    refresh: std::time::Duration,
     /// Windows' visual layer, which a panel's glass and page are in (`glass`), on this thread's dispatcher queue.
     compositor: Compositor,
     _queue: windows::System::DispatcherQueueController,
@@ -200,6 +202,10 @@ impl Display {
         unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
         register_window_class();
         let frames = std::sync::Arc::new(Frames::default());
+        // The compositor's refresh, which on Windows 8.1 and later it's asked for with no window.
+        let mut timing = windows::Win32::Graphics::Dwm::DWM_TIMING_INFO { cbSize: size_of::<windows::Win32::Graphics::Dwm::DWM_TIMING_INFO>() as u32, ..Default::default() };
+        let said = unsafe { windows::Win32::Graphics::Dwm::DwmGetCompositionTimingInfo(HWND::default(), &mut timing) }.is_ok() && timing.rateRefresh.uiNumerator > 0;
+        let refresh = if said { std::time::Duration::from_secs_f64(f64::from(timing.rateRefresh.uiDenominator) / f64::from(timing.rateRefresh.uiNumerator)) } else { crate::platform::FRAME };
         let (waiting, thread) = (frames.clone(), unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
         std::thread::Builder::new().name("frames".into()).spawn(move || {
             // It wakes the windows' thread for each frame, so it runs as that does.
@@ -218,11 +224,11 @@ impl Display {
                 }
                 *wanted = false;
                 drop(wanted);
-                // Where there's no compositor clock (before Windows 11, or a locked screen's, which says so at once), a
-                // 60 Hz display's frame stands in, on a high-resolution timer, as Rust's `sleep` is on Windows.
+                // Where there's no compositor clock (before Windows 11, or a locked screen's, which says so at once), the
+                // display's refresh stands in, on a high-resolution timer, as Rust's `sleep` is on Windows.
                 const WAIT_OBJECT_0: u32 = 0;
                 if wait.is_none_or(|wait| unsafe { wait(0, std::ptr::null(), 100) } != WAIT_OBJECT_0) {
-                    std::thread::sleep(std::time::Duration::from_micros(16_667));
+                    std::thread::sleep(refresh);
                 }
                 *waiting.shown.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
                 let _ = unsafe { PostThreadMessageW(thread, WM_NULL, WPARAM(0), LPARAM(0)) };
@@ -232,7 +238,7 @@ impl Display {
         let options = DispatcherQueueOptions { dwSize: size_of::<DispatcherQueueOptions>() as u32, threadType: DQTYPE_THREAD_CURRENT, apartmentType: DQTAT_COM_NONE };
         let queue = unsafe { CreateDispatcherQueueController(options) }.context("CreateDispatcherQueueController failed")?;
         let compositor = Compositor::new().context("Windows' compositor didn't start")?;
-        Ok(Display { queue: Queue::default(), cursors: RefCell::default(), frames, compositor, _queue: queue })
+        Ok(Display { queue: Queue::default(), cursors: RefCell::default(), frames, refresh, compositor, _queue: queue })
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
@@ -461,9 +467,8 @@ impl Display {
         if saving { crate::platform::Pressure::Serious } else { crate::platform::Pressure::Nominal }
     }
 
-    /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
-    pub fn refresh(&self) -> Option<std::time::Duration> {
-        None
+    pub fn refresh(&self) -> std::time::Duration {
+        self.refresh
     }
 
     /// Whether it says when the compositor shows each frame: it does.
