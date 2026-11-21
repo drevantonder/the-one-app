@@ -811,10 +811,13 @@ pub fn video_gone(id: f64) {
 
 /// Opens the page at `page` (where what it names by an address is from), at `link` in it, on `canvas`, `scale` device pixels to a CSS
 /// pixel, drawn with the design tokens and styles in `tables` (the UI library's tokens
-/// and styles, and its app's styles), in `theme` (`dark`, `light`, or as the device is), as the frame's JS (`calls`)
-/// is told what it says of itself. The page's module is imported after, and says it ran (`started`).
+/// and styles, and its app's styles), in `theme` (`dark`, `light`, or as the device is), for a finger where `touch`,
+/// at the text size its person chose where it's a phone's or a tablet's (`text_size`, as their app has it,
+/// `Screen::text_size`), as the frame's JS (`calls`) is told what it says of itself. The page's module is imported
+/// after, and says it ran (`started`).
 #[wasm_bindgen]
-pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, link: String, tables: Vec<String>, theme: Option<String>, touch: bool, calls: JsValue) -> Result<(), JsError> {
+#[allow(clippy::too_many_arguments)]
+pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, link: String, tables: Vec<String>, theme: Option<String>, touch: bool, text_size: Option<f32>, calls: JsValue) -> Result<(), JsError> {
     console_log();
     SCALE.set(scale);
     LINK.set(link);
@@ -831,6 +834,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
     // Another app's page, in a frame of its own of the frame's, which its client says where it is (renderer.js).
     screen.make_frame = Some(Box::new(|node, src, subject| call_with("frame", &[JsValue::from(node as f64), src.into(), subject.map_or(JsValue::NULL, JsValue::from)])));
     screen.touch = touch;
+    screen.text_size = text_size;
     screen.theme = match theme.as_deref() {
         Some("dark") => Some(Appearance::Dark),
         Some("light") => Some(Appearance::Light),
@@ -1097,7 +1101,7 @@ pub fn framed(node: f64, src: String, page: String, styles: String) -> Result<()
             screen.page = tokens;
             screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src, Some(node))));
             windows.with(WINDOW, |parent| {
-                screen.touch = parent.touch;
+                (screen.touch, screen.text_size) = (parent.touch, parent.text_size);
                 parent.framed(node, &src, screen)
             });
         })

@@ -84,7 +84,19 @@
     const spoken = semantics(reading, (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
-    await renderer.open(canvas, devicePixelRatio, base.href, decodeURIComponent(page.hash.slice(1)), tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
+    // A finger points at it on a phone or a tablet, whose own app draws at the text size its person chose: Safari says
+    // it as the body's (`-apple-system-body`, Dynamic Type's), and any other browser by its text size, as 17 to its 16.
+    const finger = matchMedia("(pointer: coarse)").matches
+    const textSize = () => {
+      const body = document.createElement("span")
+      body.style.font = "-apple-system-body"
+      if (!body.style.font) return (17 * parseFloat(getComputedStyle(document.documentElement).fontSize)) / 16
+      document.body.append(body)
+      const size = parseFloat(getComputedStyle(body).fontSize)
+      body.remove()
+      return size
+    }
+    await renderer.open(canvas, devicePixelRatio, base.href, decodeURIComponent(page.hash.slice(1)), tables, page.searchParams.get("theme"), finger, finger ? textSize() : undefined, {
       post: named ? alone(renderer) : (/** @type {object} */ message) => parent.postMessage(message, "*"),
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
       textInput: (/** @type {[string, unknown][]} */ calls) => calls.forEach(([method, args]) => typing.call(method, args)),
