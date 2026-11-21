@@ -719,7 +719,7 @@ function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unclipped, centred, widest, contrast, textMenu, handles, magnifier, dimmed, js } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, unclipped, bleeds, aligned, centred, widest, contrast, textMenu, handles, magnifier, dimmed, js } = step.expect
       // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
@@ -776,6 +776,26 @@ function requests(steps, folder) {
             return cut.length ? cut.map((node) => `"${node.name}" is cut short`).join(", ") : undefined
           },
         })
+      // No line of a text ends inside a run of it a pattern (a regular expression's source) finds: a date or a short
+      // phrase is drawn whole on one line, never broken inside, as a name is kept whole by the no-break spaces in it.
+      if (unbroken)
+        out.push({
+          request: { op: "query", text: "" },
+          judge: (answer) => {
+            const pattern = new RegExp(unbroken.replace(/\u00a0/g, " ").replace(/ /g, "[ \u00a0]"), "g")
+            const broken = []
+            for (const node of answer?.result?.nodes ?? []) {
+              if (!node.lines || node.lines.length < 2 || !(node.opacity > 0)) continue
+              const text = node.lines.join(" ")
+              // The spaces the lines were joined by, where a line ended.
+              const joins = []
+              let at = -1
+              for (const line of node.lines.slice(0, -1)) joins.push((at += line.length + 1))
+              for (const found of text.matchAll(pattern)) if (joins.some((join) => join >= found.index && join < found.index + found[0].length)) broken.push(`"${found[0]}" is broken across lines: ${node.lines.map((line) => `"${line}"`).join(", ")}`)
+            }
+            return broken.length ? [...new Set(broken)].join(", ") : undefined
+          },
+        })
       // Nothing of what's named or inside it clipped away, as a badge that overhangs its icon isn't cut by what's around.
       if (unclipped)
         out.push({
@@ -785,6 +805,34 @@ function requests(steps, folder) {
             if (!nodes.length) return `${named(unclipped)} isn't drawn`
             const clipped = nodes.filter((node) => node.opacity > 0 && node.seen < 0.99)
             return clipped.length ? clipped.map((node) => `${node.name ?? node.kind} (${node.rect ? rect(node.rect) : "nowhere"}) is clipped, ${Math.round(node.seen * 100)}% of it is in the window`).join(", ") : undefined
+          },
+        })
+      // What's named scrolls to the window's edges, both of them, as a shelf under the App Store's column on a Mac does: its box
+      // isn't cut short at a column's margin with room beyond it.
+      if (bleeds) {
+        let width
+        out.push({ request: { op: "window" }, judge: (answer) => void (width = answer?.result?.width) })
+        out.push({
+          request: { op: "query", ...selector(bleeds) },
+          judge: (answer) => {
+            const nodes = (answer?.result?.nodes ?? []).filter((node) => node.rect)
+            if (!nodes.length) return `${named(bleeds)} isn't drawn`
+            const short = nodes.filter((node) => node.rect.x > 0.5 || node.rect.x + node.rect.width < width - 0.5)
+            return short.length ? short.map((node) => `${named(bleeds)} is drawn from ${Math.round(node.rect.x)} to ${Math.round(node.rect.x + node.rect.width)} pt, not to the window's edges, 0 to ${width}`).join(", ") : undefined
+          },
+        })
+      }
+      // Every node named is drawn at the same place along its row: the same distance from the window's start, or its end,
+      // as controls at the end of rows are in a column.
+      if (aligned)
+        out.push({
+          request: { op: "query", ...selector(aligned.of) },
+          judge: (answer) => {
+            const nodes = (answer?.result?.nodes ?? []).filter((node) => node.rect && node.opacity > 0)
+            if (nodes.length < 2) return nodes.length ? undefined : `${named(aligned.of)} isn't drawn`
+            const place = (node) => (aligned.at === "start" ? node.rect.x : node.rect.x + node.rect.width)
+            const places = nodes.map(place)
+            return Math.max(...places) - Math.min(...places) > 1 && `${named(aligned.of)} is drawn at ${places.map((at) => Math.round(at)).join(", ")} pt, not at one place along its row`
           },
         })
       // What's named is in the middle of the window across, within a point, as a lone column or an empty page's words are.

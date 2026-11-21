@@ -4,7 +4,7 @@
 // Library does for an app with no screen of its own.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import type { Element } from "solid-js"
-import { Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, negative, open, Pressable, Problem, Row, Screen, ScrollView, Search, Section, Skeleton, Spinner, styles, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, open, Pressable, Problem, Row, Screen, Search, Section, Shelf, Skeleton, Spinner, styles, Text, toast, tokens, View } from "ui"
 import { sizes } from "./sizes.ts"
 
 const look = styles({
@@ -20,11 +20,11 @@ const look = styles({
   shelfHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", minHeight: tokens.length.control },
   heading: { fontWeight: tokens.weight.medium },
   more: { font: tokens.type.caption },
-  // A row that scrolls sideways leaves room round what's in it for the focus ring, which it would clip.
-  shelfApps: { flexDirection: "row", gap: tokens.grid[3], padding: tokens.grid[1], margin: negative(tokens.grid[1]) },
-  shelves: { display: "grid", gridTemplateColumns: { fill: sizes.shelf }, rowGap: tokens.grid[7], columnGap: tokens.grid[10] },
+  shelfApps: { gap: tokens.grid[3] },
+  // One shelf under another, each the screen's whole column, which a shelf runs out of to the window's edges.
+  shelves: { gap: tokens.grid[7] },
   grid: { display: "grid", gridTemplateColumns: { fill: tokens.grid[20] }, rowGap: tokens.grid[6], columnGap: tokens.grid[3] },
-  chips: { flexDirection: "row", gap: tokens.grid[2], padding: tokens.grid[1], margin: negative(tokens.grid[1]) },
+  chips: { gap: tokens.grid[2] },
   /// A category to choose, a pill: the one chosen is dark.
   chip: { flexShrink: 0, height: tokens.length.control, paddingInline: tokens.grid[4], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.label },
   chosen: { backgroundColor: tokens.colour.label, color: tokens.colour.background },
@@ -197,7 +197,7 @@ function Tile(props: { listed: { title?: string; name?: string; icon: string | n
 }
 
 /// A category's apps in one row, sideways, with See All once more are there than a phone shows.
-function Shelf(props: { category: string; apps: Listed[] }) {
+function CategoryShelf(props: { category: string; apps: Listed[] }) {
   return (
     <View style={look.shelf}>
       <View style={look.shelfHeading}>
@@ -208,11 +208,11 @@ function Shelf(props: { category: string; apps: Listed[] }) {
           </Pressable>
         </Show>
       </View>
-      <ScrollView style={look.shelfApps}>
+      <Shelf aria-label={props.category} style={look.shelfApps}>
         <For each={props.apps} keyed={key}>
           {(listed) => <Tile listed={listed()} onPress={() => to({ category: view().category, app: key(listed()) })} />}
         </For>
-      </ScrollView>
+      </Shelf>
     </View>
   )
 }
@@ -241,17 +241,17 @@ function Marketplace(props: { market: Market }) {
     <>
       <Search placeholder="Search" aria-label="Search apps" value={query()} onChangeText={setQuery} />
       <Show when={!query()}>
-        <ScrollView role="toolbar" aria-label="Categories" style={look.chips}>
+        <Shelf role="toolbar" aria-label="Categories" style={look.chips}>
           <Chip chosen={!chosen()} onPress={() => choose()}>All</Chip>
           <For each={categories()} keyed={({ category }) => category}>
             {(shelf) => <Chip chosen={chosen() === shelf().category} onPress={() => choose(shelf().category)}>{shelf().category}</Chip>}
           </For>
-        </ScrollView>
+        </Shelf>
       </Show>
       <Show
         when={query()}
         fallback={
-          <Show when={chosen()} fallback={<View style={look.shelves}><For each={categories()} keyed={({ category }) => category}>{(shelf) => <Shelf category={shelf().category} apps={shelf().apps} />}</For></View>}>
+          <Show when={chosen()} fallback={<View style={look.shelves}><For each={categories()} keyed={({ category }) => category}>{(shelf) => <CategoryShelf category={shelf().category} apps={shelf().apps} />}</For></View>}>
             <Grid apps={props.market.apps.filter((listed) => listed.category === chosen())} />
           </Show>
         }

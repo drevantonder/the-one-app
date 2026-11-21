@@ -273,6 +273,8 @@ export declare function render(code: () => Element): () => void
 
 export declare function Screen(props: { heading?: Element; action?: Element; back?: boolean; onBack?: () => void; largeTitle?: boolean; children?: Element }): Element
 export declare function Section(props: { heading?: Element; "aria-label"?: string; children?: Element }): Element
+/** A row that scrolls sideways from the window's edge to its edge, its first item where the screen's column starts (`style` may say its `gap`). */
+export declare function Shelf(props: { role?: "group" | "toolbar" | "list"; "aria-label"?: string; style?: Styles<"gap">; children?: Element }): Element
 export declare function Split(props: { open?: boolean; onClose?: () => void; detail?: Element; children?: Element }): Element
 /** Where a window's Back and Forward go (`History`), which its screens draw in their bar. */
 export declare function History(props: { value: { back?: () => void; forward?: () => void } | null; children: Element }): Element
@@ -486,7 +488,10 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`), and every text drawn in the window
  * at least `margins` points in from its sides, as a page's margins keep it, and what's drawn as tall as it should be (`tall`:
  * a node of that name, `height` points, within one), as a type size is; every text in sight drawn whole, none cut
- * short with "…", or the one named (`whole`); nothing of what's named or inside it clipped away (`unclipped`), as a badge
+ * short with "…", or the one named (`whole`); no line of a text ending inside a run a pattern finds, as a date is kept
+ * on one line (`unbroken`: a regular expression's source); what's named drawn to both of the window's edges (`bleeds`), as a
+ * shelf is; every node named the same distance along its row from the window's end, or its start with `at: "start"`
+ * (`aligned`: `{ of, at? }`), as controls at the end of rows form a column; nothing of what's named or inside it clipped away (`unclipped`), as a badge
  * overhanging its icon is drawn whole; what's named in the middle of the window across, within a point
  * (`centred`); nothing named so wider than `most` points (`widest`: `{ of, most }`); what's named standing off what's
  * around it by at least `least`:1, WCAG's contrast between the colour just outside its start and its first 4 points in,
@@ -498,7 +503,7 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * grows past it, whether `settle` says it's `settled`, and where something is drawn (`at`: `{ of, x, y, width }`, each
  * given in points, within one), so what comes in above it is seen not to push it, and a bar's glass is seen to reach the
  * window's edges. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unclipped?: Tap; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unbroken?: string; unclipped?: Tap; bleeds?: Tap; aligned?: { of: Tap; at?: "start" | "end" }; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input

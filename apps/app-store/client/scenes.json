@@ -277,6 +277,26 @@
           }
         ]
       }
+    },
+    "checks": {
+      "Its chips and its first shelf scroll to the window's edges, not to the column's": [
+        {
+          "expect": {
+            "bleeds": {
+              "role": "toolbar",
+              "name": "Categories"
+            }
+          }
+        },
+        {
+          "expect": {
+            "bleeds": {
+              "role": "group",
+              "name": "Productivity"
+            }
+          }
+        }
+      ]
     }
   },
   "Marketplace in a wide window": {
@@ -291,6 +311,24 @@
           "expect": {
             "centred": {
               "role": "searchbox"
+            }
+          }
+        }
+      ],
+      "Its chips and its first shelf scroll to the window's edges, not to the column's": [
+        {
+          "expect": {
+            "bleeds": {
+              "role": "toolbar",
+              "name": "Categories"
+            }
+          }
+        },
+        {
+          "expect": {
+            "bleeds": {
+              "role": "group",
+              "name": "Productivity"
             }
           }
         }
@@ -1648,6 +1686,24 @@
             "text": "Vault"
           }
         }
+      ],
+      "Its chips and its first shelf scroll to the window's edges, not to the column's": [
+        {
+          "expect": {
+            "bleeds": {
+              "role": "toolbar",
+              "name": "Categories"
+            }
+          }
+        },
+        {
+          "expect": {
+            "bleeds": {
+              "role": "group",
+              "name": "Connectors"
+            }
+          }
+        }
       ]
     }
   },
@@ -1658,7 +1714,8 @@
         "role": "button",
         "name": "Productivity"
       }
-    ]
+    ],
+    "checks": {}
   },
   "A category chosen": {
     "like": "Marketplace",

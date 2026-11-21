@@ -143,6 +143,13 @@ impl Screen {
                     if let Some(kept) = self.layout.kept.get(&id) {
                         if let Some((_, paragraph)) = &self.layout.leaf(kept.node).paragraph {
                             node["cut"] = json!(paragraph.cut);
+                            // Where it wrapped: each line's words, where the node's name is its text, as a check finds a date broken in two.
+                            if let Some(name) = node["name"].as_str() {
+                                let lines: Vec<&str> = paragraph.lines.iter().filter_map(|line| name.get(line.start..line.end).map(str::trim_end)).collect();
+                                if lines.len() == paragraph.lines.len() {
+                                    node["lines"] = json!(lines);
+                                }
+                            }
                         }
                     }
                 }

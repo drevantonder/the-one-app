@@ -4,14 +4,14 @@
 import { children, createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, ScrollView, Text, View } from "#primitives"
-import { back as goBack, covers, go, keydown, step, titled, touch, viewport } from "#bridge"
+import { back as goBack, covers, go, keydown, safeArea, step, titled, touch, viewport } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { ActionBar, type Action } from "./actions.tsx"
 import { ListKeys, ListStyle } from "./list.tsx"
 import { Choose, Collect } from "./collect.ts"
-import { negative, styles } from "../styles.ts"
-import { tokens } from "../tokens.ts"
+import { negative, styles, type Styles } from "../styles.ts"
+import { pixels, tokens } from "../tokens.ts"
 
 const look = styles({
   screen: { position: "relative", flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0 },
@@ -75,6 +75,12 @@ const look = styles({
   // Settings' do, so a note, a field or a button is in line with the lists, and a wide window doesn't leave it at
   // one side.
   column: { flexGrow: 1, gap: tokens.length.gutter, width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
+  // A row that scrolls sideways runs out to the window's edges, as the App Store's shelves do on a Mac and an iPad, so
+  // what's cut by an edge is cut by the window's, never at the column's margin with room beyond it. It starts where
+  // the column does (`side` of padding, as far as the margin pulls it out) and keeps room above and below for
+  // the focus ring its children draw, which it would clip.
+  shelf: { flexDirection: "row", paddingTop: tokens.grid[1], paddingBottom: tokens.grid[1], marginTop: negative(tokens.grid[1]), marginBottom: negative(tokens.grid[1]) },
+  bleed: (pull: number, side: number) => ({ marginStart: pull, marginEnd: pull, paddingStart: side, paddingEnd: side }),
   split: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0, position: "relative" },
   beside: { flexDirection: "row" },
   pane: { minHeight: 0, minWidth: 0, overflow: "hidden", backgroundColor: tokens.colour.background },
@@ -309,6 +315,22 @@ export function Section(props: { heading?: JSX.Element; "aria-label"?: string; c
       </Show>
       {props.children}
     </View>
+  )
+}
+
+/// `<Shelf aria-label="Categories" style={look.chips}>{chips}</Shelf>`: a row that scrolls sideways, from the window's
+/// edge to its edge, as the App Store's shelves do on a Mac and an iPad, its first item where the screen's column
+/// starts. `style` may say its `gap`. In a screen's column, never a `ScrollView` of your own, which ends at the column
+/// with a hard cut and room to spare beyond it. `role` says what it is: a `"toolbar"` of choices, a `"group"` (the
+/// default) of things under its `aria-label`.
+export function Shelf(props: { role?: "group" | "toolbar" | "list"; "aria-label"?: string; style?: Styles<"gap">; children?: JSX.Element }) {
+  const room = useContext(Room)
+  // Where the column starts: the gutter, or where its readable width leaves the room's middle.
+  const side = () => Math.max(pixels(tokens.length.gutter), (room() - safeArea().left - safeArea().right - pixels(tokens.length.readable)) / 2)
+  return (
+    <ScrollView role={props.role ?? "group"} aria-label={props["aria-label"]} style={[look.shelf, look.bleed(-side(), side()), props.style]}>
+      {props.children}
+    </ScrollView>
   )
 }
 
