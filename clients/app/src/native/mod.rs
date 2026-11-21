@@ -307,10 +307,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             screen.theme = theme(chosen.as_deref());
             // A phone's is under a finger from the start, so it's drawn with its tokens' touch values from its
             // first frame (pointer: coarse), as the page is told (`deviceCapabilities`).
-            screen.touch = cfg!(mobile);
+            screen.touch = Native::phone();
             screen.page = tokens_page;
             screen.make_frame = trusted.then(|| frames(framing));
-            if launcher && cfg!(desktop) {
+            if launcher && !Native::phone() {
                 // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                 // popover's colour (DESIGN.md, Launcher).
                 screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux"), whole: instead });
@@ -350,11 +350,13 @@ async fn shows(kind: &Kind, entrypoint: &str, subject: Option<&str>) -> anyhow::
 /// A window of `kind`'s, for `entrypoint`'s page for `subject`, called `name`.
 fn options(kind: &Kind, entrypoint: &str, subject: Option<&str>, name: &str) -> WindowOptions {
     let launcher = matches!(kind, Kind::Launcher(..));
+    // A computer's launcher is a panel; a phone's is its Home Screen, under every app's window.
+    let phone = Native::phone();
     let sheet = match kind {
         Kind::Sheet(sheet) => Some(sheet),
         _ => None,
     };
-    let (size, panel) = match (launcher && cfg!(desktop), sheet) {
+    let (size, panel) = match (launcher && !phone, sheet) {
         (true, _) => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
         (false, Some(_)) => ((440.0, 360.0), None),
         (false, None) => ((1024.0, 720.0), None),
@@ -366,11 +368,10 @@ fn options(kind: &Kind, entrypoint: &str, subject: Option<&str>, name: &str) -> 
         tag: json!({"entrypoint": entrypoint, "subject": subject}),
         panel: panel.map(|corner| corner as f32),
         // The launcher's kept where it's dragged to, on each screen.
-        places: (launcher && cfg!(desktop)).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
+        places: (launcher && !phone).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
         // An app's window opens where it was left, as each computer's apps do.
         frame: frame_file(launcher, sheet.is_some(), entrypoint, subject),
-        // A phone's launcher is its Home Screen, under every app's window.
-        root: launcher && cfg!(mobile),
+        root: launcher && phone,
         icon: match kind {
             Kind::App(from) => *from,
             Kind::Launcher(..) | Kind::Sheet(_) | Kind::Unopened(_) => None,
@@ -380,7 +381,7 @@ fn options(kind: &Kind, entrypoint: &str, subject: Option<&str>, name: &str) -> 
         // An app's window, and the Home Screen, shows its last frame as it opens again.
         snapshot: matches!(kind, Kind::App(_) | Kind::Launcher(..)).then(|| snapshot_file(entrypoint, subject)).flatten(),
         // Its title row is its page's: its app's icon and name (DESIGN.md, App windows).
-        title_row: cfg!(desktop) && !launcher && sheet.is_none(),
+        title_row: !phone && !launcher && sheet.is_none(),
     }
 }
 
@@ -411,7 +412,7 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                     let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
                 }
                 // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
-                if !(launcher && cfg!(desktop)) {
+                if !launcher || Native::phone() {
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
                 }
                 // The device hears its person's notifications once their home is on screen, as the web

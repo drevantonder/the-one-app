@@ -69,7 +69,7 @@ pub(super) fn respond(
     if method == "ui/notifications/request-teardown" && !framed {
         if launcher {
             computer::hide(true)
-        } else if cfg!(mobile) {
+        } else if Native::phone() {
             computer::summon()
         }
         return None;
@@ -132,10 +132,10 @@ pub(super) fn respond(
                 "theme": shown,
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
-                "deviceCapabilities": {"touch": cfg!(mobile), "hover": cfg!(desktop)},
+                "deviceCapabilities": {"touch": Native::phone(), "hover": !Native::phone()},
                 // Whether its window's title row names it, so its first screen doesn't: a page in a frame is named by
                 // nothing above it, nor is the recovery key window's.
-                "titled": cfg!(desktop) && !state.framed && state.sheet.is_none(),
+                "titled": !Native::phone() && !state.framed && state.sheet.is_none(),
                 // The place its link names, as its address's `#` says on the DOM (`link()`).
                 "link": state.fragment,
                 "connection": "online",
@@ -188,7 +188,7 @@ pub(super) fn respond(
                 // Screen. Only Android's page pins shortcuts, and no native window does yet.
                 let mut client = crate::client().unwrap_or_else(|_| json!({}));
                 client["theme"] = json!(state.chosen);
-                client["launcher"] = json!(state.launcher && cfg!(desktop));
+                client["launcher"] = json!(state.launcher && !Native::phone());
                 client["mac"] = json!(cfg!(target_os = "macos"));
                 client["pinsShortcuts"] = json!(false);
                 Some(Ok(client))

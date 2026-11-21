@@ -63,7 +63,7 @@ pub(super) fn started(entrypoint: &str, subject: Option<&str>, to: UnboundedSend
         let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
         Ok(String::from_utf8(file)?)
     });
-    let js = Thread::start(module, files, Some(cache), Clock::real(), cfg!(mobile));
+    let js = Thread::start(module, files, Some(cache), Clock::real(), Native::phone());
     Started { js, to, asked, page, number }
 }
 

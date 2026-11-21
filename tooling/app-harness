@@ -5,12 +5,14 @@
 # drives a device's. What the headless harness (`examples/screenshot.rs`) can't reach, as it draws one page with no
 # app around it.
 #
-#     tooling/app-harness <folder> [--seed <n>] [<check>…]
+#     tooling/app-harness <folder> [--seed <n>] [--phone] [<check>…]
 #
 # Each check says `ok` or `FAILED` and why, and it exits 1 if one failed. With none named, all run:
 #
 #   start    after a start, the launcher is open, and no app has two windows.
 #   reopen   an app's window closed as its system closes it (`inspector close`) opens again from a `one:` link.
+#   closed   the launcher closed as its system closes it (`inspector close`) is there again: a phone's Home Screen, a
+#            window, opens again in its place, or says it didn't open, with Try Again; a computer's panel is put away.
 #   stale    the app started as an update starts it, its Home Screen and Settings updated while it wasn't running
 #            (the files it kept then stale): one window of each app, at every moment.
 #   cached   a view's read while the server holds every request, after a write of its own: answered at once, from
@@ -30,24 +32,27 @@
 #            could have been compiled, so it waited for none being compiled, and none of its page's start.
 #
 # The folder keeps the network, the app's build and its log (`app.log`), and a network running there is used again.
-# `--seed` picks the moments things happen at, the same each time for the same seed. It needs what `tooling/network`
+# `--seed` picks the moments things happen at, the same each time for the same seed. `--phone` makes the app's windows
+# a phone's (`Native::phone`): each the whole of a 390 × 844 screen, the launcher its Home Screen, the root window under
+# every app's, which its system can close, where a computer's is a panel it only puts away. It needs what `tooling/network`
 # does, and `xvfb-run` and `dbus-run-session`, as the app's event loop is GTK's on Linux.
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|updated|twice|blank|loading|open]…"
-folder= seed=1 checks=()
+usage="tooling/app-harness <folder> [--seed <n>] [--phone] [start|reopen|closed|stale|cached|restart|updated|twice|blank|loading|open]…"
+folder= seed=1 phone= checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
-    start | reopen | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
+    --phone) phone=390x844 ;;
+    start | reopen | closed | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen stale cached restart updated twice blank loading open)
+((${#checks[@]})) || checks=(start reopen closed stale cached restart updated twice blank loading open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -71,6 +76,7 @@ if ! { [[ -s $net/pid ]] && kill -0 "$(cat "$net/pid")" 2>/dev/null; }; then
 fi
 # The seed makes the app's windows' thread as busy as a loaded device's, too (`platform::start`, fake).
 export ONE_HOME=$net/client ONE_AS=owner ONE_PROGRAM=$folder/app/one ONE_SEED=$seed
+[[ -z $phone ]] || export ONE_PHONE=$phone
 for wanted in inspector settings telemetry; do
   ONE_SUBJECT=network "$one" apps | jq -e --arg app "$wanted" 'any(.apps[]; .name == $app)' >/dev/null ||
     ONE_SUBJECT=network "$one" install --app "network/apps/$wanted" >/dev/null
@@ -144,6 +150,25 @@ reopened() {
   within 5 '[[ -z $(open_window settings) ]]' || { echo "        Settings didn't close" && return 1; }
   "$folder/app/one" one:settings
   within 20 '[[ -n $(open_window settings) ]]' || { echo "        Settings closed by its system didn't open again" && return 1; }
+}
+
+# The launcher closed as its system closes it (`inspector close`): within 20 s it's there again, in a window that
+# answers, pictured before and 2 s after (`closed-before.png`, `closed-after.png`). A phone's is a window, which closes, and opens again in its place, or says "Home Screen didn't open" with Try
+# Again where it can't, where its page, told nothing, showed black until the app started again (21 Nov); a computer's
+# is a panel, which is put away.
+closed() {
+  local launcher again
+  [[ -n $app ]] || start_app || return 1
+  within 10 '[[ -n $(open_window home-screen) ]]' || { echo "        the inspector lists no launcher" && return 1; }
+  launcher=$(open_window home-screen)
+  snap "$launcher" "$folder/closed-before.png"
+  echo "        closed: $("$one" inspector close --window "$launcher" | jq -c .)"
+  within 20 '[[ -n $(open_window home-screen) ]] && "$one" inspector tree --window "$(open_window home-screen)" >/dev/null 2>&1' ||
+    { echo "        no launcher answers 20 s after window $launcher was closed: $(windows | tr '\n' ' ')" && return 1; }
+  again=$(open_window home-screen)
+  echo "        the launcher was window $launcher, and is $again"
+  sleep 2 && snap "$again" "$folder/closed-after.png"
+  one_each
 }
 
 # New versions of the Home Screen and of Settings while the app isn't running, then the app started as an update
@@ -418,6 +443,7 @@ for name in "${checks[@]}"; do
   case $name in
     start) check "start: the launcher, and one window of each app" started ;;
     reopen) check "reopen: an app closed by its system opens again" reopened ;;
+    closed) check "closed: the launcher closed by its system is there again" closed ;;
     stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;

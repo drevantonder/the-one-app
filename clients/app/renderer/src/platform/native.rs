@@ -15,6 +15,22 @@ impl Native {
     pub fn run(&self, job: impl FnOnce(&mut Windows) + Send + 'static) {
         let _ = self.0.send(Box::new(job));
     }
+
+    /// Whether this device's windows are a phone's: each the whole screen, the Home Screen the root window under every
+    /// app's, closed only as its system closes it. The fake platform's are where the app harness says so (`ONE_PHONE`).
+    pub fn phone() -> bool {
+        #[cfg(feature = "fake")]
+        return phone_screen().is_some();
+        #[cfg(not(feature = "fake"))]
+        cfg!(any(target_os = "android", target_os = "ios"))
+    }
+}
+
+/// The fake platform's screen, where it's a phone's: `ONE_PHONE`, its size in points, as `390x844`.
+#[cfg(feature = "fake")]
+fn phone_screen() -> Option<Size<Pixels>> {
+    let (width, height) = std::env::var("ONE_PHONE").ok()?.split_once('x').map(|(width, height)| (width.parse().ok(), height.parse().ok()))?;
+    Some(Size { width: Pixels(width?), height: Pixels(height?) })
 }
 
 #[cfg(all(target_os = "windows", not(feature = "fake")))]
@@ -24,7 +40,8 @@ use super::windows::start;
 /// (`clients/app`'s `fake`, the app harness): a thread of their own, as a host's, on real time, whose display refreshes
 /// at 60 Hz while something moves, its pages' posts and its jobs taken in between, as each host's loop does. With a
 /// seed (`ONE_SEED`), it's as busy as a loaded device's: one job in four waits up to 2 s for the thread, as a Surface's
-/// launcher waited 4.5 s to be made as the app started (21 Nov). A harness that drives them itself, frame by frame, has
+/// launcher waited 4.5 s to be made as the app started (21 Nov). Its screen is a phone's where `ONE_PHONE` says so
+/// (`Native::phone`). A harness that drives them itself, frame by frame, has
 /// them by `Windows::fake` instead (`examples/screenshot.rs`).
 #[cfg(feature = "fake")]
 fn start() -> anyhow::Result<Native> {
@@ -37,6 +54,9 @@ fn start() -> anyhow::Result<Native> {
             Err(error) => return drop(ready_to.send(Err(error))),
         };
         windows.seed(seed);
+        if let Some(screen) = phone_screen() {
+            windows.phone(screen);
+        }
         let _ = ready_to.send(Ok(()));
         let mut ticked = web_time::Instant::now();
         loop {
