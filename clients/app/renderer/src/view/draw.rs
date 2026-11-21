@@ -55,7 +55,7 @@ impl Screen {
     /// scene a frame that changes nothing drew, which a new scene doesn't have.
     pub fn paint_afresh(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         self.seen = None;
-        self.paint(size, scale, text, atlas, scene);
+        self.paint(None, size, scale, text, atlas, scene);
     }
 
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each, as a frame's passes, in
@@ -63,14 +63,19 @@ impl Screen {
     /// anything it shows changed, and what's styled again and what's drawn from a layer (`plan`); the tree styled, laid
     /// out and painted (`draw`); what that drew kept, for the pointer, the keyboard and the window (`keep`); and then the
     /// keyboard where a dialog came or went (`settle_focus`), and what's told of where things landed (`tell_placed`).
+    /// What moves by itself (a scroll's coast, a spring, a transition) is drawn where it is at the time of the frame
+    /// it's for, `at`, the display's (as `requestAnimationFrame` is told it, Core Animation's link and Flutter's frames
+    /// have it), or with none (drawn as input came), now: drawn at the time it was painted, a frame the loop's own clock
+    /// drew a quarter refresh late for a link that stopped moved a step and a quarter, and the next three quarters.
     /// → whether it painted anything, which a frame that changed nothing doesn't: the scene drawn last is it.
-    pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> bool {
+    pub fn paint(&mut self, at: Option<Instant>, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> bool {
         self.tell_room(size);
-        self.paint_frames(scale, text, atlas);
+        self.paint_frames(at, scale, text, atlas);
         let started = crate::platform::on_cpu();
         self.cost.script += self.js.script();
         // A frame that changes nothing paints nothing: the scene drawn last is kept.
-        let Some(plan) = self.plan(size, scale) else { return false };
+        let now = at.map_or_else(|| self.js.clock().now(), |at| crate::platform::time_at(self.js.clock(), at));
+        let Some(plan) = self.plan(now, size, scale) else { return false };
         scene.clear();
         let drawn = self.draw(&plan, text, atlas, scene);
         let modal = drawn.modal;
@@ -104,7 +109,7 @@ impl Screen {
     }
 
     /// Each frame's page first, in the room its frame had, as this one looks, which this frame splices in.
-    fn paint_frames(&mut self, scale: f32, text: &mut TextSystem, atlas: &Atlas) {
+    fn paint_frames(&mut self, at: Option<Instant>, scale: f32, text: &mut TextSystem, atlas: &Atlas) {
         for (id, child) in &mut self.frames {
             let screen = &mut child.screen;
             (screen.theme, screen.appearance, screen.reduced_motion, screen.touch) = (self.theme, self.appearance, self.reduced_motion, self.touch);
@@ -115,7 +120,7 @@ impl Screen {
                 self.layout.conditions = None;
             }
             if child.rect.size.width > 0.0 && child.rect.size.height > 0.0 {
-                screen.paint(Size { width: Pixels(child.rect.size.width), height: Pixels(child.rect.size.height) }, scale, text, atlas, &mut child.scene);
+                screen.paint(at, Size { width: Pixels(child.rect.size.width), height: Pixels(child.rect.size.height) }, scale, text, atlas, &mut child.scene);
                 self.again |= screen.take_again();
             }
         }
@@ -125,14 +130,13 @@ impl Screen {
     /// nothing; or what's styled again (what changed, what's moving, each input, as its words are its field's, and
     /// what's changed state, with what's around it, so the rest is kept as it was laid out), and what's drawn from a
     /// layer, moved, rather than painted again.
-    fn plan(&mut self, size: Size<Pixels>, scale: f32) -> Option<Plan> {
+    fn plan(&mut self, now: f64, size: Size<Pixels>, scale: f32) -> Option<Plan> {
         let conditions = self.conditions();
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.pictures.take();
-        self.coast();
+        self.coast(now);
         self.states.focused = self.focus.focused;
         self.states.touch = self.touch;
-        let now = self.js.clock().now();
         let caret = self.caret_shows();
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
         let mut fields: Vec<_> = self.editing.fields.iter().map(|(id, field)| (*id, field.display(), field.value(), field.placed(), field.upstream())).collect();

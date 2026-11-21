@@ -71,7 +71,7 @@ impl Screen {
             child.screen.frame(at);
         }
         if self.js.framing() {
-            let time = self.js.clock().at(at);
+            let time = crate::platform::time_at(self.js.clock(), at);
             self.js.frame(time);
         }
     }

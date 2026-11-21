@@ -128,7 +128,7 @@ impl Windows {
             if std::mem::take(&mut afresh) {
                 screen.paint_afresh(room, scale, text, atlas, &mut scene);
             } else {
-                screen.paint(room, scale, text, atlas, &mut scene);
+                screen.paint(None, room, scale, text, atlas, &mut scene);
             }
             renderer.draw(&scene, &[[0.0, 0.0]]);
             renderer.finish();

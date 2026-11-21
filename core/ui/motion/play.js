@@ -129,8 +129,18 @@ async function play(built, scene, name, motion, hz, folder) {
   // as one at 60 Hz on a 120 Hz display misses every other, or a display link that stopped ticking with nothing
   // standing in for it. A device others load (`frameMs`) takes several refreshes a frame.
   const moved = values.findIndex((value) => Math.abs(value - values[0]) > 0.5)
-  const held = moved < 0 || motion.frameMs ? -1 : values.findIndex((value, n) => n > moved && (motion.eases || frames[n].at > end + 1000 / hz + 0.5) && Math.abs(value - values[n - 1]) < 0.05 && Math.abs(value - values.at(-1)) > 2)
+  // What turns as it goes is still turning where its box is at its highest or its widest, as it grows or shrinks.
+  const resized = (n) => frames[n].rect && frames[n - 1].rect && Math.max(Math.abs(frames[n].rect.width - frames[n - 1].rect.width), Math.abs(frames[n].rect.height - frames[n - 1].rect.height)) >= 0.05
+  const held = moved < 0 || motion.frameMs ? -1 : values.findIndex((value, n) => n > moved && (motion.eases || frames[n].at > end + 1000 / hz + 0.5) && Math.abs(value - values[n - 1]) < 0.05 && !resized(n) && Math.abs(value - values.at(-1)) > 2)
   if (held >= 0) failed.push(`it held still at frame ${held + 1} (${frames[held].at} ms) as it moved`)
+  // Once what moves it is done, each refresh moves it as far as the time between refreshes takes it: no step is longer
+  // than both beside it and the next shorter than both beside it, by more than 2 pt and a quarter of their mean, as a
+  // frame drawn for a refresh at the time it was drawn (a stopped link's late one, a busy frame) and the next on time
+  // are. Steps on whole points (a wheel's) go by a point either way; a curve's fastest step is one step longer, alone.
+  const steps = values.map((value, n) => (n ? value - values[n - 1] : 0))
+  const bend = (n) => steps[n + 1] - steps[n]
+  const uneven = moved < 0 || motion.frameMs ? -1 : steps.findIndex((step, n) => n > moved && frames[n - 1].at > end + 1000 / hz + 0.5 && n + 2 < steps.length && Math.sign(bend(n - 1)) === -Math.sign(bend(n)) && Math.sign(bend(n)) === -Math.sign(bend(n + 1)) && Math.abs(bend(n)) > Math.max(2, (Math.abs(step) + Math.abs(steps[n + 1])) / 8))
+  if (uneven >= 0) failed.push(`it moved unevenly at frames ${uneven + 1} and ${uneven + 2} (${frames[uneven].at} ms): ${steps.slice(uneven - 1, uneven + 3).map((step) => Math.abs(step).toFixed(0)).join(", ")} pt a refresh`)
   // What `once` names is never in sight twice in a frame, read or not, as a large title and its bar's are cross-faded.
   const twice = motion.once ? frames.findIndex((frame) => frame.count > 1) : -1
   if (twice >= 0) failed.push(`${frames[twice].count} of ${JSON.stringify(motion.once)} drawn at once at frame ${twice + 1} (${frames[twice].at} ms)`)

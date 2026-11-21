@@ -26,7 +26,7 @@ impl Windows {
             let mut text = TextSystem::new(crate::FONT, fonts, !cfg!(feature = "fake"));
             #[cfg(any(feature = "fake", target_arch = "wasm32"))]
             text.monospace(crate::view::MONOSPACE.0);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), showed: now(), wanted: false, ticked: None, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), showed: now(), wanted: false, ticked: None, vsync: None, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -191,7 +191,7 @@ impl Windows {
         let (room, scale) = (window.room(), window.parts[0].native.scale());
         let Ok(screen) = &mut window.screen else { return };
         if !screen.laid_out() {
-            screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+            screen.paint(None, room, scale, &mut self.text, &self.atlas, &mut window.scene);
             window.dirty = true;
         }
     }

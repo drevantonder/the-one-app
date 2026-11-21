@@ -138,11 +138,20 @@ impl Windows {
         let framing = self.framing();
         let ticked = self.display.frame();
         self.ticked = ticked.or(self.ticked);
+        self.vsync = ticked.or(self.vsync);
         // Where the loop's own clock stands in, its frame is the one the display would have shown a refresh after its
         // last, at most a refresh late (a link that stopped, noticed a quarter of a refresh on), so what moves keeps the
         // display's pace: at the clock's own time, a link's pause had it move a step and a half, then half a step.
         let refresh = self.refresh();
         let shown = ticked.or_else(|| (framing && !self.ticking() && since(self.framed) >= refresh).then(|| Some(self.framed + refresh).filter(|next| since(*next) < refresh).unwrap_or_else(now)));
+        // What moves is drawn where it is at the time of the display's refresh its frame is for, as a link's tick says
+        // it: the nearest to the loop's own clock's, which, counting from a frame drawn as input came, is out of step
+        // with them. Drawn at its own time, a step as the link started came two thirds of a refresh after the one
+        // before; at the refresh before it, a frame due a hair before a refresh was drawn at the last one's time.
+        let time = shown.map(|at| match self.vsync.filter(|vsync| *vsync <= at) {
+            Some(vsync) => vsync + refresh.mul_f64(((at - vsync).as_secs_f64() / refresh.as_secs_f64()).round()),
+            None => at,
+        });
         // When the display showed the frame before, which a frame presented since was drawn after (`presented`).
         let before = shown.map(|at| std::mem::replace(&mut self.showed, at));
         if let Some(at) = shown {
@@ -158,8 +167,8 @@ impl Windows {
             }
             for window in self.windows.values_mut().filter(|window| window.on_screen()) {
                 window.dirty |= std::mem::take(&mut window.moving);
-                if let Ok(screen) = &mut window.screen {
-                    screen.frame(at);
+                if let (Ok(screen), Some(time)) = (&mut window.screen, time) {
+                    screen.frame(time);
                 }
             }
         }
@@ -309,7 +318,7 @@ impl Windows {
                     && let Ok(screen) = &mut window.screen
                     && window.renderer.is_some()
                 {
-                    window.unshown |= screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
+                    window.unshown |= screen.paint(None, window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
                     // Drawn once, so its surfaces have had a frame; after that it's painted alone, and the image it
                     // took as it went (`put_away`) is kept for the frame it's summoned with.
                     if !window.drawn {
@@ -362,7 +371,7 @@ impl Windows {
                         // canvas; under its snapshot, or a canvas over all of it, it's left until it's revealed, as
                         // it was before it showed, so what it asks for as it's laid out is for its real layout.
                         if !matches!(window.cover, Cover::Over(_)) || (window.picture.is_none() && screen.title.is_some()) {
-                            changed = screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                            changed = screen.paint(time, room, scale, &mut self.text, &self.atlas, &mut window.scene);
                         }
                         window.moving = screen.take_again();
                         let calls = screen.text_input(&mut window.text_input);

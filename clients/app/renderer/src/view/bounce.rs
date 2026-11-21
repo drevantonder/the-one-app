@@ -122,10 +122,10 @@ impl Screen {
         !caught.is_empty()
     }
 
-    /// Steps what's flung, springing back or easing to the screen's clock: a fling scrolls on, slowing, and bounces off
-    /// an end it reaches at the speed it has; a stretch springs back; a wheel's notch eases on to where it's going.
-    pub(super) fn coast(&mut self) {
-        let now = self.js.clock().now();
+    /// Steps what's flung, springing back or easing to `now`, the time of the frame it's drawn in, on the screen's
+    /// clock: a fling scrolls on, slowing, and bounces off an end it reaches at the speed it has; a stretch springs
+    /// back; a wheel's notch eases on to where it's going.
+    pub(super) fn coast(&mut self, now: f64) {
         let ids: Vec<Id> = self.coasts.keys().copied().collect();
         for id in ids {
             let coast = self.coasts.get_mut(&id).expect("it's there");

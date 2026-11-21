@@ -435,6 +435,9 @@ pub struct Windows {
     /// were (`ticking`).
     wanted: bool,
     ticked: Option<web_time::Instant>,
+    /// The refresh its link last said the display showed, which its others are whole refreshes from, so the loop's own
+    /// clock stands in on them (`turned`).
+    vsync: Option<web_time::Instant>,
     /// The inspector's `host` check under way, and what the host has done since it started.
     check: Option<conformance::Check>,
     record: conformance::Record,
@@ -466,6 +469,17 @@ pub use fake::reduce as fake_reduce;
 /// The fake platform's time, in ms on its pages' clock.
 #[cfg(feature = "fake")]
 pub use fake::time as fake_time;
+
+/// When `at`, an instant the windows' loop told (a frame's), was on `clock`, a page's: on the fake platform, whose
+/// instants are its clock's (`fake::now`), exactly as long before its time; elsewhere as the clock says (`Clock::at`).
+#[cfg(not(feature = "fake"))]
+pub(crate) fn time_at(clock: &crate::js::Clock, at: web_time::Instant) -> f64 {
+    clock.at(at)
+}
+#[cfg(feature = "fake")]
+pub(crate) fn time_at(clock: &crate::js::Clock, at: web_time::Instant) -> f64 {
+    clock.now() - since(at).as_secs_f64() * 1000.0
+}
 
 /// How long since `at`, by `now`.
 pub(crate) fn since(at: web_time::Instant) -> std::time::Duration {
