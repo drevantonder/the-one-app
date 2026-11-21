@@ -52,9 +52,10 @@ pub(super) fn launcher_closed(id: WindowId) {
     }
 }
 
-/// A phone's launcher that isn't drawn natively is its page's.
+/// A phone's launcher that didn't open is its page's, which says why, with Try Again, or Reload where it `crashed`.
 #[cfg(mobile)]
-pub(super) async fn unopened_launcher(_: &str, _: String, _: bool) -> Option<WindowId> {
+pub(super) async fn unopened_launcher(_: &str, why: String, crashed: bool) -> Option<WindowId> {
+    computer::unopened(why, crashed);
     None
 }
 

@@ -783,16 +783,15 @@ pub(crate) mod computer {
     /// page says so in its place, with Try Again, or Reload where it crashed.
     pub fn unopened(why: String, crashed: bool) {
         close();
+        eprintln!("the launcher's window is gone, and its page says why: {why}");
         crate::app().shell.emit("launcher", serde_json::json!({"native": false, "why": why, "crashed": crashed}));
     }
 
-    /// Its page was updated: its window opens again on the new version.
+    /// Its page was updated, or its window closed: it opens again, or its page says why it didn't (`unopened`).
     pub fn reload_native() {
         let Some(entrypoint) = close() else { return };
         crate::spawn(async move {
-            if !open(entrypoint).await {
-                crate::app().shell.emit("launcher", serde_json::json!({"native": false}));
-            }
+            open(entrypoint).await;
         });
     }
 
