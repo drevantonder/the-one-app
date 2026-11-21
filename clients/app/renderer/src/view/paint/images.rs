@@ -102,25 +102,9 @@ impl Painter<'_> {
             Paint::Current => Some(current),
             Paint::None => None,
         };
-        let css = |colour: Hsla| {
-            let rgba = crate::geometry::Rgba::from(colour);
-            format!("rgba({},{},{},{})", (rgba.r * 255.0).round(), (rgba.g * 255.0).round(), (rgba.b * 255.0).round(), rgba.a)
-        };
-        let svg = format!(
-            r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="{view_box}" preserveAspectRatio="none"><path d="{d}" fill="{fill}" stroke="{stroke}" stroke-width="{width}" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>"#,
-            w = device.width,
-            h = device.height,
-            d = d.replace('"', ""),
-            fill = paint(look.fill).map_or_else(|| "none".to_owned(), css),
-            stroke = paint(look.stroke).map_or_else(|| "none".to_owned(), css),
-            width = look.stroke_width * self.scale,
-        );
-        // The web's canvas draws it, from its `d`, as the browser's own SVG would.
-        #[cfg(target_arch = "wasm32")]
-        let draw = || crate::platform::web::path(d, view_box, device, paint(look.fill).map(css), paint(look.stroke).map(css), look.stroke_width * self.scale);
-        #[cfg(not(target_arch = "wasm32"))]
-        let draw = || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device);
-        let Some(tile) = self.pictures.now(self.atlas, &format!("path{svg}"), draw) else { return };
+        let (key, draw) = path(d, view_box, device, paint(look.fill), paint(look.stroke), look.stroke_width * self.scale);
+        let Some(tile) = self.pictures.now(self.atlas, &key, draw) else { return };
         self.sprite(tile, content, Corners::default(), opacity, mask);
     }
 }
+

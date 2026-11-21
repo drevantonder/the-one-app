@@ -524,6 +524,12 @@ fn lay_out(layout: &mut Retained, text: &mut TextSystem, root: NodeId, available
 /// Paints a screen that says only `words`, in the middle, in the muted colour, as a page's empty state does.
 pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
     scene.clear();
+    message(words, appearance, size, scale, text, atlas, scene);
+    scene.finish();
+}
+
+/// What `paint_message` paints, in a scene that's finished after.
+fn message(words: &str, appearance: Appearance, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
     // A host's own message, in a computer's size: it has no window's conditions.
     let conditions = Conditions { dark: appearance == Appearance::Dark, ..Conditions::default() };
     let (body, background) = Text::root(conditions);
@@ -545,6 +551,50 @@ pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixe
     let top = (window.size.height - paragraph.size().height) / 2.0;
     let muted = colour_token("secondary-label", conditions);
     let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, &|_| muted, scale, mask, TransformationMatrix::unit(), atlas, scene);
+}
+
+/// Paints a window whose page isn't there yet, `opened` ago, as iOS's launch screen is: the app's background, and once
+/// a quick page would have shown (`quiet`), the UI library's `Status`, a spinner over "Loading", fading in over `fades`,
+/// so a page that's there by then shows none (Andre, 20 Nov). Its spinner turns once a second, as `spin` in
+/// core/ui/src/tokens.ts.
+#[allow(clippy::too_many_arguments)]
+pub(crate) fn paint_loading(opened: Duration, quiet: Duration, fades: Duration, appearance: Appearance, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
+    scene.clear();
+    message("", appearance, size, scale, text, atlas, scene);
+    let t = (opened.saturating_sub(quiet).as_secs_f32() / fades.as_secs_f32()).min(1.0);
+    let opacity = t * t * (3.0 - 2.0 * t);
+    if opacity <= 0.0 {
+        return scene.finish();
+    }
+    let conditions = Conditions { dark: appearance == Appearance::Dark, ..Conditions::default() };
+    let table = crate::tokens::table();
+    let (icon, gap) = (table.length("icon", conditions).unwrap_or(16.0), table.length("grid-2", conditions).unwrap_or(8.0));
+    let (_, label) = chrome_type(conditions);
+    let paragraph = text.paragraph("Loading", &label, &[], None, None);
+    let top = (size.height.0 - icon - gap - paragraph.size().height) / 2.0;
+    let mask = ContentMask { bounds: Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } }.scale_to(scale) };
+    let spinner = Bounds { origin: point((size.width.0 - icon) / 2.0, top), size: Size { width: icon, height: icon } };
+    let device = Size { width: (icon * scale).round() as u32, height: (icon * scale).round() as u32 };
+    let grey = colour_token("secondary-label", conditions);
+    let (key, draw) = path("M12 3a9 9 0 1 0 9 9", "0 0 24 24", device, None, Some(grey), 2.0 * scale);
+    if let Some(tile) = pictures::drawn(atlas, &key, draw) {
+        let centre = [(spinner.origin.x + icon / 2.0) * scale, (spinner.origin.y + icon / 2.0) * scale];
+        scene.insert_primitive(PolychromeSprite {
+            order: 0,
+            pad: 0,
+            grayscale: 0,
+            opacity,
+            bounds: spinner.scale_to(scale),
+            content_mask: mask.clone(),
+            corner_radii: Corners::default(),
+            tile,
+            transformation: TransformationMatrix::rotation(opened.as_secs_f32().fract() * 360.0, centre),
+        });
+    }
+    let colour = colour_token("label", conditions);
+    let colour = Hsla { a: colour.a * opacity, ..colour };
+    let left = (size.width.0 - paragraph.size().width) / 2.0;
+    let _ = text.paint(&paragraph, point(px(left), px(top + icon + gap)), paragraph.size().width, 0.0, &|_| colour, scale, mask, TransformationMatrix::unit(), atlas, scene);
     scene.finish();
 }
 

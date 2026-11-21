@@ -53,7 +53,7 @@ mod pump;
 mod types;
 mod window;
 pub use types::*;
-pub(crate) use draw::paint_message;
+pub(crate) use draw::{paint_loading, paint_message};
 use draw::Seen;
 pub(crate) use input::Drawn;
 pub(crate) use pointer::{Clicked, Placed, States};

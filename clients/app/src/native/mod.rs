@@ -256,6 +256,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         crate::hosts::forget(entrypoint, subject);
     }
 
+    tokens().await?;
     // Its window, made at once, and its channel, which its page starts on once it's read (`started`).
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
@@ -583,6 +584,18 @@ fn attach(window: &Arc<OnceLock<WindowId>>, screen: impl FnOnce() -> anyhow::Res
         let _ = attached_to.send(failed.map_or(Ok(()), Err));
     });
     Ok(attached)
+}
+
+/// Loads the UI library's token table built into this program where no page's is loaded yet, so a window opened before
+/// its page's tables are read is drawn in its app's colours from its first frame: on a phone's first start none was,
+/// and its window drew black, in light mode too, for 5 s and more, until its page drew (21 Nov). A page's own replaces
+/// it as it loads (`load`).
+async fn tokens() -> anyhow::Result<()> {
+    if LOADED.lock().expect("nothing panics holding it").0.is_some() {
+        return Ok(());
+    }
+    let built_in = tables(&[Url::parse(CLIENT)?.join("/ui/client/tokens.json")?]).await?.ok_or_else(|| anyhow::anyhow!("the UI library needs a newer runtime than this program's"))?;
+    load(&built_in).map(|_| ())
 }
 
 /// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles,

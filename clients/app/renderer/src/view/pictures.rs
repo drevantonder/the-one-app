@@ -363,6 +363,12 @@ impl Pictures {
 /// its own edge (`Painter::sprite` draws that pixel outside its box).
 /// `device` pixels, or as large as fits its atlas's largest texture, its border and all, the same shape: a picture
 /// larger than that is drawn from that, scaled up, as a browser draws one larger than its GPU's textures.
+/// The picture `key` in the atlas, drawn by `draw` where it isn't there yet, as a host draws its own (`paint_loading`),
+/// with no page's pictures to keep it among.
+pub(super) fn drawn(atlas: &Atlas, key: &str, draw: impl Fn() -> Option<Decoded>) -> Option<AtlasTile> {
+    atlas.get_or_insert_with(&AtlasKey::Image(hash(key)), &mut || Ok(draw().map(tiled))).ok().flatten()
+}
+
 pub(super) fn fitting(device: Size<u32>, atlas: &Atlas) -> Size<u32> {
     let largest = (atlas.largest().max(3) - 2) as f32;
     let (width, height) = (device.width as f32, device.height as f32);

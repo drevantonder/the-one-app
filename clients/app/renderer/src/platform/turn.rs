@@ -363,6 +363,12 @@ impl Windows {
                         }
                         self.display.set_title_row(&window.parts[0].native, screen.title_row());
                     }
+                    // One whose page isn't there yet (`opening`) shows its loading state, its spinner turning, never an
+                    // empty window: a phone's first start showed black for 5 s and more as its page was read (21 Nov).
+                    Err(_) if window.pending => {
+                        crate::view::paint_loading(since(window.opened), QUIET, FADES_IN, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                        window.moving = true;
+                    }
                     Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
                 }
                 // What covers it as it opens, made as it's first drawn: its snapshot, or its canvas, which a window whose

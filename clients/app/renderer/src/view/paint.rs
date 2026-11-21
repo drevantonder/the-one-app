@@ -422,6 +422,35 @@ pub(super) fn svg(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
     resvg::usvg::Tree::from_str(&out, options).ok()
 }
 
+/// A path, SVG's: its `d` in its `viewBox`, stretched to `device` pixels, filled and stroked `width` device pixels wide,
+/// with round ends. → its key among the pictures, and what draws it: resvg, or on the web its canvas, as the browser's
+/// own SVG would.
+pub(in crate::view) fn path(d: &str, view_box: &str, device: Size<u32>, fill: Option<Hsla>, stroke: Option<Hsla>, width: f32) -> (String, impl Fn() -> Option<Decoded>) {
+    let css = |colour: Hsla| {
+        let rgba = crate::geometry::Rgba::from(colour);
+        format!("rgba({},{},{},{})", (rgba.r * 255.0).round(), (rgba.g * 255.0).round(), (rgba.b * 255.0).round(), rgba.a)
+    };
+    let svg = format!(
+        r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="{view_box}" preserveAspectRatio="none"><path d="{d}" fill="{fill}" stroke="{stroke}" stroke-width="{width}" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>"#,
+        w = device.width,
+        h = device.height,
+        d = d.replace('"', ""),
+        fill = fill.map_or_else(|| "none".to_owned(), css),
+        stroke = stroke.map_or_else(|| "none".to_owned(), css),
+    );
+    #[cfg(target_arch = "wasm32")]
+    let draw = {
+        let (d, view_box) = (d.to_owned(), view_box.to_owned());
+        move || crate::platform::web::path(&d, &view_box, device, fill.map(css), stroke.map(css), width)
+    };
+    #[cfg(not(target_arch = "wasm32"))]
+    let draw = {
+        let src = format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes()));
+        move || decode(&src, device)
+    };
+    (format!("path{svg}"), draw)
+}
+
 /// A `data:` address's image, decoded for a box of `device` pixels: an SVG drawn at that size, and any other at the
 /// smallest of its size halved again and again that still covers what of the box it fills, as a mipmap's levels are, so its pixels
 /// beyond what the box shows aren't kept, and a box that grows and shrinks (a window resized) decodes it at a few
