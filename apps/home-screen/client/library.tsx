@@ -46,9 +46,9 @@ const BEHIND = "background:"
 export const openedCategory = (library: Category[], key: string) =>
   key.startsWith(BEHIND) ? sorted(library, true).find((category) => category.category === key.slice(BEHIND.length)) : sorted(library, false).find((category) => category.category === key)
 
-/// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into, and its first
-/// app's icon in it (`first`), which the opened category's first app grows out of.
-export const places: Record<string, Rect & { first: Rect }> = {}
+/// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into, and each of its
+/// apps' icons in it (`apps`), which that app grows out of.
+export const places: Record<string, Rect & { apps: Rect[] }> = {}
 
 /// The category made ahead: the one a finger or the pointer last went down on, or last opened, its contents made and
 /// kept, open or not, so opening it and closing it change how it's drawn, not what's made, and the frame a press lifts
@@ -71,6 +71,29 @@ function shelf(width: number) {
   return { gap, category, padding, columnGap, rowGap, icon }
 }
 
+/// Where each of a category's `count` apps' icons is in its square, drawn at `square`: its first four in its two
+/// columns and two rows, each in the middle of its column at its row's top, or with more than four, three and the next
+/// four small in the fourth's place, and any after those in that place's middle, too small to see.
+function icons({ category, padding, columnGap, rowGap, icon }: ReturnType<typeof shelf>, square: Rect, count: number): Rect[] {
+  const drawn = square.width / category
+  const at = (x: number, y: number, size: number) => ({ x: square.x + x * drawn, y: square.y + y * drawn, width: size * drawn, height: size * drawn })
+  const column = (category - 2 * padding.inline - columnGap) / 2
+  const row = (category - padding.top - padding.bottom - rowGap) / 2
+  const place = (index: number) => [padding.inline + (index % 2) * (column + columnGap), padding.top + Math.floor(index / 2) * (row + rowGap)]
+  // The fourth place's small icons, in two rows of two, in the middle of it.
+  const [more, small] = [icon + 14, (icon + 9) / 2]
+  const [left, top] = place(3).map((start, along) => start + ((along ? row : column) - more) / 2)
+  return Array.from({ length: count }, (_, index) => {
+    if (count <= 4 || index < 3) {
+      const [x, y] = place(index)
+      return at(x + (column - icon) / 2, y, icon)
+    }
+    const nth = index - 3
+    if (nth >= 4) return at(left + more / 2, top + more / 2, 0)
+    return at(left + (nth % 2) * (more - small), top + Math.floor(nth / 2) * (more - small), small)
+  })
+}
+
 /// The App Library: one page, which scrolls, as an iPhone's does, with every app you can reach once, whether it's
 /// installed for you, a group or everyone: your own App Library, which has theirs. Its search is at its top; under it,
 /// the categories of the apps with a screen of their own, as many across as fit, each its first four apps' icons with
@@ -89,20 +112,16 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
   const inline = () => (props.size ? 0 : room().wide ? room().side : 20)
   const width = () => props.size?.width ?? Math.min(1440, room().width - 2 * inline())
   const laid = createMemo(() => shelf(width()))
-  const opening = (key: () => string) => (event: Located) => {
+  const opening = (key: () => string, count: () => number) => (event: Located) => {
     if (!state().matches("nothing")) return
-    ahead(key)(event)
+    ahead(key, count)(event)
     home.send({ type: "open", category: key() })
   }
   // Made as a finger or the pointer goes down on it, before it's let go of.
-  const ahead = (key: () => string) => (event: Located) => {
+  const ahead = (key: () => string, count: () => number) => (event: Located) => {
     if (!state().matches("nothing")) return
     const square = event.currentTarget.getBoundingClientRect()
-    // Its first app is in its first column, its icon in the middle of it, under the square's padding, as drawn.
-    const { category, padding, columnGap, icon } = laid()
-    const drawn = square.width / category
-    const column = (category - 2 * padding.inline - columnGap) / 2
-    places[key()] = { ...square, first: { x: square.x + (padding.inline + (column - icon) / 2) * drawn, y: square.y + padding.top * drawn, width: icon * drawn, height: icon * drawn } }
+    places[key()] = { ...square, apps: icons(laid(), square, count()) }
     setMade(key())
   }
   const found = (background: boolean) => findIn(props.owner.library, query(), background)
@@ -115,22 +134,25 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
       <For each={inner.list} keyed={(category) => category.category}>
         {(category) => {
           const key = () => inner.prefix + category().category
-          const shown = () => (category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
+          const count = () => category().entrypoints.length
+          const shown = () => (count() > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
+          // Its apps are in it opened while it's open, and on their way back.
+          const away = () => state().context.category === key()
           return (
             <View style={[looks.category, looks.wide(laid().category)]}>
               <Pressable
                 role="group"
                 aria-label={category().category}
-                onPointerDown={ahead(key)}
-                onPress={opening(key)}
+                onPointerDown={ahead(key, count)}
+                onPress={opening(key, count)}
                 style={[looks.folder, looks.folderBox(laid().columnGap, laid().rowGap, laid().category, laid().padding.top, laid().padding.inline, laid().padding.bottom)]}
               >
                 <View aria-hidden="true" style={looks.tint} />
                 <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                  {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small />}
+                  {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small away={away()} />}
                 </For>
-                <Show when={category().entrypoints.length > 4}>
-                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key)} style={[looks.more, looks.square(laid().icon + 14)]}>
+                <Show when={count() > 4}>
+                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key, count)} style={[looks.more, looks.square(laid().icon + 14), looks.handed, away() && [looks.handing, looks.unseen]]}>
                     <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                       {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={[looks.iconImage(corner((laid().icon + 9) / 2)), looks.square((laid().icon + 9) / 2)]} />}
                     </For>
@@ -138,7 +160,7 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
                 </Show>
               </Pressable>
               {/* Its apps take the focus, and its small icons, which open it, so its name doesn't again: it's for a finger. */}
-              <Pressable onPress={opening(key)} style={looks.narrow}>
+              <Pressable onPress={opening(key, count)} style={looks.narrow}>
                 <Text style={looks.categoryName}>{category().category}</Text>
               </Pressable>
             </View>
@@ -198,8 +220,9 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
 
 /// An app's icon in the App Library, `icon` across: a tap opens it, or for an app with no entrypoint, the App Store
 /// at its page, and a finger that holds it opens its menu; moving it carries it onto whichever owner's pages it's
-/// dropped on. In a category's square (`small`) its name is smaller.
-function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: number; small?: boolean }) {
+/// dropped on. In a category's square (`small`) its name is smaller, and it's not drawn while it's in its category
+/// opened (`away`).
+function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: number; small?: boolean; away?: boolean }) {
   const badge = () => (opens(props.entrypoint) ? badgeOf(opens(props.entrypoint)!, props.owner) : undefined)
   const from = (event: Located): From => {
     const at = event.currentTarget.getBoundingClientRect()
@@ -219,7 +242,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
       onPress={(event) => {
         if (tapping() && state().matches("nothing")) press(props.entrypoint, props.owner, false, from(event))
       }}
-      style={[looks.entry, props.small && looks.entrySmall]}
+      style={[looks.entry, props.small && [looks.entrySmall, looks.handed], props.away && [looks.handing, looks.unseen]]}
     >
       <View style={[looks.slots, looks.square(props.icon)]}>
         <Image src={src(props.entrypoint.icon)} alt="" style={[looks.iconImage(corner(props.icon)), looks.square(props.icon)]} />

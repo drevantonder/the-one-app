@@ -1,7 +1,7 @@
 // The Home Screen's apps and widgets as each is drawn wherever it is: a widget, an icon with its name and its red count,
 // and the ⊖ that takes one off.
 import { createEffect, createMemo, createSignal, Errored, Loading, onSettled, refresh, Show, untrack } from "solid-js"
-import { Badge, call, changed, Icon, Image, type Laid, type Layout, type Located, Pressable, type Rect, Text, View, visible, Widget } from "ui"
+import { Badge, call, changed, Icon, Image, type Laid, type Layout, type Located, Pressable, type Rect, type Styles, Text, View, visible, Widget } from "ui"
 import { type Widget as WidgetItem, src } from "./types.ts"
 import { corner } from "./layout.ts"
 import { looks } from "./looks.ts"
@@ -68,8 +68,9 @@ export const Count = (props: { count?: number }) => (
 )
 
 /// An icon with its name under it, `size` across, drawn `scale` times larger. The app starts as a finger lands on it,
-/// and shows as the finger lifts, unless the finger held it, growing out of its icon.
-export function Tile(props: { name: string; icon: string; size: number; scale: number; badge?: number; onPress?: (behind: boolean, from?: From) => void; holds?: Holds; onLayout?: (event: Laid) => void }) {
+/// and shows as the finger lifts, unless the finger held it, growing out of its icon. `style` moves it, and `nameStyle`
+/// its name.
+export function Tile(props: { name: string; icon: string; size: number; scale: number; badge?: number; onPress?: (behind: boolean, from?: From) => void; holds?: Holds; onLayout?: (event: Laid) => void; style?: Styles; nameStyle?: Styles }) {
   const from = (event: Located): From => {
     const tile = event.currentTarget.getBoundingClientRect()
     const size = props.size * props.scale
@@ -87,13 +88,13 @@ export function Tile(props: { name: string; icon: string; size: number; scale: n
       }}
       onPress={(event) => tapping() && props.onPress?.(false, from(event))}
       onLayout={props.onLayout}
-      style={looks.tileBox}
+      style={[looks.tileBox, props.style]}
     >
       <View style={[looks.icon, looks.square(props.size)]}>
         <Image src={src(props.icon)} alt="" style={[looks.iconImage(corner(props.size)), looks.square(props.size)]} />
         <Count count={props.badge} />
       </View>
-      <Text style={looks.name}>{props.name}</Text>
+      <Text style={[looks.name, props.nameStyle]}>{props.name}</Text>
     </Pressable>
   )
 }

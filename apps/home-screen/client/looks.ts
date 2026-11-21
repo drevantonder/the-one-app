@@ -128,27 +128,25 @@ export const looks = styles({
   dialog: { position: "absolute", top: 0, start: 0 },
   categoryLayer: { zIndex: 10 },
   heldLayer: { zIndex: 20 },
-  // It grows out of its square and shrinks back into it, and the veil over what's behind blurs and dims with it, on
+  // Its apps fly out of its square and back into it, and the veil over what's behind blurs and dims with them, on
   // one spring, which a change on the way turns from where it is.
   veils: { opacity: { default: 1, entering: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.smooth },
-  grows: {
-    position: "absolute",
-    overflow: "hidden",
-    pointerEvents: "none",
-    borderRadius: 0,
-    transitionProperty: ["width", "height", "translateX", "translateY", "borderTopStartRadius", "borderTopEndRadius", "borderBottomEndRadius", "borderBottomStartRadius"],
-    transition: tokens.motion.smooth,
-  },
-  // Closed, kept made in its square, its corners the square's, for the next time it opens.
+  opening: { position: "absolute", overflow: "hidden", pointerEvents: "none" },
   unveiled: { opacity: 0 },
-  shrunk: { borderRadius: tokens.radius.large },
-  // What's in it shows at once as it opens, on the square's own apps, so it's seen growing out of them, and fades as it
-  // shrinks back into them.
-  shows: { position: "absolute", top: 0, start: 0, opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.quick },
-  hides: { opacity: 0, transition: tokens.motion.smooth },
+  // Its apps are handed from its square to it at once as it opens, and back once they've flown into the square again
+  // (`smooth` within half a point of it, 800 ms on), so each app is drawn once, never in both. A host that doesn't wait
+  // hands them back as it starts to close.
+  handed: { transitionProperty: ["opacity"], transitionDelay: 800 },
+  handing: { transitionDelay: 0 },
+  unseen: { opacity: 0 },
+  inOpened: { position: "absolute", top: 0, start: 0 },
   openedArea: { position: "absolute", top: 0, start: 0, overflow: "hidden", pointerEvents: "auto" },
-  contents: { transitionProperty: ["scale", "translateX", "translateY"], transition: tokens.motion.smooth },
+  // Each of its apps flies from its icon in the square.
+  flies: { transitionProperty: ["scale", "translateX", "translateY"], transition: tokens.motion.smooth },
   scaledAt: (scale: number, translateX: number, translateY: number) => ({ scale, translateX, translateY }),
+  // Its name and its apps' come in once its apps have nearly got where they go, and go first as it closes.
+  named: { opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle, transitionDelay: 250 },
+  unnamed: { opacity: 0, transitionProperty: ["opacity"], transition: tokens.motion.quick, transitionDelay: 0 },
   opened: { gap: tokens.grid[8] },
   categoryTitle: { font: tokens.type.largeTitle },
   // Its apps as Home's, spread across, four on a phone.

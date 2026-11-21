@@ -876,6 +876,10 @@
             "role": "group",
             "name": "Utilities"
           }
+        },
+        "once": {
+          "role": "button",
+          "name": "Weather"
         }
       }
     },
@@ -2524,6 +2528,10 @@
             "role": "group",
             "name": "Utilities"
           }
+        },
+        "once": {
+          "role": "button",
+          "name": "Weather"
         }
       }
     }
@@ -2642,7 +2650,11 @@
             }
           ]
         },
-        "keeps": "mid browser on WebGPU"
+        "keeps": "mid browser on WebGPU",
+        "once": {
+          "role": "button",
+          "name": "Notes"
+        }
       }
     }
   },
@@ -2667,7 +2679,11 @@
             }
           ]
         },
-        "keeps": "older iPhone"
+        "keeps": "older iPhone",
+        "once": {
+          "role": "button",
+          "name": "Notes"
+        }
       }
     }
   },
