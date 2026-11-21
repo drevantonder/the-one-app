@@ -970,7 +970,7 @@
   "Launcher on a computer": {
     "like": "Home, two pages",
     "size": [
-      980,
+      1040,
       671
     ],
     "answers": {
@@ -2235,10 +2235,262 @@
       ]
     }
   },
+  "Launcher, a full page": {
+    "like": "Launcher on a computer",
+    "answers": {
+      "home-screen_pages": {
+        "who": "users/mira",
+        "arranges": true,
+        "pages": [
+          {
+            "items": [
+              {
+                "entrypoint": "A1/client/index.html",
+                "name": "A1",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "A1",
+                "category": "Productivity"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "items": [
+              {
+                "entrypoint": "B1/client/index.html",
+                "name": "B1",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "B1",
+                "category": "Productivity"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "items": [
+              {
+                "entrypoint": "C1/client/index.html",
+                "name": "C1",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C1",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C2/client/index.html",
+                "name": "C2",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C2",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C3/client/index.html",
+                "name": "C3",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C3",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C4/client/index.html",
+                "name": "C4",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C4",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C5/client/index.html",
+                "name": "C5",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C5",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C6/client/index.html",
+                "name": "C6",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C6",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C7/client/index.html",
+                "name": "C7",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C7",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C8/client/index.html",
+                "name": "C8",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C8",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C9/client/index.html",
+                "name": "C9",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C9",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C10/client/index.html",
+                "name": "C10",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C10",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C11/client/index.html",
+                "name": "C11",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C11",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "C12/client/index.html",
+                "name": "C12",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "C12",
+                "category": "Productivity"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "items": [
+              {
+                "entrypoint": "D1/client/index.html",
+                "name": "D1",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D1",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D2/client/index.html",
+                "name": "D2",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D2",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D3/client/index.html",
+                "name": "D3",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D3",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D4/client/index.html",
+                "name": "D4",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D4",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D5/client/index.html",
+                "name": "D5",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D5",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D6/client/index.html",
+                "name": "D6",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D6",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D7/client/index.html",
+                "name": "D7",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D7",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D8/client/index.html",
+                "name": "D8",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D8",
+                "category": "Productivity"
+              },
+              {
+                "entrypoint": "D9/client/index.html",
+                "name": "D9",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "D9",
+                "category": "Productivity"
+              }
+            ],
+            "hidden": false
+          }
+        ],
+        "library": [],
+        "widgets": [],
+        "apps": []
+      }
+    },
+    "checks": {
+      "Its page arrows are clear of its icons": [
+        {
+          "trace": "traces/pointer-in.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Next Page"
+            }
+          }
+        },
+        {
+          "expect": {
+            "apart": {
+              "of": {
+                "role": "button",
+                "name": "Next Page"
+              },
+              "from": {
+                "role": "button"
+              }
+            }
+          }
+        },
+        {
+          "press": "Next Page"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "wait": 400
+        },
+        {
+          "expect": {
+            "apart": {
+              "of": {
+                "role": "button",
+                "name": "Previous Page"
+              },
+              "from": {
+                "role": "button"
+              }
+            }
+          }
+        }
+      ]
+    }
+  },
   "Launcher, one page": {
     "like": "Home, one page of apps",
     "size": [
-      980,
+      1040,
       671
     ],
     "answers": {
@@ -2579,7 +2831,7 @@
     "like": "Home, two pages",
     "page": "client/index.html#library",
     "size": [
-      980,
+      1040,
       671
     ],
     "answers": {
@@ -2697,7 +2949,7 @@
   "Launcher, nothing installed": {
     "like": "Home, nothing installed",
     "size": [
-      980,
+      1040,
       671
     ],
     "answers": {

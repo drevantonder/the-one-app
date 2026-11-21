@@ -1,7 +1,7 @@
 // The computer's launcher: its keys, its search floating over its card, and what the search found.
 import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js"
 import { Button, ScrollView, Empty, Icon, type Keyed, leave, reducedMotion, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
-import { along as alongOf, cell as cellOf, group, INSET, OVERHANG, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
+import { along as alongOf, cell as cellOf, group, INSET, OVERHANG, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP, TURN, TURN_INSET, TURN_ROOM } from "./layout.ts"
 import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
 import { looks } from "./looks.ts"
@@ -151,12 +151,6 @@ const widgetsOf = (owner: Owner | undefined, found: Listed[], words: string) => 
 }
 
 const HEADING = 20
-/// The chevrons at the card's sides: how big, and how far in.
-const TURN = 36
-const TURN_INSET = 6
-/// How far in from the card's sides the App Library's categories start, clear of the chevrons, as Launchpad keeps its
-/// grid clear of its page arrows.
-const TURN_ROOM = TURN_INSET + TURN + 4
 
 /// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
 type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
@@ -357,7 +351,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                 // The strip clips what rolls above and below, from as far above the pages as their badges reach.
                 const overhang = () => OVERHANG * room().scale
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
-                  <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page, pages()[index()]?.length ?? 1), overhang(), PAGE, room().height)]}>
+                  <View style={[looks.absolute, looks.at(room().side + alongOf(room(), inner.page, pages()[index()]?.length ?? 1), overhang(), PAGE, room().height)]}>
                     <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
                       <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
                     </View>

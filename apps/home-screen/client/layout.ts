@@ -14,7 +14,7 @@ export const DOTS = 32
 export const PHONE = 390
 /** A computer's launcher (DESIGN.md, Launcher): its search, a bar `SEARCH` wide and `SEARCH_HEIGHT` tall on its own
  * at the top, and `GAP` under it the card, one size whatever it shows, as Raycast's is: `ACROSS` of a phone's pages side
- * by side, each drawn `PAGE` wide, `INSET` in from the card's sides, under the owner switcher and over the page dots,
+ * by side, each drawn `PAGE` wide, `TURN_ROOM` in from the card's sides, under the owner switcher and over the page dots,
  * each in `PILLS` of it. Home, the App Library and what was found are each that card, which scrolls what's taller. */
 export const SEARCH = 600
 export const SEARCH_HEIGHT = 52
@@ -22,6 +22,11 @@ export const GAP = 14
 export const PAGE = 316
 export const ACROSS = 3
 export const INSET = 16
+/** The chevrons at the card's sides: how big, how far in, and so how far in from its sides what they'd be drawn over
+ * starts (a page's icons, the App Library's categories), clear of them as Launchpad keeps its grid clear of its page arrows. */
+export const TURN = 36
+export const TURN_INSET = 6
+export const TURN_ROOM = TURN_INSET + TURN + 4
 export const PILLS = 52
 /** How far a badge overhangs its icon's top (`looks.count`: `tokens.grid[1.5]`, 6 points where a computer's root size is
  * 16), as an iPhone's does, so what clips a computer's pages must reach that far above its first row, at the pages' scale. */
@@ -63,11 +68,11 @@ export function measure(width: number, height: number, safe: Insets): Room {
 }
 
 /// A launcher's room: its card's width, a screenful, which holds `ACROSS` of a phone's pages drawn `PAGE` wide side by
-/// side, `INSET` in from its sides, as tall as its six rows, which are a phone's tallest. It pages a screenful at a
+/// side, `TURN_ROOM` in from its sides, clear of the chevrons, as tall as its six rows, which are a phone's tallest. It pages a screenful at a
 /// time, so the screenful before and after are wholly outside it, as SpringBoard's are.
 export function launcherRoom(safe: Insets): Room {
   const scale = PAGE / PHONE
-  return { width: ACROSS * PAGE + 2 * INSET, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: ACROSS, scale, side: INSET, gap: 0, launcher: true, safe }
+  return { width: ACROSS * PAGE + 2 * TURN_ROOM, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: ACROSS, scale, side: TURN_ROOM, gap: 0, launcher: true, safe }
 }
 
 /// Where a launcher's page is along its owner's `count` pages, from the first's left: in its screenful's columns, the

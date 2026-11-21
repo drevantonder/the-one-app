@@ -1,7 +1,7 @@
 import { createMemo, createEffect, createSignal, onSettled, untrack } from "solid-js"
 import { createVelocityTracker, type Dragged, haptic, keydown, type Pressed, reducedMotion, viewport, type Wheeled } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop } from "./pager.ts"
-import { along as alongOf, card as cardOf, cell as cellOf, INSET, lefts, PILLS, CARD_TOP } from "./layout.ts"
+import { along as alongOf, card as cardOf, cell as cellOf, lefts, PILLS, CARD_TOP } from "./layout.ts"
 import { type At, carries } from "./machine.ts"
 import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state, at, libraryScroll } from "./store.ts"
 import { type Owner, draft, keep } from "./owners.ts"
@@ -72,7 +72,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   const cardLeft = () => (viewport().width - card().width) / 2
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
-    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + alongOf(untrack(room), page, untrack(pages)[owner]?.length ?? 1) - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
+    if (untrack(launcher)) return { x: untrack(cardLeft) + untrack(room).side + alongOf(untrack(room), page, untrack(pages)[owner]?.length ?? 1) - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
     const fit = untrack(room).fit
     const screen = Math.floor(page / fit)
     const count = untrack(screens)[owner]?.[screen]?.count ?? 1
