@@ -8,13 +8,20 @@
 //     preparing ──all checked──► restarting
 //       one server at a time restarts on it, never the last ready one, as Elixir fleets roll a release: a lone ready
 //       server waits for a quiet moment (no calls for a while), or Update Now
+//     restarting ──the edge is on an older build, and a server on this one deploys it──► updating the edge
+//       that server deploys its build's edge (`core/edge/deploy.js`), which checks it and rolls it back if it doesn't
+//       answer as that build: the edge goes after the servers, from the build they run
 //     restarting ──► up to date
+//     updating the edge ──the edge runs the build──► up to date
 //
 //     any state ──a newer build──► preparing, for the newer one
 //     preparing or restarting ──a server goes back, or doesn't finish──► it's behind (which, why), and the rest go
 //       on: a machine can be off or broken, and one mustn't keep every other from a build. It tries again by itself
 //       1, 5 and then every 15 min after it went back (`RETRIES`), or at once with Update Now or a newer build
 //     up to date ──a server that missed one is back──► preparing, for it alone
+//     up to date ──the edge is behind the servers' build──► updating the edge
+//     updating the edge ──it went back, or didn't deploy in time──► up to date, with the edge behind (which server,
+//       why), which tries again as a server that went back does
 //
 // A server that's asleep or gone as an update begins, or goes while it's under way, is skipped, and caught up under
 // the same rules once it's back. Each server prepares and goes as it's told (`clients/cli/src/serving.rs`): this
@@ -28,10 +35,13 @@
 import { DurableObject } from "cloudflare:workers";
 import { relay } from "../relay/common.ts";
 
-type NetworkUpdateStatus = "up_to_date" | "preparing" | "restarting";
+type NetworkUpdateStatus = "up_to_date" | "preparing" | "restarting" | "updating_edge";
 type ServerUpdateStatus = "up_to_date" | "downloading" | "checked" | "verifying";
-/** What a server is told to do: prepare the build, take it now, or take it once it has had no calls for a while. */
-type Instruction = "prepare" | "go" | "go_when_quiet";
+/**
+ * What a server is told to do: prepare the build, take it now, take it once it has had no calls for a while, or
+ * deploy its build's edge.
+ */
+type Instruction = "prepare" | "go" | "go_when_quiet" | "deploy_edge";
 
 /** What a server last said of itself, as it says it at the relay (`OneCore.Servers.say/0`). */
 export interface Reported {
@@ -46,6 +56,10 @@ export interface Reported {
   program?: string | null;
   next_program?: string | null;
   went_back?: string | null;
+  /** Whether an app on it deploys the network's edge (One Core's hook `edge`), which the edge's own update needs. */
+  deploys_edge?: boolean;
+  /** Why the edge it last deployed went back, and of which build, until one deploys. */
+  edge_went_back?: { build: string; why: string } | null;
 }
 
 /** Who's here, as the relay says of each server it knows (`relay.ts`'s `Presence`), with the build it last said. */
@@ -96,6 +110,8 @@ interface State {
   tries?: Record<string, number>;
   /** When what's under way is taken as not finishing, in ms since 1970. */
   until?: number | null;
+  /** The server deploying the edge, while it's updated. */
+  edge_server?: string | null;
   /** When each step of the whole was reached, in ms after the build was published. */
   timings: Record<string, number>;
   /**
@@ -108,6 +124,8 @@ interface State {
 /** How long every server has to prepare, and a server that restarts to be back, as `serving.rs`'s `START`, and more. */
 const PREPARING = 10 * 60_000;
 const RESTARTING = 5 * 60_000;
+/** How long a server has to deploy the edge, as `deploy.js` takes a few minutes, with its check and a rollback. */
+const UPDATING_EDGE = 10 * 60_000;
 /** How long a server that went back waits before it tries again, after its first time, its second, and every time after. */
 const RETRIES = [1, 5, 15].map((minutes) => minutes * 60_000);
 
@@ -175,7 +193,13 @@ export class NetworkUpdater extends DurableObject<Env> {
   async alarm() {
     const state = await this.ctx.storage.get<State>("state");
     if (!state) return;
-    if (state.until && state.until <= Date.now()) {
+    if (state.until && state.until <= Date.now() && state.network_update_status === "updating_edge") {
+      const reported = await this.reported();
+      this.wentBack(state, state.edge_server!, reported[state.edge_server!]?.name, `didn't deploy the edge within ${UPDATING_EDGE / 60_000} min`);
+      this.finish(state);
+      await this.ctx.storage.put("state", state);
+      said(state, this.status(state, reported));
+    } else if (state.until && state.until <= Date.now()) {
       const reported = await this.reported();
       const preparing = state.network_update_status === "preparing";
       const late = state.servers.filter((server) => server.ready === undefined && (preparing ? server.prepared === undefined : server.went !== undefined));
@@ -236,6 +260,23 @@ export class NetworkUpdater extends DurableObject<Env> {
         state.build &&
         Object.keys(reported).some((key) => this.takes(key, presence, reported) && !wentBack.has(key) && !on(state, reported[key]) && presence[key]?.server_ready);
       if (back) this.begin(state, state.build!, presence, reported);
+      else this.updateEdge(state, presence, reported);
+      return;
+    }
+    if (status === "updating_edge") {
+      const server = state.edge_server!;
+      const said = reported[server];
+      if (!edgeBehind(state)) {
+        state.timings.edge = Date.now() - state.published!;
+        this.finish(state);
+      } else if (said?.edge_went_back && said.edge_went_back.build === state.build) {
+        this.wentBack(state, server, said.name, `the edge went back: ${said.edge_went_back.why}`);
+        this.finish(state);
+      } else if (!presence[server]?.server_ready) {
+        // One that's gone as it deploys it is behind, and one that's still here deploys it once it tries again.
+        this.wentBack(state, server, said?.name, "went before it deployed the edge");
+        this.finish(state);
+      }
       return;
     }
     const at = Date.now() - state.published!;
@@ -263,7 +304,10 @@ export class NetworkUpdater extends DurableObject<Env> {
     if (state.network_update_status === "restarting") {
       const restarting = state.servers.filter((server) => server.ready === undefined);
       const [next] = restarting.filter((server) => server.went !== undefined).concat(restarting);
-      if (!next) return this.finish(state);
+      if (!next) {
+        this.finish(state);
+        return this.updateEdge(state, presence, reported);
+      }
       if (next.went !== undefined && state.waiting_for !== "quiet") return;
       // Never the last ready one: another must answer while it restarts, unless it's asked to now.
       const others = Object.keys(presence).some((key) => key !== next.key && presence[key]?.server_ready && this.takes(key, presence, reported));
@@ -289,7 +333,25 @@ export class NetworkUpdater extends DurableObject<Env> {
     state.network_update_status = "up_to_date";
     state.waiting_for = null;
     state.until = null;
+    state.edge_server = null;
     if (state.published) state.timings.ready = Date.now() - state.published;
+  }
+
+  /**
+   * Has a server deploy the edge of the build the network's servers are on, once they're all on it and the edge is on
+   * an older one: one that's ready, on the build, and has an app that deploys it (`deploys_edge`). A server whose
+   * deploy of the edge went back tries again as one that went back from a build does (`RETRIES`, `alarm`).
+   */
+  updateEdge(state: State, presence: Record<string, Presence | null>, reported: Record<string, Reported>) {
+    if (!edgeBehind(state)) return;
+    const wentBack = new Set((state.went_back ?? []).map(({ server }) => server));
+    const [server] = Object.keys(reported)
+      .filter((key) => presence[key]?.server_ready && reported[key].deploys_edge && reported[key].version === (state.latest?.["server-code"] ?? state.build) && !wentBack.has(key))
+      .sort();
+    if (!server) return;
+    state.network_update_status = "updating_edge";
+    state.edge_server = server;
+    state.until = Date.now() + UPDATING_EDGE;
   }
 
   /** Takes `server` out of the update, saying why, as behind: the rest go on without it, and it tries again (`RETRIES`). */
@@ -305,6 +367,7 @@ export class NetworkUpdater extends DurableObject<Env> {
   instructions(state: State, reported: Record<string, Reported>): Record<string, Instruction> {
     const told: Record<string, Instruction> = {};
     if (state.network_update_status === "up_to_date") return told;
+    if (state.network_update_status === "updating_edge") return { [state.edge_server!]: "deploy_edge" };
     for (const server of state.servers) {
       if (server.ready !== undefined) continue;
       if (state.network_update_status === "preparing" && server.prepared === undefined) told[server.key] = "prepare";
@@ -342,6 +405,12 @@ export class NetworkUpdater extends DurableObject<Env> {
       },
     };
   }
+}
+
+/** Whether the edge is on an older build than the network's servers take, so one of them deploys theirs. */
+function edgeBehind(state: State) {
+  const build = state.latest?.["server-code"] ?? state.build;
+  return !!build && !!state.edge && newer(build, state.edge);
 }
 
 /**

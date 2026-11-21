@@ -30,7 +30,7 @@ interface ServerStatus {
 
 /** The network's update, as its updater says it (`builds`' `network`). */
 interface NetworkUpdate {
-  network_update_status: "up_to_date" | "preparing" | "restarting" | "held"
+  network_update_status: "up_to_date" | "preparing" | "restarting" | "updating_edge" | "held"
   build: string | null
   done: number
   of: number
