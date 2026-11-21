@@ -19,6 +19,7 @@ import copy from "@phosphor-icons/core/assets/regular/copy.svg?raw"
 import cornersIn from "@phosphor-icons/core/assets/regular/corners-in.svg?raw"
 import cornersOut from "@phosphor-icons/core/assets/regular/corners-out.svg?raw"
 import dotsThree from "@phosphor-icons/core/assets/regular/dots-three.svg?raw"
+import dotsThreeCircle from "@phosphor-icons/core/assets/regular/dots-three-circle.svg?raw"
 import file from "@phosphor-icons/core/assets/regular/file.svg?raw"
 import gearSix from "@phosphor-icons/core/assets/fill/gear-six-fill.svg?raw"
 import magnifyingGlass from "@phosphor-icons/core/assets/regular/magnifying-glass.svg?raw"
@@ -57,6 +58,7 @@ const svgs = {
   "hard-drives": hardDrives,
   robot,
   "dots-three": dotsThree,
+  "dots-three-circle": dotsThreeCircle,
   file,
   "gear-six": gearSix,
   "magnifying-glass": magnifyingGlass,
@@ -78,6 +80,7 @@ export type IconName = keyof typeof svgs
 
 const look = styles({
   icon: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0 },
+  symbol: { width: tokens.length.symbol, height: tokens.length.symbol },
   spinner: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0, animationName: "spin", animation: tokens.motion.spin },
   spinnerArc: { fill: "none", stroke: "currentColor", strokeWidth: 2 },
   button: {
@@ -132,15 +135,15 @@ const look = styles({
   badgeOutline: { backgroundColor: tokens.colour.field, color: tokens.colour.label, boxShadow: tokens.shadow.edge },
 })
 
-/// `<Icon name="plus" />`: one of the UI library's icons, by Phosphor's name for it, an icon's size, in the colour of
-/// the text around it. A name the UI library doesn't have throws the names it has. An app that wants another draws
+/// `<Icon name="plus" />`: one of the UI library's icons, by Phosphor's name for it, an icon's size (`large`: a symbol's,
+/// which is a control of its own), in the colour of the text around it. A name the UI library doesn't have throws the names it has. An app that wants another draws
 /// Phosphor's path with a `Path`.
-export function Icon(props: { name: IconName; along?: boolean }) {
+export function Icon(props: { name: IconName; along?: boolean; large?: boolean }) {
   const d = () => {
     if (!paths[props.name]) throw new Error(`No icon named "${props.name}". There are: ${Object.keys(paths).join(", ")}`)
     return paths[props.name]
   }
-  return <Svg viewBox="0 0 256 256" aria-hidden="true" style={look.icon}><Path d={d()} /></Svg>
+  return <Svg viewBox="0 0 256 256" aria-hidden="true" style={[look.icon, props.large && look.symbol]}><Path d={d()} /></Svg>
 }
 
 /// `<Spinner />`: something's under way, an icon's size.

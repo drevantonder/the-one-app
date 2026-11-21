@@ -79,9 +79,26 @@
         ]
       }
     },
-    "component": "deleted"
+    "component": "deleted",
+    "checks": {
+      "A row's menu button's mark is an icon's size, in a colour that shows": [
+        {
+          "expect": {
+            "inked": {
+              "of": {
+                "role": "button",
+                "name": "More for groceries"
+              },
+              "width": 14,
+              "contrast": 3
+            }
+          }
+        }
+      ]
+    }
   },
   "Menu Open": {
+    "checks": {},
     "like": "Recently Deleted",
     "taps": [
       "More for groceries"

@@ -284,6 +284,8 @@ export const tokens = {
   length: named({
     control: lengths.control,
     icon: lengths.icon,
+    /** A symbol that is a control of its own, as iOS's `ellipsis.circle` ends a row: 22 pt under a finger. */
+    symbol: length({ default: rem(1.25), touch: rem(1.375), phone: rem(22 / 17) }),
     /** How far an icon sits inside the edge of a square button of it, which a button with no edge of its own at the
      * end of a row pulls out by, so the icon lines up with what's under it: half of `control` less `icon`. */
     iconInset: length({ default: rem(0.5), touch: rem(0.8125), phone: rem(12.5 / 17) }),

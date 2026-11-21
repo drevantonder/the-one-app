@@ -234,7 +234,11 @@ export default {
       "Back then closes the screen": ["Add Item", { wait: 400 }, { back: true }, { expect: { gone: { role: "dialog" } } }, { back: true }, { expect: { gone: "Add Item" } }, { expect: { shown: { role: "button", name: "Vault" } } }],
     },
   },
-  "Over the page/Menu, closed": () => <OwnMenu />,
+  // As iOS's row menu is an icon's size in a colour that shows, a 44 pt target round a speck is no way into what a row does.
+  "Over the page/Menu, closed": {
+    render: () => <OwnMenu />,
+    checks: { "Its button's mark is an icon's size, in a colour that shows": [{ expect: { inked: { of: trigger, width: 14, contrast: 3 } } }] },
+  },
   "Over the page/Menu, open": { render: () => <OwnMenu />, taps: ["Open Menu"] },
   // Hovered, as a pointer does: a computer's, in a narrow window.
   "Over the page/Menu, what's chosen": { render: () => <Chosen />, touch: false, checks: menuChecks },

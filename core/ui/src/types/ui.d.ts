@@ -317,9 +317,9 @@ export declare function Row(props: {
 
 export type IconName =
   | "arrow-elbow-down-left" | "calendar-blank" | "caret-down" | "caret-left" | "caret-right" | "caret-up-down" | "check" | "copy" | "corners-in"
-  | "corners-out" | "device-mobile" | "devices" | "dots-three" | "file" | "gear-six" | "globe" | "hard-drives" | "magnifying-glass" | "minus" | "minus-circle"
+  | "corners-out" | "device-mobile" | "devices" | "dots-three" | "dots-three-circle" | "file" | "gear-six" | "globe" | "hard-drives" | "magnifying-glass" | "minus" | "minus-circle"
   | "paperclip" | "pencil-simple" | "plus" | "plus-circle" | "robot" | "squares-four" | "trash" | "warning-circle" | "x"
-export declare function Icon(props: { name: IconName; along?: boolean }): Element
+export declare function Icon(props: { name: IconName; along?: boolean; large?: boolean }): Element
 export declare function Spinner(): Element
 
 export type ButtonProps = {

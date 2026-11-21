@@ -23,6 +23,23 @@ const why = (answer, is) => {
   return "it isn't"
 }
 
+/// A picture's light at a point of the window, as WCAG's relative luminance: where the picture is `width` points across
+/// in the window, and how many of its pixels a point is.
+const lights = (png, points) => {
+  const { data, width } = PNG.sync.read(Buffer.from(png, "base64"))
+  const scale = width / points
+  const linear = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+  const luminance = (x, y) => {
+    const at = (Math.round(y * scale) * width + Math.round(x * scale)) * 4
+    return 0.2126 * linear(data[at]) + 0.7152 * linear(data[at + 1]) + 0.0722 * linear(data[at + 2])
+  }
+  return { scale, luminance }
+}
+/// How far inside a node's box its mark is looked for, in points (`inked`).
+const EDGE = 4
+/// WCAG's contrast ratio of two luminances.
+const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
+
 /// A check's steps as the harness's requests, each with what judges its answer: why it failed, or nothing.
 export function requests(steps, folder) {
   const named = (tap) => (typeof tap === "string" ? tap : tap.name ?? tap.text ?? JSON.stringify(tap))
@@ -46,7 +63,7 @@ export function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, bleeds, aligned, centred, widest, contrast, textMenu, handles, magnifier, dimmed, js } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, bleeds, aligned, centred, widest, contrast, inked, textMenu, handles, magnifier, dimmed, js } = step.expect
       // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
@@ -208,21 +225,46 @@ export function requests(steps, folder) {
           request: { op: "snap" },
           judge: (answer) => {
             if (!found) return `${named(contrast.of)} isn't drawn`
-            const { data, width } = PNG.sync.read(Buffer.from(answer.result.png, "base64"))
-            const scale = width / points
-            const luminance = (x, y) => {
-              const at = (Math.round(y * scale) * width + Math.round(x * scale)) * 4
-              const linear = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
-              return 0.2126 * linear(data[at]) + 0.7152 * linear(data[at + 1]) + 0.0722 * linear(data[at + 2])
-            }
+            const { scale, luminance } = lights(answer.result.png, points)
             const y = found.y + found.height / 2
             const outside = luminance(Math.max(0, found.x - 3), y)
             let most = 1
             for (let x = found.x; x < found.x + 4; x += 1 / scale) {
               const inside = luminance(x, y)
-              most = Math.max(most, (Math.max(inside, outside) + 0.05) / (Math.min(inside, outside) + 0.05))
+              most = Math.max(most, ratio(inside, outside))
             }
             return most < contrast.least && `${named(contrast.of)} stands off what's around it at ${most.toFixed(2)}:1, under ${contrast.least}:1`
+          },
+        })
+      }
+      // What's named has a mark you can see: its glyph (the ink in its box, which differs from the box's corner, its
+      // background) is at least `width` points across, and at least `contrast` (WCAG's ratio, 3:1 for a control's
+      // glyph) off that background where it's furthest from it, as an iOS toolbar's glyph is an icon's size in a colour
+      // that shows, not a speck.
+      if (inked) {
+        let found, points
+        out.push({ request: { op: "window" }, judge: (answer) => void (points = answer?.result?.width) })
+        out.push({ request: { op: "query", ...selector(inked.of) }, judge: (answer) => void (found = answer?.result?.nodes?.[0]?.rect) })
+        out.push({
+          request: { op: "snap" },
+          judge: (answer) => {
+            if (!found) return `${named(inked.of)} isn't drawn`
+            const { scale, luminance } = lights(answer.result.png, points)
+            // Inside its box, clear of the edge a row's hairline or its own fill is drawn along.
+            const [x0, y0, x1, y1] = [found.x + EDGE, found.y + EDGE, found.x + found.width - EDGE, found.y + found.height - EDGE]
+            const ground = luminance(x0, y0)
+            let [most, left, right] = [1, Infinity, -Infinity]
+            for (let y = y0; y < y1; y += 1 / scale)
+              for (let x = x0; x < x1; x += 1 / scale) {
+                const against = ratio(luminance(x, y), ground)
+                most = Math.max(most, against)
+                if (against > 1.5) [left, right] = [Math.min(left, x), Math.max(right, x)]
+              }
+            const wide = right >= left ? right - left : 0
+            const wrong = []
+            if (wide < inked.width) wrong.push(`its mark is ${wide.toFixed(0)} pt across, under ${inked.width}`)
+            if (most < inked.contrast) wrong.push(`its mark stands off its background at ${most.toFixed(2)}:1, under ${inked.contrast}:1`)
+            return wrong.length ? `${named(inked.of)}: ${wrong.join(", ")}` : undefined
           },
         })
       }

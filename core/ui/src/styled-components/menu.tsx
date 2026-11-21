@@ -30,6 +30,9 @@ const Opened = createContext<ReturnType<typeof createMenu> & { destructive: () =
 const look = styles({
   catcher: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, pointerEvents: "auto" },
   closed: { display: "none" },
+  // The mark of a button with no words, in the text's colour as iOS's `ellipsis.circle` is the tint's: a row's way into
+  // what it does is seen, not the grey of what's beside it.
+  more: { color: tokens.colour.label },
   placed: (top: number, left: number) => ({ position: "absolute", top, left, pointerEvents: "auto" }),
   measuring: { position: "absolute", top: 0, left: 0, opacity: 0 },
   content: {
@@ -69,7 +72,7 @@ const look = styles({
 /// `<Menu.Positioner><Menu.Content>` around `<Menu.Item value="rename">Rename</Menu.Item>`s, a `<Menu.Separator />`
 /// between groups, `<Menu.Group label="Install for">` around some under a small heading, and `<Menu.Item
 /// value="delete" destructive>Delete</Menu.Item>`: a button that opens a few things to do, under it, over the page. The
-/// trigger is three dots, named `aria-label` (More unless said); with words in it, it's a button of `variant` (a
+/// trigger is a circled ellipsis, named `aria-label` (More unless said); with words in it, it's a button of `variant` (a
 /// `Button`'s, `outline` unless said) that says them, and `size="icon"` keeps one with an icon in it to its icon. An
 /// item starts with an `<Icon />` if it's given one, and `destructive` is for what can't be undone. A press outside,
 /// Escape and choosing an item close it. In a `Row`'s `end`, a long press or a right-click on the row opens it too,
@@ -106,7 +109,13 @@ export const Menu = {
         onLayout={trigger.onLayout}
         onPress={menu.toggle}
       >
-        {inside.toArray().length ? inside() : <Icon name="dots-three" />}
+        {inside.toArray().length ? (
+          inside()
+        ) : (
+          <View style={look.more}>
+            <Icon name="dots-three-circle" large />
+          </View>
+        )}
       </Button>
     )
   },

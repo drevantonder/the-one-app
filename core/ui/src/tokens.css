@@ -52,6 +52,7 @@
   --grid-2-5: 0.625rem;
   --control: 2rem;
   --icon: 1rem;
+  --symbol: 1.25rem;
   --icon-inset: 0.5rem;
   --bar: 3.25rem;
   --gutter: 1rem;
@@ -194,6 +195,7 @@
   :root {
     --control: 2.75rem;
     --icon: 1.125rem;
+    --symbol: 1.375rem;
     --icon-inset: 0.8125rem;
     --bar: 3.5rem;
     --sheet: 28rem;
@@ -218,6 +220,7 @@
     font: -apple-system-body;
     --control: 2.5882rem;
     --icon: 1.1176rem;
+    --symbol: 1.2941rem;
     --icon-inset: 0.7353rem;
     --bar: 3.3382rem;
     --gutter: 16px;
