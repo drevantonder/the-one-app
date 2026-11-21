@@ -25,7 +25,7 @@ defmodule OneCore.Writes do
   by saying it speaks only that one, and a server runs it only where every server that could have been asked it
   first speaks it too: one from before would have run it without claiming it.
   """
-  alias OneCore.{Bucket, Iroh, Protocol, Server, Servers, User}
+  alias OneCore.{Bucket, Cache, Iroh, Protocol, Server, Servers, User}
   alias OneCore.Call.State
 
   # The protocols that keep to idempotency keys (`core/protocol.json`).
@@ -81,6 +81,8 @@ defmodule OneCore.Writes do
 
   defp claimed(write, path, asked, actor, subject) do
     record = %{"server" => Server.key(), "claim" => write.claim, "actor" => actor, "asked" => asked, "status" => "running"}
+
+    swept(subject)
 
     with :ok <- resendable(write, actor, subject),
          :exists <- Bucket.write(path, JSON.encode!(record)) do
@@ -252,6 +254,19 @@ defmodule OneCore.Writes do
       true ->
         nil
     end
+  end
+
+  # Removes what's kept of `subject`'s writes past their day, in the background, as a write is claimed, at most once an
+  # hour on each server: so none is kept much past its day, however few are written, as `OneCore.Tasks` removes tasks.
+  # A key says when it was made, so nothing is read to tell.
+  defp swept(subject) do
+    Cache.fetch(__MODULE__, {:swept, subject}, fn ->
+      Task.Supervisor.start_child(OneCore.Asks, fn ->
+        for path <- Bucket.list("#{subject}/writes/"), expired?(Path.basename(path)), do: Bucket.remove(path)
+      end)
+
+      {:commit, true, expire: :timer.hours(1)}
+    end)
   end
 
   defp expired?(key) do
