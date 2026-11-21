@@ -939,14 +939,18 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         let boundary = ((now / refresh).floor() + 1.0) * refresh;
         let tick = if boundary - now < 0.001 { boundary + refresh } else { boundary } - begun;
         between(windows);
-        while let Some((t, event)) = samples.get(next).filter(|(t, _)| *t <= tick) {
+        // What the display shows at a refresh is the frame drawn last before it (on the refresh before, or at once as
+        // input came since), so each is read just before its refresh, and the refresh then taken. Input that comes
+        // between the two (a trace's at the refresh itself, as every move of a press along `moves` is, and a mouse's
+        // notch each 50 ms is every third refresh at 60 Hz) is delivered after the read, just before the refresh's frame,
+        // never by running the clock past the read, which read that frame a refresh early and the next one again.
+        let read = tick - JUST_BEFORE;
+        while let Some((t, event)) = samples.get(next).filter(|(t, _)| *t <= read) {
             windows.run((t - elapsed()).max(0.0));
             deliver(windows, id, event)?;
             next += 1;
         }
-        // What the display shows at a refresh is the frame drawn last before it (on the refresh before, or at once as
-        // input came since), so each is read just before its refresh, and the refresh then taken.
-        windows.run((tick - JUST_BEFORE - elapsed()).max(0.0));
+        windows.run((read - elapsed()).max(0.0));
         let drew = windows.frames(id) > drawn;
         drawn = windows.frames(id);
         // What it cost since the frame before, every frame drawn meanwhile and its JS, which a frame that drew nothing
@@ -1006,6 +1010,10 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             }
         }
         frames.push(frame);
+        while let Some((_, event)) = samples.get(next).filter(|(t, _)| *t <= tick) {
+            deliver(windows, id, event)?;
+            next += 1;
+        }
         windows.run((tick - elapsed()).max(0.0));
         // What its page asked for as it ended (an app opened) is done before it's taken as still.
         between(windows);

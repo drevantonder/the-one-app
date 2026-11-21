@@ -515,8 +515,8 @@ export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; st
  * where this is, its top and its middle there (within a point), as an iPhone's folder grows out of its square and its
  * apps out of the square's. `once`: what it names is never seen
  * twice in a frame, whether a screen reader reads it or not, as a large title and its bar's small one are cross-faded.
- * `eases`: what each turn of a mouse's wheel moves goes over several frames, never as far as a turn in one, as Windows'
- * apps (WinUI) and Chrome smooth-scroll a notch (a Mac's moves at once).
+ * `eases`: what each turn of a mouse's wheel moves goes over several frames, never as far as a turn in one, and never
+ * holds still while the wheel turns, as Windows' apps (WinUI) and Chrome smooth-scroll a notch (a Mac's moves at once).
  * However it's played, what it takes out is gone once it settles. */
 export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean; keeps?: string; opensFrom?: Tap; once?: Tap; eases?: boolean }
 /** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
