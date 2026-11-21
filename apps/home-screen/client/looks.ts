@@ -136,12 +136,16 @@ export const looks = styles({
     overflow: "hidden",
     pointerEvents: "none",
     borderRadius: 0,
-    transitionProperty: ["width", "height", "translateX", "translateY", "opacity", "borderTopStartRadius", "borderTopEndRadius", "borderBottomEndRadius", "borderBottomStartRadius"],
+    transitionProperty: ["width", "height", "translateX", "translateY", "borderTopStartRadius", "borderTopEndRadius", "borderBottomEndRadius", "borderBottomStartRadius"],
     transition: tokens.motion.smooth,
   },
   // Closed, kept made in its square, its corners the square's, for the next time it opens.
   unveiled: { opacity: 0 },
-  shrunk: { opacity: 0, borderRadius: tokens.radius.large },
+  shrunk: { borderRadius: tokens.radius.large },
+  // What's in it shows at once as it opens, on the square's own apps, so it's seen growing out of them, and fades as it
+  // shrinks back into them.
+  shows: { position: "absolute", top: 0, start: 0, opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.quick },
+  hides: { opacity: 0, transition: tokens.motion.smooth },
   openedArea: { position: "absolute", top: 0, start: 0, overflow: "hidden", pointerEvents: "auto" },
   contents: { transitionProperty: ["scale", "translateX", "translateY"], transition: tokens.motion.smooth },
   scaledAt: (scale: number, translateX: number, translateY: number) => ({ scale, translateX, translateY }),

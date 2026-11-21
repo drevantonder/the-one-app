@@ -511,8 +511,9 @@ export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; st
  * as a device others load draws them (Telemetry's frame interval), which presses it as a window's late frames do.
  * `blurred`: glass shows blurred in every frame after its first, as a veil it opens does. `keeps`: the tier of
  * core/ui/devices.json whose budget each of its frames keeps, at that tier's rate, the frames a press lands and lifts
- * on too, their JS, painting and GPU as that device would take them. `opensFrom`: what `follow` names is first drawn exactly
- * where this is (within a point), as an iPhone's folder grows out of its square. `once`: what it names is never seen
+ * on too, their JS, painting and GPU as that device would take them. `opensFrom`: what `follow` names is first drawn from
+ * where this is, its top and its middle there (within a point), as an iPhone's folder grows out of its square and its
+ * apps out of the square's. `once`: what it names is never seen
  * twice in a frame, whether a screen reader reads it or not, as a large title and its bar's small one are cross-faded.
  * `eases`: what each turn of a mouse's wheel moves goes over several frames, never as far as a turn in one, as Windows'
  * apps (WinUI) and Chrome smooth-scroll a notch (a Mac's moves at once).

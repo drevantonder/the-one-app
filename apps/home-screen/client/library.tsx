@@ -46,8 +46,9 @@ const BEHIND = "background:"
 export const openedCategory = (library: Category[], key: string) =>
   key.startsWith(BEHIND) ? sorted(library, true).find((category) => category.category === key.slice(BEHIND.length)) : sorted(library, false).find((category) => category.category === key)
 
-/// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into.
-export const places: Record<string, Rect> = {}
+/// Where each category's place was drawn as it was opened, which it grows out of and shrinks back into, and its first
+/// app's icon in it (`first`), which the opened category's first app grows out of.
+export const places: Record<string, Rect & { first: Rect }> = {}
 
 /// The category made ahead: the one a finger or the pointer last went down on, or last opened, its contents made and
 /// kept, open or not, so opening it and closing it change how it's drawn, not what's made, and the frame a press lifts
@@ -96,7 +97,12 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
   // Made as a finger or the pointer goes down on it, before it's let go of.
   const ahead = (key: () => string) => (event: Located) => {
     if (!state().matches("nothing")) return
-    places[key()] = event.currentTarget.getBoundingClientRect()
+    const square = event.currentTarget.getBoundingClientRect()
+    // Its first app is in its first column, its icon in the middle of it, under the square's padding, as drawn.
+    const { category, padding, columnGap, icon } = laid()
+    const drawn = square.width / category
+    const column = (category - 2 * padding.inline - columnGap) / 2
+    places[key()] = { ...square, first: { x: square.x + (padding.inline + (column - icon) / 2) * drawn, y: square.y + padding.top * drawn, width: icon * drawn, height: icon * drawn } }
     setMade(key())
   }
   const found = (background: boolean) => findIn(props.owner.library, query(), background)

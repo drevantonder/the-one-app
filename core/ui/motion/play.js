@@ -71,12 +71,13 @@ async function play(built, scene, name, motion, hz, folder) {
   const toward = Math.sign(values.at(-1) - values[0])
   const back = motion.steady ? values.findIndex((value, n) => n > 0 && frames[n].at <= end && (value - values[n - 1]) * toward < -1) : -1
   if (back >= 0) failed.push(`it went back ${Math.abs(values[back] - values[back - 1]).toFixed(0)} pt at frame ${back + 1} (${frames[back].at} ms)`)
-  // What it opens is first drawn where what it opens from is, as an iPhone's folder grows out of its square: within a
-  // point, or a step of its own motion, which may have taken one before the frame it's first drawn on.
+  // What it opens is first drawn from where what it opens from is, its top and its middle there, as an iPhone's folder
+  // grows out of its square and its apps out of the square's: within a point, or a step of its own motion, which may
+  // have taken one before the frame it's first drawn on.
   if (origin) {
     const from = ran.answers.at(-2)?.result?.nodes?.[0]?.rect
     const drawn = frames.flatMap((frame) => (frame.rect ? [frame.rect] : []))
-    const apart = (a, b) => Math.max(...["x", "y", "width", "height"].map((side) => Math.abs(a[side] - b[side])))
+    const apart = (a, b) => Math.max(Math.abs(a.y - b.y), Math.abs(a.x + a.width / 2 - b.x - b.width / 2))
     const [first] = drawn
     const next = drawn.find((one) => apart(one, first) > 0)
     if (!from || !first) failed.push(`${from ? "what it follows" : "what it opens from"} isn't there to compare`)

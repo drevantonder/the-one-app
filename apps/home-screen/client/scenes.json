@@ -862,12 +862,20 @@
         },
         "keeps": "older iPhone",
         "follow": {
-          "role": "dialog",
-          "name": "Utilities"
+          "role": "button",
+          "name": "Weather",
+          "within": {
+            "role": "dialog",
+            "name": "Utilities"
+          }
         },
         "opensFrom": {
-          "role": "group",
-          "name": "Utilities"
+          "role": "button",
+          "name": "Weather",
+          "within": {
+            "role": "group",
+            "name": "Utilities"
+          }
         }
       }
     },
@@ -2502,12 +2510,20 @@
         },
         "keeps": "mid browser on WebGPU",
         "follow": {
-          "role": "dialog",
-          "name": "Utilities"
+          "role": "button",
+          "name": "Weather",
+          "within": {
+            "role": "dialog",
+            "name": "Utilities"
+          }
         },
         "opensFrom": {
-          "role": "group",
-          "name": "Utilities"
+          "role": "button",
+          "name": "Weather",
+          "within": {
+            "role": "group",
+            "name": "Utilities"
+          }
         }
       }
     }
