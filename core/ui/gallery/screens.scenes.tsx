@@ -55,7 +55,10 @@ export default {
   // bar's small name taking its place and the bar its glass and hairline, as UINavigationBar's large titles do.
   "Screens/A phone's first screen": {
     alone: true,
+    layout: "fullscreen",
     touch: true,
+    // An iPhone's status bar and home indicator.
+    safeArea: [47, 0, 34, 0],
     render: () => (
       <View style={look.phone}>
         <Screen heading="Notes" action={<Button>Add</Button>}>
@@ -64,7 +67,8 @@ export default {
       </View>
     ),
     checks: {
-      "Scrolled, its large title goes under the bar, which takes its glass": [{ expect: { blur: false } }, { trace: "traces/finger-pans-up.json" }, { expect: { blur: true } }, { expect: { shown: { role: "heading", name: "Notes" } } }],
+      // Its glass reaches the window's sides and goes up under the status bar, as UINavigationBar's does.
+      "Scrolled, its large title goes under the bar, which takes its glass": [{ expect: { blur: false } }, { trace: "traces/finger-pans-up.json" }, { expect: { blur: true } }, { expect: { shown: { role: "heading", name: "Notes" } } }, { expect: { at: { of: { role: "banner" }, x: 0, y: 0, width: 390 } } }],
       // iOS's sizes at its usual text size (17 pt): the large title 34 pt (`.largeTitle`), the bar's 17 (`.headline`), each
       // with its lines' height and the room around them.
       "On a phone, the large title is 34 pt and the bar's title 17": [
@@ -75,9 +79,10 @@ export default {
     },
     motions: { "Scrolled under its bar": { from: { x: 195, y: 600 }, gesture: { swipe: [0, -200], speed: 400 }, follow: { role: "heading", name: "Notes" }, once: { role: "heading", name: "Notes" } } },
   },
-  "Screens/Settings": { alone: true, size: [1100, 720], render: () => <View style={look.window}>{settings()}</View> },
+  "Screens/Settings": { alone: true, layout: "fullscreen", size: [1100, 720], render: () => <View style={look.window}>{settings()}</View> },
   "Screens/A large title": {
     alone: true,
+    layout: "fullscreen",
     size: [750, 475],
     render: () => (
       <View style={look.narrow}>

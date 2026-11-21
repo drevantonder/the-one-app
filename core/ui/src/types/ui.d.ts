@@ -458,7 +458,8 @@ export declare function Widget(props: {
 // Scenes: a component's or a screen's states, named, each drawn as it is with what it shows, for the gallery
 // (core/ui/gallery) and for drawing each natively and on the web (core/ui/scenes.js). A scene is what to
 // draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
-// (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
+// (`alone`: something over the page), drawn edge to edge in its window, as a whole screen is, rather than inset in it
+// (`layout: "fullscreen"`, as Storybook's), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
 // finger points at it (`touch`), what its window keeps at each edge (`safeArea`, top, right, bottom and left: a phone's
 // status bar and home indicator), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
 // people do with it and what must hold as they do (`checks`, `bun motion.js --checks`), with the seeds a check once
@@ -466,7 +467,7 @@ export declare function Widget(props: {
 // words a scene that shows an error says it logs (`errors`: "Couldn't reach the network"). Its name is its family's and its own: "Buttons/Variants".
 export type Scene =
   | (() => Element)
-  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; errors?: string[]; safeArea?: [number, number, number, number]; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
+  | { render: () => Element; taps?: Tap[]; alone?: boolean; layout?: "fullscreen"; size?: [number, number]; touch?: boolean; errors?: string[]; safeArea?: [number, number, number, number]; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
 /** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
  * press held `hold` ms or tapped `clicks` times (an `agent`'s comes as an agent's request to a device's window does, by the inspector, though
  * nobody could press it, as on a panel put away), the pointer moved onto something (`hover`), a button held `down` on something and let go (`up`), input played as
@@ -494,9 +495,10 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
  * or not (`magnifier`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and at most `js`
  * MB held by its page's JS, collected first (the inspector's `js_bytes`), as a page that keeps what it no longer shows
- * grows past it, whether `settle` says it's `settled`, and where something is drawn (`at`: `{ of, y }`, in points,
- * within one), so what comes in above it is seen not to push it. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unclipped?: Tap; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; y: number } }
+ * grows past it, whether `settle` says it's `settled`, and where something is drawn (`at`: `{ of, x, y, width }`, each
+ * given in points, within one), so what comes in above it is seen not to push it, and a bar's glass is seen to reach the
+ * window's edges. */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; unclipped?: Tap; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; x?: number; y?: number; width?: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input

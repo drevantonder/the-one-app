@@ -66,7 +66,10 @@ render(() => (
       </ScrollView>
     }
   >
-    {(scene) => <View style={look.alone}>{draw(scene())}</View>}
+    {(scene) => {
+      const shown = scene()
+      return typeof shown !== "function" && shown.layout === "fullscreen" ? draw(shown) : <View style={look.alone}>{draw(shown)}</View>
+    }}
   </Show>
   </Show>
 ))
