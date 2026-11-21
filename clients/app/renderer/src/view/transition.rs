@@ -266,8 +266,10 @@ impl Moving {
         }
     }
 
+    /// Where it's drawn at `now`: where it's going, once it's arrived there (`done`), so the frame it arrives in, the
+    /// last it's drawn moving, draws it where it rests, not a hair short, where nothing draws it again.
     fn at(&self, now: f64) -> Value {
-        self.state(now).0
+        if self.done(now) { self.to.clone() } else { self.state(now).0 }
     }
 
     fn done(&self, now: f64) -> bool {
@@ -336,6 +338,10 @@ impl Flip {
     fn state(&self, now: f64) -> [(f64, f64); 4] {
         let seconds = ((now - self.start) / 1000.0).max(0.0);
         std::array::from_fn(|at| DRAGGED.at(self.off[at], self.velocity[at], seconds))
+    }
+
+    fn done(&self, now: f64) -> bool {
+        self.state(now).iter().all(|(off, velocity)| Spring::arrived(*off, *velocity, 0.1))
     }
 }
 
@@ -505,7 +511,8 @@ impl Transitions {
 
     /// How far from where it's laid out node `id` is drawn at `now`, on its way there: along, down, wider and taller.
     pub fn flip(&self, id: Id, now: f64) -> Option<[f32; 4]> {
-        self.flips.get(&id).map(|flip| flip.state(now).map(|(off, _)| off as f32))
+        // Arrived, it's where it's laid out, as `Moving::at` has it.
+        self.flips.get(&id).map(|flip| if flip.done(now) { [0.0; 4] } else { flip.state(now).map(|(off, _)| off as f32) })
     }
 
     /// Node `id` is dragged `offset` pixels, along and down, from where its style puts it, held there.
@@ -576,7 +583,8 @@ impl Transitions {
             }
             axis.rest = Some(rest);
         }
-        let [(x, _), (y, _)] = dragged.state(now);
+        // Arrived, it's where its style puts it, as `Moving::at` has it.
+        let [(x, _), (y, _)] = if dragged.done(now) { [(0.0, 0.0); 2] } else { dragged.state(now) };
         computed.look.translate = (Offset::Px(rests[0] + x as f32), Offset::Px(rests[1] + y as f32));
         true
     }
@@ -616,11 +624,14 @@ impl Transitions {
         self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.flips.keys().copied())
     }
 
-    /// The nodes moving only by their own move, growth and fade (`translateX`, `translateY`, `scale`, `opacity`),
-    /// which change nothing in them, so what's in them can be drawn once and moved (`view::Layer`).
-    pub fn moving_whole(&self) -> HashSet<Id> {
+    /// The nodes moving at `now` only by their own move, growth and fade (`translateX`, `translateY`, `scale`,
+    /// `opacity`), which change nothing in them, so what's in them can be drawn once and moved (`view::Layer`). One
+    /// that's arrived by then isn't: the frame it arrives in draws it as it rests, as every frame after it does, not its
+    /// layer's picture grown or shrunk, which a picture drawn where it rests isn't the same as.
+    pub fn moving_whole(&self, now: f64) -> HashSet<Id> {
         let whole = |property: &str| matches!(property, "translateX" | "translateY" | "scale" | "opacity");
-        let mut ids: HashSet<Id> = self.moving.keys().filter(|(_, property)| whole(property)).map(|(id, _)| *id).chain(self.dragged.keys().copied()).collect();
+        let on_the_way = self.moving.iter().filter(|((_, property), moving)| whole(property) && !moving.done(now)).map(|((id, _), _)| *id);
+        let mut ids: HashSet<Id> = on_the_way.chain(self.dragged.iter().filter(|(_, dragged)| !dragged.done(now)).map(|(id, _)| *id)).collect();
         for (id, _) in self.moving.keys().filter(|(_, property)| !whole(property)) {
             ids.remove(id);
         }
@@ -631,7 +642,7 @@ impl Transitions {
     pub fn finish(&mut self, now: f64) -> bool {
         self.moving.retain(|_, moving| !moving.done(now));
         self.dragged.retain(|_, dragged| !dragged.done(now));
-        self.flips.retain(|_, flip| !flip.state(now).iter().all(|(off, velocity)| Spring::arrived(*off, *velocity, 0.1)));
+        self.flips.retain(|_, flip| !flip.done(now));
         !self.moving.is_empty() || !self.dragged.is_empty() || !self.animated.is_empty() || !self.flips.is_empty()
     }
 

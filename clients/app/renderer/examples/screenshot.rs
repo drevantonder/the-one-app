@@ -1053,7 +1053,9 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         // What its page asked for as it ended (an app opened) is done before it's taken as still.
         between(windows);
         windows.run(0.0);
-        let still = !windows.wanted();
+        // Still once nothing's wanted and the frame drawn last has been read: one drawn as it went still (a change a
+        // delay held till this refresh) is the last the display shows.
+        let still = !windows.wanted() && windows.frames(id) == drawn;
         if next == samples.len() && (still || tick >= length + after) {
             break;
         }

@@ -187,7 +187,7 @@ impl Screen {
         }
         // What's moving, growing or fading and nothing else, with nothing in it changing, moving otherwise or holding
         // the keyboard, is drawn from its layer, moved; anything else in it that changes draws it all again.
-        let whole = self.transitions.moving_whole();
+        let whole = self.transitions.moving_whole(now);
         let mut touched = HashSet::new();
         let focused = self.states.focused.filter(|id| self.editing.fields.contains_key(id));
         for id in changed.iter().chain(&states).chain(moving.iter().filter(|id| !whole.contains(id))).chain(&focused).copied() {

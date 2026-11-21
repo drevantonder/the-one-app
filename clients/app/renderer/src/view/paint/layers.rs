@@ -211,10 +211,10 @@ impl Painter<'_> {
             self.intersections.push((id, drawn.intersects(&self.near)));
         }
         let radii = Corners {
-            top_left: corner(look.radii.top_left, bounds.size),
-            top_right: corner(look.radii.top_right, bounds.size),
-            bottom_right: corner(look.radii.bottom_right, bounds.size),
-            bottom_left: corner(look.radii.bottom_left, bounds.size),
+            top_left: corner(look.radii.top_left, bounds.size, transform.scale),
+            top_right: corner(look.radii.top_right, bounds.size, transform.scale),
+            bottom_right: corner(look.radii.bottom_right, bounds.size, transform.scale),
+            bottom_left: corner(look.radii.bottom_left, bounds.size, transform.scale),
         };
         let scaled = |edges: Edges<f32>| Edges { top: edges.top * transform.scale, right: edges.right * transform.scale, bottom: edges.bottom * transform.scale, left: edges.left * transform.scale };
         // Shadows under it, the first nearest, then what shows through it, its fill and border, then shadows inside.

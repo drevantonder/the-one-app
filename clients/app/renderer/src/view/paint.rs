@@ -365,10 +365,11 @@ impl Scale for Bounds<f32> {
     }
 }
 
-/// A corner's radius in pixels, for a box of `size`, no more than half its shorter side, as CSS draws it.
-pub(super) fn corner(radius: Radius, size: Size<f32>) -> f32 {
+/// A corner's radius in pixels, for a box drawn `size`, grown `scale` times with what's around it (a radius in points
+/// grows with it, as a CSS transform's), no more than half its shorter side, as CSS draws it.
+pub(super) fn corner(radius: Radius, size: Size<f32>, scale: f32) -> f32 {
     let px = match radius {
-        Radius::Px(px) => px,
+        Radius::Px(px) => px * scale,
         Radius::Percent(percent) => size.width.min(size.height) * percent / 100.0,
     };
     px.min(size.width / 2.0).min(size.height / 2.0).max(0.0)
