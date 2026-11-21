@@ -400,6 +400,7 @@ impl Screen {
                 self.fetched.insert(src.clone(), None);
                 if let Some(fetch) = self.fetch.as_mut() {
                     fetch(&src);
+                    self.fetching.insert(src);
                 }
             }
         }

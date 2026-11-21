@@ -502,7 +502,10 @@ impl Screen {
         if self.js.has_posted() || self.late.as_ref().is_some_and(super::Late::holding) {
             pending.push(json!({"kind": "posted"}));
         }
-        // A picture decoding in the background is drawn once it's ready.
+        // A picture on its way from its window (`fetch`), and one decoding in the background, drawn once it's ready.
+        if !self.fetching.is_empty() {
+            pending.push(json!({"kind": "fetch", "src": self.fetching.iter().collect::<Vec<_>>()}));
+        }
         if self.pictures.pending() > 0 {
             pending.push(json!({"kind": "picture", "decoding": self.pictures.pending()}));
         }

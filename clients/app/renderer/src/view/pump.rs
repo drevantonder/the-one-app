@@ -277,6 +277,7 @@ impl Screen {
     /// The picture at `src`, as its page names it, fetched by its window: as a `data:` address, or none where it wasn't
     /// found.
     pub fn fetched(&mut self, src: &str, data: Option<String>) {
+        self.fetching.remove(src);
         self.fetched.insert(src.to_owned(), data);
     }
 }

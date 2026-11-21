@@ -181,6 +181,9 @@ async function press(frame, name) {
   await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
 }
 
+/// The longest the web half waits for a scene to settle before it takes its picture anyway, saying what's pending.
+const SETTLES_WITHIN_MS = 10000
+
 /// A scene drawn by our renderer on the web, in headless Chromium's WebGPU, as `web.png`, once its first frame is drawn
 /// and what moves as it opens has settled, on the native harness's clock, language and time zone, each tap pressed
 /// through its ARIA tree.
@@ -194,8 +197,15 @@ async function web(browser, serve, key, scene, folder) {
   await page.goto(serve.url(`${key} (web)`))
   const frame = await (await page.waitForSelector("#page")).contentFrame()
   const drawn = await frame.waitForFunction(() => "drawn" in document.documentElement.dataset, null, { timeout: 20000 }).then(() => true, () => false)
-  await page.waitForTimeout(1000)
-  for (const name of drawn ? scene.taps : []) await press(frame, name).then(() => page.waitForTimeout(1000))
+  // Each picture is taken once the renderer says nothing is pending, as the native harness's `settle`, and the frame
+  // it drew last is on the screen.
+  const settled = async () => {
+    const { settled, pending } = await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), SETTLES_WITHIN_MS)
+    if (!settled) problems.push(`it didn't settle within ${SETTLES_WITHIN_MS} ms: ${JSON.stringify(pending)}`)
+    await frame.evaluate(() => new Promise((shown) => requestAnimationFrame(() => requestAnimationFrame(shown))))
+  }
+  if (drawn) await settled()
+  for (const name of drawn ? scene.taps : []) await press(frame, name).then(settled)
   if (drawn) await page.screenshot({ path: join(folder, "web.png") })
   await page.close()
   return drawn ? { problems } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
@@ -354,6 +364,7 @@ for (const target of targets) {
       process.exitCode = 1
     }
     if (ssh && !drawn.missing) said.push(...(await onDevice(drawn, folder)))
+    for (const problem of onWeb.problems ?? []) said.push(`  web: ${problem}`)
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
     else if (onTheWeb && !drawn.missing) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))

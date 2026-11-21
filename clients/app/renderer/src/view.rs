@@ -241,6 +241,8 @@ pub struct Screen {
     /// Each picture its page names by an address rather than a `data:` one, as a `data:` address once its window has
     /// fetched it (`fetched`), or none while it's on its way or wasn't found; and what fetches one, the window's.
     fetched: HashMap<String, Option<String>>,
+    /// Each picture asked of `fetch` that hasn't come back yet (`fetched`), which `settle` waits for.
+    fetching: HashSet<String>,
     pub fetch: Option<Box<dyn FnMut(&str)>>,
     /// What a fetch brought back off the window's own turn, which it takes as its page's posts (`fetched`, as each
     /// comes): a harness's, which reads its page's files as the page asks.
@@ -372,6 +374,7 @@ impl Screen {
             intersecting: HashMap::new(),
             pictures: Default::default(),
             fetched: HashMap::new(),
+            fetching: HashSet::new(),
             fetch: None,
             arrived: Default::default(),
             rects: Rects::new(),

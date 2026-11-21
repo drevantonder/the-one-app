@@ -115,6 +115,8 @@
       unopened,
     })
     step("opened")
+    // What a harness asks before it takes a picture, as a native window's inspector answers `settle`.
+    Object.assign(globalThis, { inspector: { settle: renderer.settle } })
     addEventListener("message", ({ source, data }) => source === parent && !answered(data) && renderer.message(data))
     // The canvas as the DOM says it is, in device pixels, and how many to a CSS pixel (the display's and the zoom),
     // and what happens on it.

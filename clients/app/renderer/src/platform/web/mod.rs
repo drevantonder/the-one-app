@@ -39,6 +39,8 @@ thread_local! {
     /// The windows, once the page's canvas has its GPU (`open`).
     static WINDOWS: RefCell<Option<Windows>> = const { RefCell::new(None) };
     static JOBS: RefCell<VecDeque<Job>> = const { RefCell::new(VecDeque::new()) };
+    /// What each `settle` waiting resolves, by its number, and the last number given.
+    static SETTLING: RefCell<(u32, std::collections::HashMap<u32, js_sys::Function>)> = RefCell::new((0, std::collections::HashMap::new()));
     /// A microtask is on its way to run what's queued, and a turn is running now.
     static SOON: Cell<bool> = const { Cell::new(false) };
     static TURNING: Cell<bool> = const { Cell::new(false) };
@@ -861,6 +863,35 @@ pub fn component(styles: String) -> Result<(), JsError> {
     crate::tokens::load_component(&styles).map_err(|error| JsError::new(&format!("{error:#}")))?;
     crate::load_styles(&styles).map_err(|error| JsError::new(&format!("{error:#}")))?;
     Ok(())
+}
+
+/// Resolves once nothing on the page, or its frames' pages, is pending (what it asked, a picture fetched or decoding,
+/// what moves), with what settled says, as the inspector's `settle` answers natively (`Screen::inspect`), or at
+/// `deadline` ms with what still is: what a harness waits for before it takes a picture (core/ui's scenes.js).
+#[wasm_bindgen]
+pub fn settle(deadline: f64) -> js_sys::Promise {
+    js_sys::Promise::new(&mut |resolve, _| {
+        let number = SETTLING.with_borrow_mut(|(next, waiting)| {
+            *next += 1;
+            waiting.insert(*next, resolve);
+            *next
+        });
+        let _ = Native::get().map(|native| {
+            native.run(move |windows| {
+                let request = crate::inspect::Request { id: Value::Null, op: "settle".into(), inputs: serde_json::Map::from_iter([("deadline".to_owned(), Value::from(deadline))]) };
+                windows.with(WINDOW, |screen| {
+                    screen.inspect(
+                        request,
+                        Box::new(move |answer| {
+                            if let Some(resolve) = SETTLING.with_borrow_mut(|(_, waiting)| waiting.remove(&number)) {
+                                let _ = resolve.call1(&JsValue::NULL, &js_sys::JSON::parse(&answer["result"].to_string()).unwrap_or(JsValue::NULL));
+                            }
+                        }),
+                    )
+                });
+            })
+        });
+    })
 }
 
 /// The runtime version this renderer draws (`crate::RUNTIME_VERSION`), which a page's entrypoint names.
