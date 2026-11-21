@@ -10,7 +10,7 @@
   ],
   "who": true,
   "scripts": {
-    "build": "bun ../../../core/ui/dist/build/app.js \"$PWD/page\" \"$PWD/files/sign-in\"",
+    "build": "bun ../../../core/ui/dist/build/app.js \"$PWD/page\" \"$PWD/files/sign-in\" apps/sign-in/edge/page",
     "typecheck": "tsc && tsc -p page",
     "generate": "bun generate.ts"
   },

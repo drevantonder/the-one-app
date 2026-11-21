@@ -1,6 +1,6 @@
 // Building a folder into what the harness loads: the UI library, an app's client and its page.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, writeFileSync } from "node:fs"
-import { basename, dirname, join } from "node:path"
+import { basename, dirname, join, relative } from "node:path"
 import { here, out, root } from "./options.js"
 
 /// When a file under `paths` last changed, the latest.
@@ -93,14 +93,14 @@ export function build(target, built) {
   const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
   const ofComponent = (scene) => !!scene && (scene.component || ofComponent(scenes[scene.like]))
   if (!Object.keys(scenes).length || Object.values(scenes).some((scene) => !ofComponent(scene))) {
-    const made = Bun.spawnSync(["bun", library("build/app.js"), target, built])
+    const made = Bun.spawnSync(["bun", library("build/app.js"), target, built, relative(root, target)])
     servedAsIs(target, built)
     if (made.exitCode !== 0) return `didn't build\n${made.stderr.toString().trim()}`
   }
   const named = [...new Set(Object.values(scenes).map((scene) => scene.component).filter(Boolean))]
   if (!named.length) return
   const at = join(built, COMPONENTS)
-  const made = Bun.spawnSync(["bun", library("build/app.js"), join(target, "client"), at])
+  const made = Bun.spawnSync(["bun", library("build/app.js"), join(target, "client"), at, relative(root, join(target, "client"))])
   if (made.exitCode !== 0) return `its components didn't build\n${made.stderr.toString().trim()}`
   for (const component of named) {
     writeFileSync(join(at, `${component}.scene.js`), `import { ListStyle, render } from "/ui/client/ui.js"
@@ -125,7 +125,7 @@ export function usedApp(app, out) {
     const client = join(root, "apps", app, "client")
     const packages = install(client)
     if (packages) throw new Error(`${app}'s packages didn't install: ${packages}`)
-    const made = Bun.spawnSync(["bun", library("build/app.js"), client, folder])
+    const made = Bun.spawnSync(["bun", library("build/app.js"), client, folder, relative(root, client)])
     if (made.exitCode !== 0) throw new Error(`${app}'s components didn't build: ${made.stderr}`)
     usedApps.set(app, folder)
   }

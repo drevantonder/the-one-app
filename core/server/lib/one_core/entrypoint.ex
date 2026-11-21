@@ -59,8 +59,10 @@ defmodule OneCore.Entrypoint do
   An untrusted app is a stranger's, whose app's build could otherwise read the server's files (an import of any
   path) or run its own code. So unless it's `trusted`, its packages install without their scripts, and it's built in a
   sandbox (`OneCore.Sandbox.run/3`), which reads only Bun, the UI library's build and the app.
+
+  The build's sourcemaps name each file as the app's repo does, `apps/<name>/client/<file>`, which an error reports.
   """
-  def build(files, trusted) do
+  def build(name, files, trusted) do
     {app, rest} = Map.split_with(files, fn {path, _} -> String.starts_with?(path, @client) end)
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
@@ -72,7 +74,7 @@ defmodule OneCore.Entrypoint do
       with {:ok, bun} <- bun(),
            {:ok, builder} <- builder(bun),
            :ok <- install(bun, source, trusted),
-           :ok <- built(bun, builder, source, out, trusted) do
+           :ok <- built(bun, builder, source, out, "apps/#{name}/client", trusted) do
         built =
           for path <- Path.wildcard(Path.join(out, "**"), match_dot: true), File.regular?(path), into: %{} do
             {@client <> Path.relative_to(path, out), File.read!(path)}
@@ -229,15 +231,15 @@ defmodule OneCore.Entrypoint do
     end
   end
 
-  defp built(bun, builder, source, out, true),
-    do: run(bun, [Path.join(builder, "app.js"), source, out], "The app didn't build", builder)
+  defp built(bun, builder, source, out, where, true),
+    do: run(bun, [Path.join(builder, "app.js"), source, out, where], "The app didn't build", builder)
 
-  defp built(bun, builder, source, out, false) do
+  defp built(bun, builder, source, out, where, false) do
     File.mkdir_p!(out)
     bun = real(bun)
     policy = %{read: [Path.dirname(bun), builder], write: [source, out], env: %{"HOME" => "/tmp", "NO_COLOR" => "1"}, memory: nil}
 
-    case OneCore.Sandbox.run(bun, [Path.join(builder, "app.js"), source, out], policy) do
+    case OneCore.Sandbox.run(bun, [Path.join(builder, "app.js"), source, out, where], policy) do
       {:error, why} -> {:error, why}
       {_, 0} -> :ok
       {said, _} -> {:error, "The app didn't build:\n#{String.trim(said)}"}

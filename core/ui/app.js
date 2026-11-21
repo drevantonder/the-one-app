@@ -1,4 +1,6 @@
-// Builds an app: `bun app.js <source> <out>`. A server runs it, as the UI library it serves holds it (build.js), when a
+// Builds an app: `bun app.js <source> <out> [<where>]`, where `<where>` is the folder `<source>` is in the app's repo
+// (`apps/home-screen/client`), which its sourcemaps name each file by, so an error says which app's file it threw in.
+// A server runs it, as the UI library it serves holds it (build.js), when a
 // app with an app is deployed, on the app's source as it was deployed, and serves what it writes to <out>. Each
 // `.html` in <source> is a page, and each module its package.json `exports` (`"./profile": "./profile.tsx"`) is built as
 // `<name>.js`, with its exports, for another app's page to import: a component it draws. What every app shares (Solid,
@@ -14,7 +16,7 @@ import solid from "@solidjs/vite-plugin"
 import { build, normalizePath, parseAst } from "vite"
 import { newMade, stylesPlugin, stylesTable } from "./tables.ts"
 
-const [source, out] = process.argv.slice(2)
+const [source, out, where = ""] = process.argv.slice(2)
 
 // What an app imports that the app `ui` serves, by where it's served (ui/build.js).
 const shared = { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js", "@solidjs/web": "/ui/client/web.js", ui: "/ui/client/ui.js" }
@@ -49,7 +51,11 @@ try {
         external: Object.keys(shared),
         // A module another page imports keeps its name and what it exports.
         preserveEntrySignatures: "exports-only",
-        output: { paths: shared, entryFileNames: (entry) => (exported.some(([name]) => name === entry.name) ? "[name].js" : "assets/[name]-[hash].js") },
+        output: {
+          paths: shared,
+          sourcemapPathTransform: (path, map) => join(where, relative(source, resolve(dirname(map), path))),
+          entryFileNames: (entry) => (exported.some(([name]) => name === entry.name) ? "[name].js" : "assets/[name]-[hash].js"),
+        },
       },
     },
   })

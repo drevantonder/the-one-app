@@ -412,7 +412,7 @@ defmodule OneCore.Apps.Deploy do
   # An app's entrypoint is built against this server's UI library (`OneCore.Entrypoint`).
   defp built(owner, name, files, trusted) do
     if Entrypoint.client?(files),
-      do: built_before(Apps.app(owner, name), files) || Entrypoint.build(files, trusted),
+      do: built_before(Apps.app(owner, name), files) || Entrypoint.build(name, files, trusted),
       else: {:ok, files}
   end
 
