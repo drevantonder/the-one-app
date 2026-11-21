@@ -1,5 +1,5 @@
 // Draws every scene on a native host, and with `--web` on the web too, and compares them: `bun scenes.js [<folder>…] [--scene <words>]
-// [--out <dir>] [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
+// [--out <dir>] [--against <dir>] [--dark] [--touch] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
 // harness>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
 // --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
@@ -32,6 +32,10 @@
 // reads, which a client answers at once from what it keeps: its first content is when it's had every answer, and a
 // scene whose page takes longer than OPENS_WITHIN_MS to it, as one that asks again for what an answer said or opens on
 // a tool that changes something does, fails, which the exit status says.
+//
+// A scene under a finger is on a phone, whose window's top and bottom the device keeps for itself (IPHONE's, unless it
+// says its own `safeArea`): words or a control drawn under its status bar, or under its home indicator but for what
+// scrolls there, fail it. `--touch` draws every scene a phone's width (under COMPACT) under a finger, as on a phone.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -50,6 +54,7 @@ const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : u
 // Its own worktree's, never a folder every agent on the machine shares, where one ran with another's UI build.
 const out = resolve(option("--out") ?? join(root, "target", "scenes"))
 const dark = flag("--dark")
+const touched = flag("--touch")
 const onTheWeb = flag("--web")
 // Every scene in a window this size, as a computer's, where it says none of its own.
 const sized = option("--size")?.split("x").map(Number)
@@ -78,21 +83,26 @@ async function scenesOf(target, built) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch = false, timeZone = "UTC", errors } = whole(scene)
+      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch = false, timeZone = "UTC", errors, safeArea } = whole(scene)
       const at = whole(scene).page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")
       const [page, link] = at.split("#")
       const eased = Object.values(whole(scene).motions ?? {}).find((motion) => motion.eases && motion.gesture?.trace)
       const wheel = eased && JSON.parse(readFileSync(join(target, "client", eased.gesture.trace), "utf8")).find((event) => event.kind === "wheel")
-      return { name, page, link, uses, answers, taps, size, touch, timeZone, errors, wheel }
+      const fingered = touch || (touched && size[0] < COMPACT)
+      return { name, page, link, uses, answers, taps, size, touch: fingered, timeZone, errors, safeArea: safeArea ?? (fingered ? IPHONE : undefined), wheel }
     })
   }
   // The gallery lists its own, drawn at `#scenes` by the native harness (motion.js).
-  return (await gallery(target, built, join(out, basename(target), ".scenes"), true)).map((scene) => ({ ...scene, size: sized ?? scene.size, timeZone: "UTC" }))
+  return (await gallery(target, built, join(out, basename(target), ".scenes"), true)).map((scene) => {
+    const size = sized ?? scene.size
+    const fingered = scene.touch || (touched && size[0] < COMPACT)
+    return { ...scene, size, touch: fingered, safeArea: scene.safeArea ?? (fingered ? IPHONE : undefined), timeZone: "UTC" }
+  })
 }
 
 /// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would. The frame
 /// is the page's own, or `src`, the renderer's frame that draws it (`web`).
-const host = (page, link, answers, [width, height], touch, src = `/${page}${link ? `#${encodeURIComponent(link)}` : ""}`) => `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}iframe{border:0;width:${width}px;height:${height}px;display:block}</style>
+const host = (page, link, answers, [width, height], touch, safeArea, src = `/${page}${link ? `#${encodeURIComponent(link)}` : ""}`) => `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}iframe{border:0;width:${width}px;height:${height}px;display:block}</style>
 <iframe id="page" src="${src}"></iframe>
 <script>
 const answers = ${JSON.stringify(answers)}
@@ -101,7 +111,7 @@ addEventListener("message", ({ data, source }) => {
   if (!data || data.id === undefined) return
   const reply = (body) => source.postMessage({ jsonrpc: "2.0", id: data.id, ...body }, "*")
   const own = (method) => (method in answers ? answers[method] : undefined)
-  if (data.method === "ui/initialize") return reply({ result: own("ui/initialize") ?? { hostContext: { containerDimensions: { width: ${width}, height: ${height} }, deviceCapabilities: { touch: ${touch}, hover: ${!touch} }, theme: ${JSON.stringify(dark ? "dark" : "light")} } } })
+  if (data.method === "ui/initialize") return reply({ result: own("ui/initialize") ?? { hostContext: { containerDimensions: { width: ${width}, height: ${height} }, deviceCapabilities: { touch: ${touch}, hover: ${!touch} }, theme: ${JSON.stringify(dark ? "dark" : "light")}${safeArea ? `, safeAreaInsets: ${JSON.stringify(insets(safeArea))}` : ""} } } })
   if (data.method === "tools/call") {
     const answer = own(data.params.name)
     if (answer === undefined || answer?.$error) return reply({ result: { isError: true, content: [{ type: "text", text: answer?.$error ?? "No answer for " + data.params.name }] } })
@@ -136,7 +146,7 @@ function server(built, target, used) {
   return {
     url: (key) => `http://localhost:${listener.port}/host.html?scene=${encodeURIComponent(key)}`,
     // The renderer's frame, drawing the page at its address here.
-    hostWeb: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch, `/renderer/?runtime=${needed}#/${scene.page}${scene.link ? `#${encodeURIComponent(scene.link)}` : ""}`)),
+    hostWeb: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch, scene.safeArea, `/renderer/?runtime=${needed}#/${scene.page}${scene.link ? `#${encodeURIComponent(scene.link)}` : ""}`)),
     stop: () => listener.stop(true),
   }
 }
@@ -329,8 +339,8 @@ function native(built, scene, folder, used) {
   // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   // With a device to draw it too, each ends at rest with where every node is and a picture drawn afresh, to compare.
-  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...(ssh ? DRAWN : [])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
-  const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), "--time-zone", scene.timeZone, "--requests", "-"]
+  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...(scene.safeArea ? [{ op: "query" }] : []), ...(ssh ? DRAWN : [])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
+  const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone, "--requests", "-"]
   const run = Bun.spawnSync(capped([harness, ...asked]), { stdin: new TextEncoder().encode(requests), env })
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: stopped(run.exitCode) ?? (run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing") }
   const nodes = JSON.parse(readFileSync(join(folder, "native.json"), "utf8"))
@@ -340,7 +350,46 @@ function native(built, scene, folder, used) {
   const tree = outline({ states: {}, children: (Array.isArray(nodes) ? nodes : [nodes]).map(semantic) })
   writeFileSync(join(folder, "native.txt"), tree)
   const measured = run.stderr.toString().match(/^measured (.*)$/m)
-  return { tree, measured: measured && JSON.parse(measured[1]), answers: answered(run.stdout.toString()), at, asked, requests }
+  const said = answered(run.stdout.toString())
+  const unsafe = scene.safeArea && underTheDevice(said.at(ssh ? -DRAWN.length - 1 : -1)?.result?.nodes ?? [], scene.size[1], insets(scene.safeArea))
+  return { tree, measured: measured && JSON.parse(measured[1]), unsafe, answers: said, at, asked, requests }
+}
+
+/// A phone's safe area, top, right, bottom and left, as an iPhone with a Dynamic Island has it upright (14 Pro to 17):
+/// its status bar and its home indicator.
+const IPHONE = [59, 0, 34, 0]
+const insets = ([top, right, bottom, left]) => ({ top, right, bottom, left })
+/// The narrowest a window is that isn't a phone's, in points: Material's compact width class ends there.
+const COMPACT = 600
+
+/// What a phone draws over a window's words and controls (the harness's `query` of every node, at rest): each drawn under
+/// its status bar, or under its home indicator unless it's in what scrolls, which goes under it as UIKit's scroll views'
+/// content does. Under the status bar, what's scrolled there is meant to be, as under a bar, and so is what covers the
+// whole window, as a menu's backdrop that closes it does. → what's wrong, a line each.
+function underTheDevice(nodes, height, { top, bottom }) {
+  const byId = new Map(nodes.map((node) => [node.node, node]))
+  const parent = new Map(nodes.flatMap((node) => (node.children ?? []).map((child) => [child, node])))
+  const above = (node) => {
+    const all = []
+    for (let up = parent.get(node.node); up; up = parent.get(up.node)) all.push(up)
+    return all
+  }
+  // What scrolls: a scroll view, or the window itself where what's in it is taller, as a browser's document is; and
+  // whether it's scrolled, where what's in the one starts above it, or the other's top is above the window's.
+  const scrolls = (node) => node.kind === "scroll" || (!parent.has(node.node) && node.rect?.height > height + 0.5)
+  const scrolled = (node) => (node.kind === "scroll" ? (node.children ?? []).some((child) => byId.get(child)?.rect?.y < node.rect.y - 0.5) : node.rect.y < -0.5)
+  const said = (node) => node.name ?? node.role ?? node.kind
+  return nodes
+    // A control, or words but a control's own, which it's said for.
+    .filter((node) => node.rect && node.opacity > 0 && node.seen > 0 && (node.actions || (node.kind === "text" && !above(node).some((up) => up.actions))))
+    .flatMap((node) => {
+      const { y, height: tall } = node.rect
+      const over = above(node).filter(scrolls)
+      if (y <= 0.5 && y + tall >= height - 0.5) return []
+      if (y < top - 0.5 && y + tall > 0 && !over.some(scrolled)) return [`"${said(node)}" is drawn at y ${Math.round(y)}, under the status bar, whose safe area ends at ${top}`]
+      if (y + tall > height - bottom + 0.5 && y < height && !over.length) return [`"${said(node)}" is drawn down to y ${Math.round(y + tall)}, under the home indicator, whose safe area starts at ${height - bottom}`]
+      return []
+    })
 }
 
 /// What each scene ends with where a device draws it too: at rest, where each node is, and a picture drawn afresh.
@@ -446,6 +495,10 @@ for (const target of targets) {
     // A page that threw while drawing shows `render`'s Problem, whose scene says nothing of the page.
     if (drawn.tree?.includes(messages.cantShowPage)) {
       said.push(`  native: the page crashed, showing "${messages.cantShowPage}"`)
+      process.exitCode = 1
+    }
+    for (const line of drawn.unsafe ?? []) {
+      said.push(`  on a phone: ${line}`)
       process.exitCode = 1
     }
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)

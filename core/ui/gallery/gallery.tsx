@@ -25,6 +25,8 @@ const look = styles({
   scene: { gap: tokens.grid[2] },
   name: { font: tokens.type.caption, color: tokens.colour.secondaryLabel },
   alone: { padding: tokens.grid[4], gap: tokens.grid[4] },
+  // A scene alone keeps clear of what a phone keeps for itself, its status bar and home indicator, as a page does.
+  safe: { paddingTop: tokens.length.safeTop, paddingBottom: tokens.length.safeBottom, paddingStart: tokens.length.safeLeft, paddingEnd: tokens.length.safeRight },
 })
 
 const scenes: Scenes = { ...text, ...images, ...buttons, ...lists, ...fields, ...states, ...tabs, ...widgets, ...over, ...actions, ...live, ...motion, ...styling, ...screens }
@@ -68,7 +70,7 @@ render(() => (
   >
     {(scene) => {
       const shown = scene()
-      return typeof shown !== "function" && shown.layout === "fullscreen" ? draw(shown) : <View style={look.alone}>{draw(shown)}</View>
+      return typeof shown !== "function" && shown.layout === "fullscreen" ? draw(shown) : <View style={look.safe}><View style={look.alone}>{draw(shown)}</View></View>
     }}
   </Show>
   </Show>
