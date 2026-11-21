@@ -72,36 +72,38 @@ impl Renderer {
                     over: hash(&|hasher| std::hash::Hash::hash(&(size, origin.map(f32::to_bits), generation), hasher)),
                     batches: reaching.iter().map(|at| hashes[*at]).collect(),
                 };
-                // A backdrop's blur is of the whole frame drawn before it, wherever the backdrop is: the same while that
-                // is, as the first of its batch moves (a sheet carried up), it's kept.
+                // A backdrop's blur is of what's drawn before it in what it blurs (`Blur::area`): the same while that
+                // is, wherever it is and whatever else moves, as the first of its batch moves (a sheet carried up) or
+                // a switch turns beside a bar of glass, it's kept. What's drawn there is the batches before that reach
+                // it, a backdrop among them as what's behind it is, and the backdrops of its own batch before it, not
+                // it, so a backdrop fading (a veil coming in) blurs what's behind it once, not each frame.
                 let drawing: Vec<PrimitiveBatch<'_>> = reaching.iter().map(|at| batches[*at]).collect();
-                let blurs = reaching
-                    .iter()
-                    .enumerate()
-                    .map(|(at, batch)| match &batches[*batch] {
-                        PrimitiveBatch::Backdrops(backdrops) => backdrops
-                            .iter()
-                            .enumerate()
-                            .map(|(one, backdrop)| {
-                                // What's drawn before it: the batches before, and the backdrops of its own batch before
-                                // it, not it, so a backdrop fading (a veil coming in) blurs what's behind it once, not
-                                // each frame; and the region it blurs.
-                                // Safety: the scene's primitives are `#[repr(C)]` structs of numbers, as
-                                // `push_instances` reads.
-                                let earlier = unsafe { std::slice::from_raw_parts(backdrops.as_ptr().cast::<u8>(), std::mem::size_of_val(&backdrops[..one])) };
-                                let shown = backdrop.bounds.intersect(&backdrop.content_mask.bounds);
-                                let (x, y) = (shown.origin.x.0 - origin[0], shown.origin.y.0 - origin[1]);
-                                let region = [x, y, x + shown.size.width.0, y + shown.size.height.0];
-                                let behind = hash(&|hasher| std::hash::Hash::hash(&(drawn.over, &drawn.batches[..at], earlier, backdrop.blur.0.to_bits(), region.map(f32::to_bits)), hasher));
-                                let mut blur = self.plan_blur(size, backdrop.blur.0, region);
-                                blur.behind = Some(behind);
-                                blur.ready = blur.ready(&drawing, at, one, *origin);
-                                blur
-                            })
-                            .collect(),
-                        _ => Vec::new(),
-                    })
-                    .collect();
+                let mut blurs: Vec<Vec<Blur>> = Vec::with_capacity(drawing.len());
+                for (at, batch) in drawing.iter().enumerate() {
+                    let PrimitiveBatch::Backdrops(backdrops) = batch else {
+                        blurs.push(Vec::new());
+                        continue;
+                    };
+                    let mut these: Vec<Blur> = Vec::with_capacity(backdrops.len());
+                    for (one, backdrop) in backdrops.iter().enumerate() {
+                        // Safety: the scene's primitives are `#[repr(C)]` structs of numbers, as `push_instances` reads.
+                        let earlier = unsafe { std::slice::from_raw_parts(backdrops.as_ptr().cast::<u8>(), std::mem::size_of_val(&backdrops[..one])) };
+                        let shown = backdrop.bounds.intersect(&backdrop.content_mask.bounds);
+                        let (x, y) = (shown.origin.x.0 - origin[0], shown.origin.y.0 - origin[1]);
+                        let region = [x, y, x + shown.size.width.0, y + shown.size.height.0];
+                        let mut blur = self.plan_blur(size, backdrop.blur.0, region);
+                        let area = blur.area(*origin);
+                        let behind: Vec<u64> = (0..at)
+                            .filter(|before| drawing[*before].reaches(&area))
+                            .flat_map(|before| std::iter::once(drawn.batches[before]).chain(blurs[before].iter().filter_map(|blur| blur.behind)))
+                            .chain(these.iter().filter_map(|blur| blur.behind))
+                            .collect();
+                        blur.behind = Some(hash(&|hasher| std::hash::Hash::hash(&(drawn.over, &behind, earlier, backdrop.blur.0.to_bits(), region.map(f32::to_bits)), hasher)));
+                        blur.ready = blur.ready(&drawing, at, one, *origin);
+                        these.push(blur);
+                    }
+                    blurs.push(these);
+                }
                 Some(Planned { globals, batches: reaching, drawn, blurs })
             })
             .collect();

@@ -220,6 +220,68 @@ impl Scene {
     pub fn finish(&mut self) {
         self.occlude();
         self.sort();
+        self.gather();
+    }
+
+    /// Orders what's drawn again, where something blurs what's behind it (a backdrop), so backdrops are drawn together:
+    /// what overlaps something drawn before it, or what a backdrop's blur reads, still comes after it, and the rest as
+    /// early as it can, each backdrop after all else it can be drawn after, so the frame is the same to the pixel. The
+    /// renderer blurs every backdrop that's ready at once, in one blur's passes and one break in the frame
+    /// (`Renderer::draw_batches`); the order by what overlaps (`insert_primitive`) doesn't know what a blur reads round
+    /// its backdrop, so a launcher's left chevron and the page under it came after its right chevron's backdrop, in the
+    /// same batches as the right chevron's own fill, and its blur was taken alone: 9 render passes a frame where 5 draw it.
+    /// Each is first given its wave, how many blurs must be taken before it's drawn: past each blur that reads it or
+    /// whose backdrop it's over, and at least that of what it's over or, for a backdrop, what its blur reads; then
+    /// they're ordered by wave, each wave's backdrops last, and in each by the order they had.
+    fn gather(&mut self) {
+        if self.backdrops.is_empty() {
+            return;
+        }
+        let cut = |bounds: Bounds<ScaledPixels>, mask: &ContentMask<ScaledPixels>| bounds.intersect(&mask.bounds);
+        // Each primitive, as it was ordered, with what it's drawn over: its order, its kind and where it is in its list.
+        let mut all: Vec<(DrawOrder, PrimitiveKind, usize, Bounds<ScaledPixels>)> = Vec::new();
+        all.extend(self.shadows.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::Shadow, at, cut(one.reach(), &one.content_mask))));
+        all.extend(self.quads.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::Quad, at, cut(one.bounds, &one.content_mask))));
+        all.extend(self.underlines.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::Underline, at, cut(one.bounds, &one.content_mask))));
+        all.extend(self.monochrome_sprites.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::MonochromeSprite, at, cut(one.bounds, &one.content_mask))));
+        all.extend(self.polychrome_sprites.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::PolychromeSprite, at, cut(one.bounds, &one.content_mask))));
+        all.extend(self.backdrops.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::Backdrop, at, cut(one.bounds, &one.content_mask))));
+        all.extend(self.rasters.iter().enumerate().map(|(at, one)| (one.order, PrimitiveKind::Raster, at, cut(one.bounds, &one.content_mask))));
+        all.sort_unstable_by_key(|(order, kind, at, _)| (*order, *kind, *at));
+        // What's drawn, by its wave (a backdrop's one past its own), and what backdrops' blurs read, by one past theirs.
+        let (mut drawn, mut read) = (BoundsTree::<ScaledPixels>::default(), BoundsTree::<ScaledPixels>::default());
+        let mut waves: Vec<(u32, bool, DrawOrder, PrimitiveKind, usize)> = Vec::with_capacity(all.len());
+        for (order, kind, at, area) in all {
+            let wave = drawn.max_intersecting(&area).max(read.max_intersecting(&area));
+            if kind == PrimitiveKind::Backdrop {
+                let reads = self.backdrops[at].reads();
+                let wave = wave.max(drawn.max_intersecting(&reads));
+                drawn.insert_at(area, wave + 1);
+                read.insert_at(reads, wave + 1);
+                waves.push((wave, true, order, kind, at));
+            } else {
+                drawn.insert_at(area, wave);
+                waves.push((wave, false, order, kind, at));
+            }
+        }
+        waves.sort_unstable();
+        let mut order = 0;
+        let mut last = None;
+        for (wave, backdrop, was, kind, at) in waves {
+            if last != Some((wave, backdrop, was)) {
+                (order, last) = (order + 1, Some((wave, backdrop, was)));
+            }
+            match kind {
+                PrimitiveKind::Shadow => self.shadows[at].order = order,
+                PrimitiveKind::Quad => self.quads[at].order = order,
+                PrimitiveKind::Underline => self.underlines[at].order = order,
+                PrimitiveKind::MonochromeSprite => self.monochrome_sprites[at].order = order,
+                PrimitiveKind::PolychromeSprite => self.polychrome_sprites[at].order = order,
+                PrimitiveKind::Backdrop => self.backdrops[at].order = order,
+                PrimitiveKind::Raster => self.rasters[at].order = order,
+            }
+        }
+        self.sort();
     }
 
     /// Each kind of primitive in the order it was drawn, which its batches are drawn in (`batches`).
@@ -707,6 +769,28 @@ pub(crate) struct Backdrop {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub corner_radii: Corners<ScaledPixels>,
+}
+
+/// How many times a backdrop's frame is halved at most, for its blur: a sixteenth of it, for the widest.
+pub(crate) const BLUR_LEVELS: usize = 4;
+
+/// How a blur of `sigma` device pixels is taken: the level its frame is halved to, and how far round what's behind
+/// its backdrop it reads, twice the Gaussian's reach (`Renderer::plan_blur`).
+pub(crate) fn blur_reach(sigma: f32) -> (usize, f32) {
+    let level = (1..=BLUR_LEVELS).find(|level| sigma / (1 << level) as f32 <= 6.0).unwrap_or(BLUR_LEVELS);
+    (level, 2.0 * (sigma * 3.0).ceil())
+}
+
+impl Backdrop {
+    /// What of the scene its blur reads, at most: what's shown of it, with its reach round it out to its level's
+    /// texels, as `Renderer::plan_blur`'s region is before it's cut to the frame.
+    pub(crate) fn reads(&self) -> Bounds<ScaledPixels> {
+        let (level, reach) = blur_reach(self.blur.0);
+        let out = reach + (1 << level) as f32;
+        let shown = self.bounds.intersect(&self.content_mask.bounds);
+        let px = ScaledPixels;
+        Bounds { origin: crate::geometry::Point { x: px(shown.origin.x.0 - out), y: px(shown.origin.y.0 - out) }, size: crate::geometry::Size { width: px(shown.size.width.0 + 2.0 * out), height: px(shown.size.height.0 + 2.0 * out) } }
+    }
 }
 
 impl From<Backdrop> for Primitive {

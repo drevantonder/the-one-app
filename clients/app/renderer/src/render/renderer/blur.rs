@@ -1,10 +1,7 @@
 use super::Renderer;
-use super::super::scene::{Backdrop, PrimitiveBatch};
+use super::super::scene::{BLUR_LEVELS, Backdrop, PrimitiveBatch, blur_reach};
 use crate::geometry::{Bounds, ScaledPixels, point, size};
 use super::params::BlurParams;
-
-/// How many times a backdrop's frame is halved at most: a sixteenth of it, for the widest blur.
-const LEVELS: usize = 4;
 
 /// The textures a backdrop's blur is drawn through, for frames of `size`: for each level (half its size, a quarter,
 /// …) the frame shrunk to it and the two passes of its blur, each made as a blur at that level first needs it; and
@@ -12,12 +9,12 @@ const LEVELS: usize = 4;
 pub(super) struct BackdropTextures {
     pub(super) size: (u32, u32),
     pub(super) source: Option<(wgpu::Texture, wgpu::TextureView)>,
-    pub(super) levels: [[Option<(wgpu::Texture, wgpu::TextureView)>; 3]; LEVELS],
+    pub(super) levels: [[Option<(wgpu::Texture, wgpu::TextureView)>; 3]; BLUR_LEVELS],
 }
 
 /// Where a backdrop's blur's parameters are in the frame's data, and at which level it's blurred.
 pub(super) struct Blur {
-    /// What was drawn before it, by which a blur of it is kept (`Renderer::blurred`).
+    /// What was drawn before it in what it blurs, by which a blur of it is kept (`Target::blurred`).
     pub(super) behind: Option<u64>,
     pub(super) level: usize,
     /// What of the frame it blurs, in its device pixels, left, top, right and bottom: the backdrop and twice the
@@ -41,13 +38,18 @@ impl Blur {
         blurs.iter().all(|blur| blur.level == next.level && (blur.sigma == next.sigma || !meets(next.region, blur.region)))
     }
 
+    /// What of the scene it blurs, its region, of a target whose top left is `origin` in the scene.
+    pub(super) fn area(&self, origin: [f32; 2]) -> Bounds<ScaledPixels> {
+        let px = ScaledPixels;
+        let [left, top, right, bottom] = self.region.map(|edge| edge as f32);
+        Bounds { origin: point(px(left + origin[0]), px(top + origin[1])), size: size(px(right - left), px(bottom - top)) }
+    }
+
     /// The earliest backdrop `one` of batch `at`'s blur can be taken (`ready`): just past the last thing drawn before
     /// it that reaches its region, of a target whose top left is `origin` in the scene, as what's drawn after that is
     /// none of what it blurs.
     pub(super) fn ready(&self, batches: &[PrimitiveBatch<'_>], at: usize, one: usize, origin: [f32; 2]) -> (usize, usize) {
-        let px = ScaledPixels;
-        let [left, top, right, bottom] = self.region.map(|edge| edge as f32);
-        let area = Bounds { origin: point(px(left + origin[0]), px(top + origin[1])), size: size(px(right - left), px(bottom - top)) };
+        let area = self.area(origin);
         let last = |backdrops: &[Backdrop]| backdrops.iter().rposition(|backdrop| backdrop.bounds.intersect(&backdrop.content_mask.bounds).intersects(&area));
         if let PrimitiveBatch::Backdrops(backdrops) = &batches[at]
             && let Some(before) = last(&backdrops[..one])
@@ -89,8 +91,8 @@ impl Renderer {
     /// reach away, and the one across what's a reach beyond that. Its edges are on its level's texels, so each halving
     /// takes whole ones.
     pub(super) fn plan_blur(&mut self, size: (u32, u32), sigma: f32, area: [f32; 4]) -> Blur {
-        let level = (1..=LEVELS).find(|level| sigma / (1 << level) as f32 <= 6.0).unwrap_or(LEVELS);
-        let (step, reach) = (1u32 << level, 2.0 * (sigma * 3.0).ceil());
+        let (level, reach) = blur_reach(sigma);
+        let step = 1u32 << level;
         let out = |edge: f32, most: u32, up: bool| {
             let edge = if up { edge + reach } else { edge - reach }.clamp(0.0, most as f32) as u32;
             if up { edge.div_ceil(step) * step } else { edge / step * step }.min(most)

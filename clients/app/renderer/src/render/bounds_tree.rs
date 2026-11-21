@@ -38,11 +38,26 @@ where
     }
 
     pub fn insert(&mut self, new_bounds: Bounds<U>) -> u32 {
+        self.place(new_bounds, |max_intersecting_ordering| max_intersecting_ordering + 1)
+    }
+
+    /// Puts in `bounds` at `order`, whatever it intersects.
+    pub fn insert_at(&mut self, bounds: Bounds<U>, order: u32) {
+        self.place(bounds, |_| order);
+    }
+
+    /// The highest order of what it holds that intersects `bounds`, 0 where nothing does.
+    pub fn max_intersecting(&self, bounds: &Bounds<U>) -> u32 {
+        self.root.map_or(0, |root| self.find_max_ordering(root, bounds, 0))
+    }
+
+    fn place(&mut self, new_bounds: Bounds<U>, order: impl FnOnce(u32) -> u32) -> u32 {
         // If the tree is empty, make the root the new leaf.
         if self.root.is_none() {
-            let new_node = self.push_leaf(new_bounds, 1);
+            let ordering = order(0);
+            let new_node = self.push_leaf(new_bounds, ordering);
             self.root = Some(new_node);
-            return 1;
+            return ordering;
         }
 
         // Search for the best place to add the new leaf based on heuristics.
@@ -96,7 +111,7 @@ where
             max_intersecting_ordering = cmp::max(max_intersecting_ordering, *sibling_ordering);
         }
 
-        let ordering = max_intersecting_ordering + 1;
+        let ordering = order(max_intersecting_ordering);
         let new_node = self.push_leaf(new_bounds, ordering);
         let new_parent = self.push_internal(sibling, new_node);
 
