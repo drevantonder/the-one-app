@@ -69,6 +69,12 @@ defmodule Database.Lease do
   Whether a server may answer from its copy isn't a state of its own. It's the time since it last saw the log's next
   entry free, read after the transaction ran by both its clocks, since a state timeout fires only between events,
   and by the monotonic clock alone, which stops while a machine sleeps.
+
+  A server looks at the log's next entry in the background, as a Chubby or etcd client renews its lease ahead of its
+  end, every `@renew_every` while it has been asked for a transaction in the last `@renewed_while`. So a database in
+  use answers from its copy without waiting on the bucket, and one whose bucket doesn't answer refuses at once once
+  its lease has run out, saying so, rather than having every call wait on the bucket in turn. Every hook that decides
+  who may reach what reads a database (`OneCore.Hooks`), so every tool call would wait.
   """
   @behaviour :gen_statem
   require Logger
@@ -88,6 +94,16 @@ defmodule Database.Lease do
   @lease_ttl 4_000
   @writes_after 5_000
 
+  # How often a server looks at the log's next entry in the background while its database is in use, and for how long
+  # after its last transaction. Half the lease leaves the bucket half of it to answer before the lease runs out.
+  @renew_every div(@lease_ttl, 2)
+  @renewed_while 60_000
+
+  # How long a call that finds the lease run out, with no look in the background under way, as on a database that
+  # wasn't in use, waits for one: the bucket answers a read well within a second (`OneCore.Bucket.S3`), and one that
+  # hasn't in this long isn't answering.
+  @renew_within 2_000
+
   # What SQLite says of a write to a copy that's read-only (`pragma query_only`), as `Database.query/3` raises it.
   @read_only "attempt to write a readonly database"
 
@@ -96,9 +112,29 @@ defmodule Database.Lease do
   # wrote, `logged` the pages logged since the last snapshot and `pages` the copy's size, `proved` its clocks when it
   # last saw the log's next entry free, `settled` when by its monotonic clock it may write, and `firing` the
   # scheduled jobs being called here: each one's `job` and the time it was due `at`, by its call's process, and
-  # whether it's `marked` as run yet; `lost_to` the server that last took the lease from this one. A field's default is what's safe for a database that was open under a version
-  # of this module without it (`code_change/4`): never seen free, so it looks before it answers.
-  defstruct [:artifact, :server, :folder, :db, :proved, :settled, :failed, :lost_to, number: 0, logged: 0, pages: 0, firing: %{}]
+  # whether it's `marked` as run yet; `lost_to` the server that last took the lease from this one; `renewing` the look
+  # at the log under way in the background, `unreached` why the last look couldn't read the bucket, `used` when by its
+  # monotonic clock it last ran a transaction, and `ticking` whether it looks again every `@renew_every`. A field's
+  # default is what's safe for a database that was open under a version of this module without it (`code_change/4`):
+  # never seen free, so it looks before it answers.
+  defstruct [
+    :artifact,
+    :server,
+    :folder,
+    :db,
+    :proved,
+    :settled,
+    :failed,
+    :lost_to,
+    :renewing,
+    :unreached,
+    :used,
+    ticking: false,
+    number: 0,
+    logged: 0,
+    pages: 0,
+    firing: %{}
+  ]
 
   # How long, in milliseconds, a server whose own copy of the database failed takes no lease after it handed this one
   # on, so a server that can open files takes it rather than this one again (`failed/4`).
@@ -204,7 +240,15 @@ defmodule Database.Lease do
       when elem(ask, 0) in [:transaction, :schedule],
       do: {:keep_state_and_data, {:reply, from, {:held_by, server}}}
 
+  # A transaction on a database that isn't being looked at in the background starts that first.
+  def handle_event({:call, _from} = type, {_codec, {:transaction, _, _, _}} = content, state, %{ticking: false} = data)
+      when state in [:settling, :holding] do
+    {:keep_state, %{data | ticking: true}, [{{:timeout, :renew}, @renew_every, nil}, {:next_event, type, content}]}
+  end
+
   def handle_event({:call, _from} = type, {_codec, {:transaction, schema, fun, job}} = content, state, data) do
+    data = %{data | used: System.monotonic_time(:millisecond)}
+
     transact({type, content}, state, data, fn db ->
       migrate(db, schema)
       result = fun.(db)
@@ -215,6 +259,17 @@ defmodule Database.Lease do
 
   def handle_event({:call, _from} = type, {_codec, {:schedule, jobs, _fire, now}} = content, state, data),
     do: transact({type, content}, state, data, &due(&1, jobs, now))
+
+  # What the look in the background found. One that finds another server took the lease has it lose it now.
+  def handle_event(:info, {ref, renewal}, state, %{renewing: {%Task{ref: ref}, _began}} = data) do
+    Process.demonitor(ref, [:flush])
+
+    case renewed(renewal, %{data | renewing: nil}) do
+      {:lost, data} when state in [:settling, :holding] -> lost(data, "as it found looking at the log")
+      {_ok_or_lost, data} -> {:keep_state, data}
+      {:unreached, data, _why} -> {:keep_state, data}
+    end
+  end
 
   # A job's call ended. One that committed no transaction is marked as run now, unless the lease has gone: then the
   # server holding it makes the call.
@@ -229,6 +284,14 @@ defmodule Database.Lease do
   end
 
   def handle_event(:info, _message, _state, _data), do: :keep_state_and_data
+
+  # It looks at the log in the background while it's in use, and stops once it hasn't been for `@renewed_while`, when
+  # what its last look found is too old to go by.
+  def handle_event({:timeout, :renew}, nil, state, data) do
+    if state in [:settling, :holding] and System.monotonic_time(:millisecond) - data.used < @renewed_while,
+      do: {:keep_state, renew(data), {{:timeout, :renew}, @renew_every, nil}},
+      else: {:keep_state, %{data | ticking: false, unreached: nil}}
+  end
 
   # A server stopping as it was asked to hands on the lease it holds: its copy is closed first, so it answers nothing
   # from it after, and then the log's next entry names nobody. One that has lost the lease meanwhile writes nothing.
@@ -274,24 +337,46 @@ defmodule Database.Lease do
     error -> failed(event, data, error, __STACKTRACE__)
   end
 
+  # One that finds the lease run out while a look in the background hasn't come back is refused before it runs, a
+  # write too, which would wait on the same bucket.
   defp transacted(event, state, data, work) do
-    ran = run(data.db, work)
+    case if(data.renewing, do: proved(data), else: {:ok, data}) do
+      {:ok, data} -> committed(event, state, data, run(data.db, work))
+      {:lost, data} -> lost(data, "so it didn't run a transaction", next(event))
+      {:unreached, data, why} -> refused(event, data, why)
+    end
+  end
 
+  defp committed(event, state, data, ran) do
     case {Log.changed(file(data)), state, read_only?(ran)} do
       {nil, :settling, true} ->
-        {:keep_state_and_data, :postpone}
+        {:keep_state, data, :postpone}
 
       {nil, _state, _read_only} ->
         case proved(data) do
           {:ok, data} -> answered(event, ran, data)
-          :lost -> lost(event, data, "so it didn't answer from its copy")
+          {:lost, data} -> lost(data, "so it didn't answer from its copy", next(event))
+          {:unreached, data, why} -> refused(event, data, why)
         end
 
       {changed, :holding, _read_only} ->
         case write(data, changed) do
           {:ok, data} -> answered(event, ran, data)
-          :lost -> lost(event, data, "and the write it hadn't answered with it")
+          :lost -> lost(data, "and the write it hadn't answered with it", next(event))
         end
+    end
+  end
+
+  defp next({type, content}), do: [{:next_event, type, content}]
+
+  # The bucket didn't answer in time to keep the lease: a call is refused at once, saying only that its app couldn't
+  # be reached (`Database.transaction/3`), and why goes to this server's log.
+  defp refused(event, data, why) do
+    Logger.warning("#{data.artifact.prefix}: refused a transaction, as its lease ran out and #{why}")
+
+    case event do
+      {{:call, from}, _content} -> {:keep_state, data, {:reply, from, :unreached}}
+      {:info, _message} -> {:keep_state, data}
     end
   end
 
@@ -366,13 +451,14 @@ defmodule Database.Lease do
   defp done({:info, {:DOWN, _monitor, :process, _caller, _why}}, ran, data), do: {snapshot(data, ran), []}
 
   # Another server wrote the log's next entry: the lease is theirs, and what this one committed to its copy since
-  # is thrown away with it. `event` is handled again where it is now, which for a call is with who holds it.
-  defp lost({type, content}, data, what) do
+  # is thrown away with it. An event in `actions` is handled again where it is now, which for a call is with who holds
+  # it.
+  defp lost(data, what, actions \\ []) do
     Logger.info("#{data.artifact.prefix}: lost its lease, #{what}")
 
     case look(close(data)) do
-      {{:following, holder}, data} -> moved({{:following, holder}, %{data | lost_to: holder}}, [{:next_event, type, content}])
-      looked -> moved(looked, [{:next_event, type, content}])
+      {{:following, holder}, data} -> moved({{:following, holder}, %{data | lost_to: holder}}, actions)
+      looked -> moved(looked, actions)
     end
   end
 
@@ -591,18 +677,60 @@ defmodule Database.Lease do
   # only finds out by looking. So it answers from its copy for `@lease_ttl` after it last saw that entry free, by
   # both its clocks, the monotonic one, which never goes back, and the system's, which goes on while the machine
   # sleeps; and then looks again. A server that took the lease meanwhile writes nothing until that's passed.
+  #
+  # It looks in the background while the database is in use (`renew/1`), so this most often finds it seen free
+  # already. Where it isn't, and a look is under way, the bucket hasn't answered it for half the lease at least, and
+  # the call isn't kept waiting on it, nor where the last look couldn't read the bucket; and otherwise one is begun,
+  # and waited for `@renew_within`.
   defp proved(data) do
-    now = clocks()
-
-    if proved?(data.proved, now) do
+    if proved?(data.proved, clocks()) do
       {:ok, data}
     else
-      case Log.entry(data.artifact, data.number + 1) do
-        nil -> {:ok, %{data | proved: now}}
-        _taken -> :lost
+      waits = if data.renewing || data.unreached, do: 0, else: @renew_within
+      %{renewing: {task, began}} = data = renew(data)
+
+      case Task.yield(task, waits) do
+        {:ok, renewal} ->
+          with {:ok, data} <- renewed(renewal, %{data | renewing: nil}) do
+            if proved?(data.proved, clocks()),
+              do: {:ok, data},
+              else: {:unreached, data, "the bucket was slow to answer"}
+          end
+
+        nil ->
+          waited = System.monotonic_time(:millisecond) - began
+          {:unreached, data, data.unreached || "the bucket hasn't answered for #{waited} ms"}
       end
     end
   end
+
+  # Looks at the log's next entry in a process of its own, unless it's being looked at already: `renewing` is that
+  # task and when it began, by the monotonic clock, and it answers with when it began by both clocks, the number of
+  # the last entry this server had read, and the entry, `{:unreached, why}` where the bucket couldn't be read.
+  defp renew(%{renewing: nil, artifact: artifact, number: number} = data) do
+    began = clocks()
+
+    task =
+      Task.async(fn ->
+        try do
+          {began, number, Log.entry(artifact, number + 1)}
+        catch
+          kind, reason -> {began, number, {:unreached, Exception.format_banner(kind, reason)}}
+        end
+      end)
+
+    %{data | renewing: {task, elem(began, 0)}}
+  end
+
+  defp renew(data), do: data
+
+  # What a look at the log found: the entry after the last this server read free, which proves the lease from when
+  # it began, or written by another server, which took it. One begun before this server wrote that entry itself is
+  # older than what the write proved.
+  defp renewed({_began, _number, {:unreached, why}}, data), do: {:unreached, %{data | unreached: why}, why}
+  defp renewed({_began, number, _entry}, %{number: now} = data) when number != now, do: {:ok, %{data | unreached: nil}}
+  defp renewed({began, _number, nil}, data), do: {:ok, %{data | proved: began, unreached: nil}}
+  defp renewed({_began, _number, _taken}, data), do: {:lost, %{data | unreached: nil}}
 
   defp proved?({monotonic, system}, {now_monotonic, now_system}),
     do: now_monotonic < monotonic + @lease_ttl and now_system >= system and now_system < system + @lease_ttl

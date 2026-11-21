@@ -34,6 +34,10 @@ defmodule Database do
         opened_again(lease)
         transaction(call, schema, fun)
 
+      # Its lease ran out and the bucket didn't answer, which this server's log says more of.
+      :unreached ->
+        unreachable(call)
+
       {:raised, kind, reason, stacktrace} ->
         :erlang.raise(kind, reason, stacktrace)
 
@@ -185,6 +189,9 @@ defmodule Database do
       :codec_changed ->
         opened_again(lease)
         schedule(call, jobs, fire)
+
+      :unreached ->
+        unreachable(call)
 
       {:held_by, server} ->
         taken_over(call, lease, server)
