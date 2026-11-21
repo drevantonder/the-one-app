@@ -47,6 +47,7 @@ export function requests(steps, folder, answers = {}) {
   const out = []
   // What the window looked like before anything's done, which `dimmed` compares what's over the page with.
   let before
+  let apartFrom
   if (steps.some((step) => step.expect?.dimmed)) out.push({ request: { op: "snap" }, judge: (answer) => void (before = answer?.result?.png) })
   for (const [at, step] of steps.entries()) {
     const from = out.length
@@ -72,7 +73,7 @@ export function requests(steps, folder, answers = {}) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, bleeds, aligned, centred, widest, contrast, inked, located, textMenu, handles, magnifier, dimmed, js, asked } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, apart, bleeds, aligned, centred, widest, contrast, inked, located, textMenu, handles, magnifier, dimmed, js, asked } = step.expect
       // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
@@ -162,6 +163,30 @@ export function requests(steps, folder, answers = {}) {
             if (missing.length) return `${missing.map((text) => `"${text}"`).join(", ")} isn't drawn`
             const advances = found.map((node, at) => node.rect.width / [...monospace[at]].length)
             return Math.max(...advances) - Math.min(...advances) > 0.05 && `its characters are ${advances.map((advance, at) => `${advance.toFixed(2)} pt (${monospace[at]})`).join(", ")} wide: not one monospace face`
+          },
+        })
+      // What's named drawn clear of what `from` names, as a floating control (a page's arrow) is clear of the content it
+      // isn't about: no two of them, both in sight, share any of their boxes.
+      if (apart)
+        out.push({
+          request: { op: "query", ...selector(apart.of) },
+          judge: (answer) => {
+            const floating = (answer?.result?.nodes ?? []).filter((node) => node.rect && node.opacity > 0 && node.seen > 0)
+            if (!floating.length) return `${named(apart.of)} isn't drawn`
+            apartFrom = floating
+          },
+        })
+      if (apart)
+        out.push({
+          request: { op: "query", ...selector(apart.from) },
+          judge: (answer) => {
+            const over = apartFrom.flatMap((one) =>
+              (answer?.result?.nodes ?? [])
+                .filter((node) => node.rect && node.opacity > 0 && node.seen > 0 && node.node !== one.node)
+                .filter((node) => Math.min(one.rect.x + one.rect.width, node.rect.x + node.rect.width) - Math.max(one.rect.x, node.rect.x) > 1 && Math.min(one.rect.y + one.rect.height, node.rect.y + node.rect.height) - Math.max(one.rect.y, node.rect.y) > 1)
+                .map((node) => `${one.name ?? one.role} (${rect(one.rect)}) is drawn over ${node.name ?? node.role} (${rect(node.rect)})`),
+            )
+            return over.length ? over.join(", ") : undefined
           },
         })
       // Nothing of what's named or inside it clipped away, as a badge that overhangs its icon isn't cut by what's around.

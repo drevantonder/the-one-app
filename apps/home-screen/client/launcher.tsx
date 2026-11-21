@@ -154,6 +154,9 @@ const HEADING = 20
 /// The chevrons at the card's sides: how big, and how far in.
 const TURN = 36
 const TURN_INSET = 6
+/// How far in from the card's sides the App Library's categories start, clear of the chevrons, as Launchpad keeps its
+/// grid clear of its page arrows.
+const TURN_ROOM = TURN_INSET + TURN + 4
 
 /// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
 type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
@@ -382,7 +385,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           {/* The App Library, the page after Home's last, scrolling what's taller; for whoever asked for less motion,
               cross-fading in over Home. */}
           <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.shifted(libraryAt()), looks.opacity(browsing() ? 1 : 0)]}>
-            <Library owner={props.owners[0]} size={{ width: card().width - 2 * INSET, height: card().height - INSET - PILLS }} />
+            <Library owner={props.owners[0]} size={{ width: card().width - 2 * TURN_ROOM, height: card().height - INSET - PILLS }} />
           </View>
           </View>
           {/* Whose pages they are at the top, as a phone has it: over Home, sliding off with it to the App Library. */}

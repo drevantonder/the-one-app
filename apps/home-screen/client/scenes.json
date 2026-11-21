@@ -2592,6 +2592,32 @@
           }
         }
       }
+    },
+    "checks": {
+      "Its page arrows are clear of its categories": [
+        {
+          "hover": {
+            "role": "group",
+            "name": "Productivity"
+          }
+        },
+        {
+          "wait": 400
+        },
+        {
+          "expect": {
+            "apart": {
+              "of": {
+                "role": "button",
+                "name": "Previous Page"
+              },
+              "from": {
+                "role": "group"
+              }
+            }
+          }
+        }
+      ]
     }
   },
   "Launcher, App Library swiped back": {
