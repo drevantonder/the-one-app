@@ -51,11 +51,14 @@ export async function runThere(at, folder, args, lines) {
   return { stdout, stderr: tree >= 0 ? stderr.slice(0, tree) : stderr, failed: ran.exitCode !== 0 || !stdout.trim() }
 }
 
-/// A motion's trace played in a real window on `--ssh`'s device, in its person's session, by the `window` example
-/// (`--present`): a scheduled task runs it there, and says it's done on a named pipe, which is every session's, that
-/// this waits on there, five minutes at most. → what it said of each round's
-/// frames, as JSON lines, and whether it failed.
-export async function presentThere(at, folder, scene, events) {
+/// A motion played in a real window on `--ssh`'s device, in its person's session, by the `window` example
+/// (`--present`): the inspector's requests it's `played`, each at its time, after the scene's `taps`, in a window
+/// opened afresh for each of three rounds. A scheduled task runs it there, and says it's done on a named pipe, which is
+/// every session's, that this waits on there, five minutes at most. → what it said of each motion's frames, as JSON
+/// lines, and whether it failed.
+export async function presentThere(at, folder, scene, played, taps) {
+  // A locked screen's windows are drawn but not shown, so presenting costs nothing there.
+  if (Bun.spawnSync(["ssh", ssh, 'tasklist /FI "IMAGENAME eq LogonUI.exe" /NH']).stdout.toString().includes("LogonUI")) return { said: [], stderr: `${ssh}'s screen is locked, so a window there isn't shown: unlock it first`, failed: true }
   const base = onDevice()
   const name = `${basename(folder)}-${Math.random().toString(36).slice(2, 8)}`.replace(/[^\w-]/g, "")
   const run = `${base}\\${name}`
@@ -63,10 +66,11 @@ export async function presentThere(at, folder, scene, events) {
   rmSync(staged, { recursive: true, force: true })
   cpSync(at, join(staged, "page"), { recursive: true, dereference: true })
   cpSync(join(folder, "answers.json"), join(staged, "answers.json"))
-  writeFileSync(join(staged, "trace.json"), JSON.stringify(events))
+  writeFileSync(join(staged, "played.json"), JSON.stringify(played))
+  writeFileSync(join(staged, "before.jsonl"), taps.map((tap, id) => JSON.stringify({ v: 1, id: id + 1, ...tap })).join("\n"))
   const client = scene.answers?.["one/client"]
   const panel = client?.launcher ? ["--panel", "16"] : []
-  const args = ["page", "--trace", "trace.json", "--ui", `${base}\\ui`, "--answers", "answers.json", "--size", `${scene.size[0]}x${scene.size[1]}`, "--rounds", "3", ...panel]
+  const args = ["page", "--play", "played.json", "--before", "before.jsonl", "--ui", `${base}\\ui`, "--answers", "answers.json", "--size", `${scene.size[0]}x${scene.size[1]}`, "--rounds", "3", ...panel]
   writeFileSync(join(staged, "run.cmd"), ["@echo off", `cd /d "${run}"`, `"${base}\\screenshot.exe" ${args.map((arg) => `"${arg}"`).join(" ")} > said.txt 2> err.txt`, "echo %errorlevel% > exit.txt", `echo done> \\\\.\\pipe\\${name}`].join("\r\n"))
   writeFileSync(
     join(staged, "wait.ps1"),

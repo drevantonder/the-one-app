@@ -6,10 +6,12 @@
 // `cargo xwin build --release … --target x86_64-pc-windows-msvc`, which draws with Direct3D 12 over ssh), at its tier's
 // device pixels a point, and judges its tier by each frame's own times there: its GPU's (its timestamps), its thread's
 // painting and drawing, and its JS's. With `--present` too, and the `window` example built for it as `--harness`, each
-// motion that plays a trace of a wheel's notches is played in a real window in the device's person's session instead
-// (a scheduled task's), drawn and presented on its display as the app's windows are, which the headless harness never
-// does: it fails where its frames' painting and drawing, or its GPU, took longer than a refresh at their 95th
-// percentile, and says each part (waiting for an image, submitting, presenting).
+// motion of a computer's scene is played in a real window in the device's person's session instead (a scheduled
+// task's), three times, each in a window opened afresh, drawn and presented on its display as the app's windows are,
+// with the GPU's work in flight as it is there, which the headless harness never has: a wheel's notches and the
+// pointer's moves at their times, or a press where it starts, held or dragged. It fails where its frames' painting and
+// drawing, or its GPU, took longer than a refresh at their 95th percentile, and says each part (waiting for an image,
+// submitting, presenting).
 //
 // A folder is the gallery (core/ui/gallery, its scenes in `*.scenes.tsx`) or an app's (apps/<app>, in
 // `client/scenes.json`), as `scenes.js` takes them; with none, the gallery and every app with a motion. A motion is

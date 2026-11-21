@@ -24,13 +24,21 @@ async function play(built, scene, name, motion, hz, folder) {
   const events = trace && JSON.parse(readFileSync(join(scene.from, trace), "utf8"))
   const taps = scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) }, { op: "clock", step: 1000 }])
   if (present) {
-    if (!events?.some((event) => event.kind === "wheel")) return { said: `  ${hz} Hz: not a wheel's, which only the headless harness plays` }
     if (hz !== device.hz) return { said: `  ${hz} Hz: the device's display is ${device.hz} Hz` }
+    // What a computer's window plays as a person would, at its times, its taps first, each settled: a wheel's notches and the pointer's moves, or a
+    // press held where `from` is, or dragged from there as far as its moves go.
+    const fingers = events?.some((event) => event.kind === "touch")
+    if (scene.touch || fingers || motion.frameMs || motion.reducedMotion) return { said: `  ${hz} Hz: ${scene.touch || fingers ? "a finger's, which a computer's window doesn't take" : motion.frameMs ? "paced as a loaded device's" : "with less motion"}, which only the headless harness plays` }
+    const [dx, dy] = stretches.reduce(([x, y], stretch) => [x + (stretch.dx ?? 0), y + (stretch.dy ?? 0)], [0, 0])
+    const ms = stretches.reduce((sum, stretch) => sum + stretch.ms, 0)
+    const played = events
+      ? events.flatMap((event) => (event.kind === "wheel" ? [{ at: event.ms, op: "scroll", x: event.x, y: event.y, dx: event.dx, dy: event.dy }] : event.kind === "move" ? [{ at: event.ms, op: "hover", x: event.x, y: event.y }] : []))
+      : [dx || dy ? { at: 0, op: "drag", ...selector(motion.from), dx, dy, ms } : { at: 0, op: "tap", ...selector(motion.from) }]
     const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
     writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
-    const shown = await presentThere(at, folder, scene, events)
-    const ms = (value) => `${value} ms`
-    const lines = shown.said.map((round, n) => `  ${hz} Hz presented, round ${n + 1}: ${round.frames} frames, p95 painting ${ms(round.paint_ms)}, drawing ${ms(round.draw_ms)} (waiting for an image ${ms(round.acquire_ms)}, submitting ${ms(round.submit_ms)}, presenting ${ms(round.present_ms)}), GPU ${ms(round.gpu_ms)}, render passes p95 ${round.passes} (most ${round.most_passes})`)
+    const shown = await presentThere(at, folder, scene, played, taps.filter((tap) => tap.op !== "clock"))
+    const said = (value) => `${value} ms`
+    const lines = shown.said.map((round, n) => `  ${hz} Hz presented, motion ${n + 1}: ${round.frames} frames, p95 painting ${said(round.paint_ms)}, drawing ${said(round.draw_ms)} (waiting for an image ${said(round.acquire_ms)}, submitting ${said(round.submit_ms)}, presenting ${said(round.present_ms)}), GPU ${said(round.gpu_ms)}, render passes p95 ${round.passes} (most ${round.most_passes})`)
     if (!shown.said.length) lines.push(`  ${hz} Hz presented: nothing said: ${shown.stderr.trim().split("\n").at(-1)}`)
     const memory = shown.stderr.split("\n").map((line) => line.trim()).filter((line) => line.startsWith('{"memory"')).map((line) => JSON.parse(line).memory.gpu).at(-1)
     if (memory) lines.push(`  ${hz} Hz presented, the GPU at its end: ${memory.encoders} command encoders, ${((memory.reserved ?? 0) / 1e6).toFixed(1)} MB reserved (${((memory.allocated ?? 0) / 1e6).toFixed(1)} MB allocated)`)
