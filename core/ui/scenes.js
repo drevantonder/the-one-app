@@ -456,13 +456,15 @@ function squeezedWords(nodes) {
 
 /// Words drawn past the side of what they're in, or of the window, where nothing scrolls them there: a line that didn't
 /// wrap in the width it was given. → what's wrong, a line each.
+const MOVED = ["transform", "translateX", "translateY", "scale", "scaleX", "scaleY", "rotate"]
 function overflowingWords(nodes, width) {
   const parent = new Map(nodes.flatMap((node) => (node.children ?? []).map((child) => [child, node])))
   return nodes.flatMap((node) => {
     if (node.kind !== "text" || !node.rect || !(node.opacity > 0) || !(node.seen > 0) || node.rect.width <= 0) return []
     const above = []
     for (let up = parent.get(node.node); up; up = parent.get(up.node)) above.push(up)
-    if (above.some((up) => up.kind === "scroll" && up.rect && up.rect.width < node.rect.width)) return []
+    // What scrolls sideways shows the rest as it's scrolled, and a transform moves words where it's meant to.
+    if ([node, ...above].some((up) => up.kind === "scroll" || MOVED.some((key) => up.resolved?.[key] !== undefined))) return []
     const { x, width: wide } = node.rect
     if (x < -0.5 || x + wide > width + 0.5) return [`"${node.name}" is drawn from x ${Math.round(x)} to ${Math.round(x + wide)}, past the window's ${width}`]
     const box = above.find((up) => up.rect)?.rect
