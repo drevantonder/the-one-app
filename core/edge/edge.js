@@ -1,7 +1,13 @@
-// Runs a network's edge on this machine, with nothing deployed, or deploys it to Cloudflare:
+// Runs a network's edge on this machine, with nothing deployed, builds it to be deployed, or deploys it to Cloudflare:
 //
 //     bun edge.js dev [what `wrangler dev` takes]
+//     bun edge.js build <folder>
 //     bun edge.js deploy https://<the network's address>
+//
+// A build is the edge as `deploy.js` deploys it, with nothing of the repo: each Worker bundled, as Wrangler bundles
+// it, and the web client's files. `tooling/release` ships it in `server-code`, so each server has the edge of the
+// build it runs, and the network's update has one deploy it once the servers are on that build
+// (`updater/updater.ts`). `deploy` builds it and deploys it, as a network's first edge is deployed.
 //
 // Deployed with the network's address, the edge answers there: Cloudflare attaches that name to it, making its DNS
 // record and certificate, as the name is on a zone of the account it's deployed to.
@@ -31,38 +37,26 @@ import { $, Glob } from "bun";
 const here = import.meta.dir;
 const root = resolve(here, "../..");
 const [what, ...rest] = process.argv.slice(2);
-if (!["dev", "deploy"].includes(what)) throw new Error("bun edge.js dev, or bun edge.js deploy https://<address>");
+if (!["dev", "build", "deploy"].includes(what)) throw new Error("bun edge.js dev, bun edge.js build <folder>, or bun edge.js deploy https://<address>");
+if (what === "build" && !rest[0]) throw new Error("bun edge.js build <folder>: a build is made in a folder");
 if (what === "deploy" && !rest[0]) throw new Error("bun edge.js deploy https://<address>: a deploy is to a network, by its address");
 const at = what === "deploy" ? new URL(rest[0]) : null;
 if (at && (at.protocol !== "https:" || at.pathname !== "/")) throw new Error("A network's address is https://<name>, with no path");
 // Each network's edge is in its own Cloudflare account, which only its own token reaches: the 1Password item "The One App
-// edge deploy (<its name>)", or CLOUDFLARE_API_TOKEN. Wrangler deploys to the account of the zone the address is on, as
-// Cloudflare says to that token, and nothing is deployed where the token can't see the zone: a token taken for another
-// network's, as Andre's was the only one read, once deployed one network's Workers in place of another's (20 Nov).
-if (at) {
-  if (!process.env.CLOUDFLARE_API_TOKEN) {
-    const title = `The One App edge deploy (${at.hostname})`;
-    const items = await $`op item list --format json`.quiet().nothrow();
-    if (items.exitCode !== 0) throw new Error(`No Cloudflare token: set CLOUDFLARE_API_TOKEN, or sign in to 1Password (\`op\`) to read "${title}"`);
-    const item = JSON.parse(items.text()).find((/** @type {{title: string}} */ item) => item.title === title);
-    if (!item) throw new Error(`No Cloudflare token for ${at.hostname}: 1Password has no item "${title}", and CLOUDFLARE_API_TOKEN isn't set`);
-    process.env.CLOUDFLARE_API_TOKEN = (await $`op read ${`op://${item.vault.id}/${item.id}/credential`}`.quiet()).text().trim();
-  }
-  const labels = at.hostname.split(".");
-  let zone;
-  for (let from = 0; !zone && from < labels.length - 1; from++) {
-    const asked = await fetch(`https://api.cloudflare.com/client/v4/zones?name=${labels.slice(from).join(".")}`, { headers: { authorization: `Bearer ${process.env.CLOUDFLARE_API_TOKEN}` } });
-    zone = asked.ok ? (await asked.json()).result?.[0] : undefined;
-  }
-  if (!zone) throw new Error(`The Cloudflare token for ${at.hostname} reaches no zone it's on, so nothing was deployed: it's another network's token, or it can't read the zone`);
-  process.env.CLOUDFLARE_ACCOUNT_ID = zone.account.id;
-  console.log(`Deploying to ${zone.account.name}, the account of ${zone.name}`);
+// edge deploy (<its name>)", or CLOUDFLARE_API_TOKEN.
+if (at && !process.env.CLOUDFLARE_API_TOKEN) {
+  const title = `The One App edge deploy (${at.hostname})`;
+  const items = await $`op item list --format json`.quiet().nothrow();
+  if (items.exitCode !== 0) throw new Error(`No Cloudflare token: set CLOUDFLARE_API_TOKEN, or sign in to 1Password (\`op\`) to read "${title}"`);
+  const item = JSON.parse(items.text()).find((/** @type {{title: string}} */ item) => item.title === title);
+  if (!item) throw new Error(`No Cloudflare token for ${at.hostname}: 1Password has no item "${title}", and CLOUDFLARE_API_TOKEN isn't set`);
+  process.env.CLOUDFLARE_API_TOKEN = (await $`op read ${`op://${item.vault.id}/${item.id}/credential`}`.quiet()).text().trim();
 }
 
 /** The first part of each path a piece of the edge answers (`edge.ts`). The web client's files are the rest. */
 const PIECES = await Bun.file(`${here}/paths.json`).json();
 
-const built = `${root}/target/edge-${what}`;
+const built = `${root}/target/edge-${what === "dev" ? "dev" : "deploy"}`;
 rmSync(built, { recursive: true, force: true });
 mkdirSync(built, { recursive: true });
 
@@ -164,7 +158,6 @@ const own = {
 const full = tailed({
   ...own,
   services: [...edge.services, ...workers.map(({ binding, worker }) => ({ binding, service: worker.name })), ...(who ? [who] : []).map(({ binding, service, entrypoint }) => ({ binding, service, entrypoint }))],
-  ...(at && { routes: [{ pattern: at.hostname, custom_domain: true }] }),
 });
 await Bun.write(`${built}/edge.jsonc`, JSON.stringify(full, null, 2));
 const edgeConfig = relative(here, `${built}/edge.jsonc`);
@@ -178,8 +171,7 @@ const relayConfig = relative(here, `${built}/relay.jsonc`);
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited;
 // A part's D1 databases are made what they should be by their migrations (`migrations_dir`), as Wrangler applies
 // them, never as the part answers a request: the local ones before `dev` starts, where it keeps them, and Cloudflare's
-// just after the part is deployed, since Wrangler makes a database a part names on its first deploy, and refuses
-// migrations for one that isn't there yet.
+// as it's deployed (`deploy.js`).
 const migrate = async (/** @type {{worker: any}} */ { worker }, /** @type {string} */ deployed, /** @type {string[]} */ where) => {
   for (const { binding, migrations_dir } of worker.d1_databases ?? []) {
     const failed = migrations_dir && (await wrangler("d1", "migrations", "apply", binding, "-c", deployed, ...where));
@@ -191,41 +183,59 @@ if (what === "dev") {
   for (const [at, part] of workers.entries()) await migrate(part, partConfigs[at], ["--local", ...(kept >= 0 ? rest.slice(kept, kept + 2) : [])]);
   process.exit(await wrangler("dev", ...[edgeConfig, relayConfig, ...partConfigs].flatMap((config) => ["-c", config]), ...rest));
 }
-// A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
-// its `wrangler.jsonc`, which only it holds, such as the edge's keys to the bucket and an app's part's to an outside
-// service. The edge, the relay and the parts are bound to each other, and Cloudflare refuses a binding to a Worker that
-// isn't there yet, so on an account that has no edge yet it's deployed first without its bindings to the others and
-// its address.
-const deploy = async (/** @type {string} */ config, /** @type {string} */ secrets, /** @type {string[]} */ ...more) => {
-  const failed = await wrangler("deploy", "-c", config, ...(existsSync(secrets) ? ["--secrets-file", relative(here, secrets)] : []), ...more);
-  if (failed) process.exit(failed);
-};
-if ((await $`bun x wrangler deployments list --name ${edge.name}`.cwd(here).quiet().nothrow()).exitCode !== 0) {
-  const bindings = edge.durable_objects.bindings.filter(({ script_name }) => !script_name);
-  await Bun.write(`${built}/bare.jsonc`, JSON.stringify({ ...own, services: [], durable_objects: { ...edge.durable_objects, bindings } }, null, 2));
-  await deploy(relative(here, `${built}/bare.jsonc`), `${here}/secrets`);
-}
-// A part is deployed, then its databases migrated. The tail parts go before the relay and the other parts, which name
-// them as their tail consumers, as Cloudflare refuses one that isn't there yet.
-const deployPart = async (/** @type {number} */ at) => {
-  await deploy(partConfigs[at], `${root}/apps/${workers[at].app}/edge/secrets`);
-  await migrate(workers[at], partConfigs[at], ["--remote"]);
-};
-for (const [at, { tail }] of workers.entries()) if (tail) await deployPart(at);
-// The relay is deployed only when what it runs changed: a deploy ends every connection it holds. Its version is tagged
-// with a hash of its bundle and config, as the build Wrangler would upload, and one with the same tag isn't deployed again.
-{
-  const out = `${built}/relay-bundle`;
-  await $`bun x wrangler deploy --dry-run --outdir ${out} -c ${relayConfig}`.cwd(here).quiet();
-  const hash = new Bun.CryptoHasher("sha256").update(JSON.stringify(relayed));
+// What's deployed is built from those: each Worker bundled as Wrangler bundles it as it deploys (`--dry-run --outdir`),
+// with a config that deploys that bundle as it is, beside its assets and its D1 migrations, and the order they're
+// deployed in (`deploy.js`): a Worker after the ones it's bound to.
+const out = what === "build" ? resolve(rest[0]) : `${built}/edge`;
+rmSync(out, { recursive: true, force: true });
+mkdirSync(`${out}/workers`, { recursive: true });
+cpSync(web, `${out}/web`, { recursive: true });
+for (const file of ["deploy.js", "package.json", "bun.lock"]) cpSync(`${here}/${file}`, `${out}/${file}`);
+const listed = [];
+const bundle = async (/** @type {string} */ config, /** @type {any} */ worker, /** @type {string} */ kind, /** @type {string} */ from) => {
+  const at = `${out}/workers/${worker.name}`;
+  await $`bun x wrangler deploy --dry-run --outdir ${at}/bundle -c ${config}`.cwd(here).quiet();
   // Its modules, not the source map or the README Wrangler writes beside them, which says when it was built.
-  for (const file of [...new Glob("**/*").scanSync(out)].filter((file) => !/(\.map|README\.md)$/.test(file)).sort()) hash.update(file).update(await Bun.file(`${out}/${file}`).bytes());
-  const tag = hash.digest("hex").slice(0, 24);
-  const status = await $`bun x wrangler deployments status --name ${relayWorker.name} --json`.cwd(here).quiet().nothrow();
-  const live = status.exitCode === 0 && JSON.parse(status.text()).versions?.[0]?.version_id;
-  const deployed = live && JSON.parse((await $`bun x wrangler versions view ${live} --name ${relayWorker.name} --json`.cwd(here).quiet()).text()).annotations?.["workers/tag"];
-  if (deployed === tag) console.log(`The relay is as deployed (${tag}), so it's left running`);
-  else await deploy(relayConfig, `${here}/relay/secrets`, "--tag", tag);
-}
-for (const [at, { tail }] of workers.entries()) if (!tail) await deployPart(at);
-await deploy(edgeConfig, `${here}/secrets`);
+  for (const file of readdirSync(`${at}/bundle`)) if (/(\.map|README\.md)$/.test(file)) rmSync(`${at}/bundle/${file}`);
+  const { build: _, ...rest } = worker;
+  const shipped = { ...rest, main: `bundle/${basename(worker.main).replace(/\.[^.]+$/, ".js")}`, base_dir: "bundle", no_bundle: true, find_additional_modules: true };
+  if (worker.assets) {
+    if (kind !== "edge") cpSync(resolve(from, worker.assets.directory), `${at}/assets`, { recursive: true });
+    shipped.assets = { ...worker.assets, directory: kind === "edge" ? "../../web" : "assets" };
+  }
+  const d1 = [];
+  shipped.d1_databases = worker.d1_databases?.map((database) => {
+    if (!database.migrations_dir) return database;
+    d1.push(database.binding);
+    cpSync(resolve(from, database.migrations_dir), `${at}/migrations/${database.binding}`, { recursive: true });
+    return { ...database, migrations_dir: `migrations/${database.binding}` };
+  });
+  await Bun.write(`${at}/wrangler.jsonc`, JSON.stringify(shipped, null, 2));
+  // It's tagged with a hash of its bundle and config, as the build Wrangler would upload, so a deploy that changes
+  // nothing of it is told (the relay's, which ends every connection it holds, is skipped then).
+  const hash = new Bun.CryptoHasher("sha256").update(JSON.stringify(shipped));
+  for (const file of [...new Glob("**/*").scanSync(`${at}/bundle`)].sort()) hash.update(file).update(await Bun.file(`${at}/bundle/${file}`).bytes());
+  listed.push({ name: worker.name, kind, tag: hash.digest("hex").slice(0, 24), d1 });
+  if (kind === "edge") {
+    // On an account that has no edge yet it's deployed first without its bindings to the others or its address.
+    const bindings = shipped.durable_objects.bindings.filter(({ script_name }) => !script_name);
+    const { tail_consumers: __, ...bare } = shipped;
+    await Bun.write(`${at}/bare.jsonc`, JSON.stringify({ ...bare, services: [], durable_objects: { ...shipped.durable_objects, bindings } }, null, 2));
+  }
+};
+// The tail parts go first, since the rest name them as their tail consumers, then the relay, the other parts and the edge.
+for (const [at, { part, worker, tail }] of workers.entries()) if (tail) await bundle(partConfigs[at], worker, "tail", part);
+await bundle(relayConfig, relayed, "relay", built);
+for (const [at, { part, worker, tail }] of workers.entries()) if (!tail) await bundle(partConfigs[at], tailed(worker), "part", part);
+await bundle(edgeConfig, full, "edge", built);
+await Bun.write(`${out}/workers.json`, JSON.stringify({ version, workers: listed }, null, 2));
+if (what === "build") process.exit(0);
+
+// Deployed from here, each Worker is given its secrets if it has any: a file `secrets` beside its `wrangler.jsonc`,
+// which only it holds, such as the edge's keys to the bucket and an app's part's to an outside service, as a network's
+// first deploy needs them. A build never has them.
+if (existsSync(`${here}/secrets`)) cpSync(`${here}/secrets`, `${out}/workers/${edge.name}/secrets`);
+if (existsSync(`${here}/relay/secrets`)) cpSync(`${here}/relay/secrets`, `${out}/workers/${relayWorker.name}/secrets`);
+for (const { app, worker } of workers) if (existsSync(`${root}/apps/${app}/edge/secrets`)) cpSync(`${root}/apps/${app}/edge/secrets`, `${out}/workers/${worker.name}/secrets`);
+await $`bun install --frozen-lockfile`.cwd(out).quiet();
+process.exit(await Bun.spawn(["bun", "deploy.js", at.href], { cwd: out, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited);

@@ -14,6 +14,7 @@
   },
   "scripts": {
     "dev": "bun edge.js dev",
+    "build": "bun edge.js build",
     "deploy": "bun edge.js deploy",
     "types": "wrangler types worker-configuration.d.ts --include-runtime=false && wrangler types -c relay/wrangler.jsonc relay/worker-configuration.d.ts --include-runtime=false --env-interface RelayEnv",
     "typecheck": "tsc"
