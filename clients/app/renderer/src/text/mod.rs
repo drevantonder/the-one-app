@@ -294,6 +294,13 @@ impl TextSystem {
         }
     }
 
+    /// The family `name` is the system's monospace, as a host that loads no system fonts is given one.
+    pub fn monospace(&mut self, name: &str) {
+        if let Some(family) = self.fonts.collection.family_id(name) {
+            self.fonts.collection.set_generic_families(GenericFamily::Monospace, [family].into_iter());
+        }
+    }
+
     /// `text` set in `style`, or in `runs` where it's given them (a text with texts in it), wrapped to `width` (none:
     /// as wide as it is) and cut short with an ellipsis after `max_lines`. A line ends at a newline, or where Unicode's
     /// line breaking (UAX #14) allows before it'd be wider than `width`; a word wider than `width` alone overflows it,

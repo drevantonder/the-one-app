@@ -19,7 +19,10 @@ impl Windows {
             let mut fonts = crate::fonts()?;
             #[cfg(feature = "fake")]
             fonts.extend(fake::fallback_fonts()?);
-            let text = TextSystem::new(crate::FONT, fonts, !cfg!(feature = "fake"));
+            #[allow(unused_mut)]
+            let mut text = TextSystem::new(crate::FONT, fonts, !cfg!(feature = "fake"));
+            #[cfg(feature = "fake")]
+            text.monospace(fake::MONOSPACE);
             Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {

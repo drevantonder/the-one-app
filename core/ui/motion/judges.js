@@ -46,7 +46,7 @@ export function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, unclipped, bleeds, aligned, centred, widest, contrast, textMenu, handles, magnifier, dimmed, js } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, unbroken, monospace, unclipped, bleeds, aligned, centred, widest, contrast, textMenu, handles, magnifier, dimmed, js } = step.expect
       // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
@@ -121,6 +121,19 @@ export function requests(steps, folder) {
               for (const found of text.matchAll(pattern)) if (joins.some((join) => join >= found.index && join < found.index + found[0].length)) broken.push(`"${found[0]}" is broken across lines: ${node.lines.map((line) => `"${line}"`).join(", ")}`)
             }
             return broken.length ? [...new Set(broken)].join(", ") : undefined
+          },
+        })
+      // Every text named is drawn in a monospace face: each as wide per character as the others, as a code view's
+      // columns line up, which the proportional face's narrow i and wide m don't.
+      if (monospace)
+        out.push({
+          request: { op: "query", text: "" },
+          judge: (answer) => {
+            const found = monospace.map((text) => (answer?.result?.nodes ?? []).find((node) => node.name === text && node.rect))
+            const missing = monospace.filter((_, at) => !found[at])
+            if (missing.length) return `${missing.map((text) => `"${text}"`).join(", ")} isn't drawn`
+            const advances = found.map((node, at) => node.rect.width / [...monospace[at]].length)
+            return Math.max(...advances) - Math.min(...advances) > 0.05 && `its characters are ${advances.map((advance, at) => `${advance.toFixed(2)} pt (${monospace[at]})`).join(", ")} wide: not one monospace face`
           },
         })
       // Nothing of what's named or inside it clipped away, as a badge that overhangs its icon isn't cut by what's around.

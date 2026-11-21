@@ -198,7 +198,21 @@
       "notes",
       "History",
       "Add packing list"
-    ]
+    ],
+    "checks": {
+      "Code is in a monospace face": [
+        {
+          "expect": {
+            "monospace": [
+              "diff --git a/todo.txt b/todo.txt",
+              "index 111..222 100644",
+              "@@ -1,2 +1,3 @@",
+              "+++ b/todo.txt"
+            ]
+          }
+        }
+      ]
+    }
   },
   "File": {
     "like": "Code",

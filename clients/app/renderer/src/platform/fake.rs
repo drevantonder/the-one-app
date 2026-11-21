@@ -401,11 +401,11 @@ pub fn now() -> web_time::Instant {
 
 /// The faces a Linux device falls back to where Allo hasn't a character, a symbol's (⇧, ⋮) and an emoji's, from the
 /// harness's host (Debian's and Ubuntu's `fonts-dejavu-core` and `fonts-noto-color-emoji`), so it draws what a device
-/// does and not a gap; on a device it's sent to that hasn't them (`motion.js --ssh`, a Windows one), from beside it,
+/// does and not a gap, and the monospace for code, which the system has and a harness's host loads none of; on a device it's sent to that hasn't them (`motion.js --ssh`, a Windows one), from beside it,
 /// where they're sent with it, so it draws the same glyphs as here.
 pub fn fallback_fonts() -> anyhow::Result<Vec<Vec<u8>>> {
     let beside = |path: &str| Some(std::env::current_exe().ok()?.parent()?.join(std::path::Path::new(path).file_name()?));
-    ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
+    ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/dejavu/DejaVuSansMono.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
         .into_iter()
         .map(|path| {
             std::fs::read(path)
@@ -414,6 +414,9 @@ pub fn fallback_fonts() -> anyhow::Result<Vec<Vec<u8>>> {
         })
         .collect()
 }
+
+/// The family of the monospace `fallback_fonts` has, which the harness's text calls its system's.
+pub const MONOSPACE: &str = "DejaVu Sans Mono";
 
 /// Whether the system is in Dark mode, which a harness says (`Windows::appearance`): Light until it does.
 static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
