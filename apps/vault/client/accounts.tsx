@@ -451,11 +451,9 @@ function ItemScreen(props: { item: Item }) {
         </List>
         <Show when={problem()}>{(problem) => <Problem heading={problem().heading} text={problem().text} />}</Show>
       </Section>
-      <Section>
-        <Button variant="destructive" onPress={remove}>
-          Delete Item
-        </Button>
-      </Section>
+      <List>
+        <Row heading="Delete Item…" text="It's in Recently Deleted for 30 days." destructive onPress={remove} />
+      </List>
     </Screen>
   )
 }

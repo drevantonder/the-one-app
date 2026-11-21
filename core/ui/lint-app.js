@@ -2,7 +2,7 @@
 // alone, as its tsconfig.json says by extending tsconfig.app.json, with TypeScript's own checker. It fails on an element of
 // the DOM's, `document`, `window` or any other Web API, a stylesheet, a prop a native host can't draw, and a `For` as a
 // `List`'s rows, which makes them all at once (`List each` makes those near the window), and a `Row` straight in a `Section`,
-// which has no card (the `List` it's in draws it). A server runs it
+// which has no card (the `List` it's in draws it), and a `Button` of `variant="destructive"`, which only an alert draws. A server runs it
 // too, as the UI library it serves holds it (build.js), on the app it deploys, where an entrypoint says its `runtime_version`
 // (`OneCore.Entrypoint.lint/3`). Its errors are TypeScript's, a line each: file, line, column and message, as the folder names it.
 // A raw colour or length in a static style is a warning, not an error: "make it a token" (a line each, as an error's, but
@@ -97,6 +97,12 @@ function dom() {
         for (const child of node.children.filter((one) => one.type === "JSXElement" && named(one) === "Row")) {
           found.push(`${at(child)}: error: a \`Row\` in a \`Section\` has no card, which only the \`List\` it's in draws: write \`<List><Row … /></List>\``)
         }
+      }
+      // `<Button variant="destructive">`: a destructive action on a page is a red `Row` in a `List`, as iOS's Settings has
+      // "Sign Out" and "Delete Contact"; a red button is an alert's, which `confirm({ destructive: true })` draws.
+      if (node.type === "JSXElement" && named(node) === "Button") {
+        const variant = node.openingElement.attributes.find((one) => one.type === "JSXAttribute" && one.name.name === "variant")
+        if (variant?.value?.value === "destructive") found.push(`${at(node)}: error: a red button isn't a page's: a destructive action is a red \`Row\` in a \`List\` (\`<List><Row heading="Delete…" destructive onPress={…} /></List>\`), and \`confirm({ destructive: true })\` draws the alert's`)
       }
       // `globalThis.document`, `self["window"]`
       const object = unwrapped(node.object)
