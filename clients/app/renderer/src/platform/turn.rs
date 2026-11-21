@@ -12,15 +12,19 @@ impl Windows {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
         let showing = self.windows.values().filter(|window| !window.shown || matches!(window.cover, Cover::Over(_)) || window.reloading).map(|window| (if window.picture.is_some() { SHOWN_WITHIN } else { QUIET }).saturating_sub(since(window.opened)));
         let blank = self.windows.values().filter(|window| !window.looked && (!window.panel || window.visible)).map(|window| BLANK.saturating_sub(since(window.looking)));
-        // Where the display says nothing of its frames, or hasn't yet since they were asked for, the next is a 60 Hz
-        // display's.
-        let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(since(self.framed)));
+        // Where the display says nothing of its frames, hasn't yet since they were asked for, or has stopped, the loop's
+        // own clock stands in for it a refresh after its last; while its link ticks, the loop looks again once a tick is
+        // a quarter of a refresh late (`ticking`).
+        let refresh = self.refresh();
+        let frame = self.framing().then(|| match self.ticked.filter(|_| self.ticking()) {
+            Some(at) => (refresh * 5 / 4).saturating_sub(since(at)),
+            None => refresh.saturating_sub(since(self.framed)),
+        });
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due).into_iter().chain(self.recording.as_ref().map(|recording| recording.until.saturating_duration_since(now()))).min();
         let idle = self.renderers().filter_map(Renderer::idle_in);
         // A change held for the refresh after its window's last frame (`turned`), where the display says nothing yet.
-        let refresh = self.display.refresh().unwrap_or(FRAME);
         let held = self.windows.values().filter(|window| !self.ticking() && window.dirty && window.on_screen()).filter_map(|window| window.presented).map(|at| refresh.saturating_sub(since(at)));
         screens.chain(showing).chain(blank).chain(frame).chain(pulled).chain(check).chain(idle).chain(held).min()
     }
@@ -34,11 +38,17 @@ impl Windows {
         cfg!(any(target_os = "android", target_os = "ios"))
     }
 
-    /// Whether the display says when it shows each frame, and has since its frames were last asked for: a display link
-    /// just started takes a while to tick (a Mac's two or three refreshes), and the loop's own clock stands in for it
-    /// till then, so what started moving isn't held on its first frame.
+    /// Whether the display says when it shows each frame, and has within the last refresh and a quarter since its
+    /// frames were last asked for: a display link just started takes a while to tick (a Mac's two or three refreshes),
+    /// and a ProMotion display's stops a while as if what's on it were idle, and the loop's own clock stands in for it
+    /// meanwhile, so what moves isn't held. A tick later than that finds the frame that clock drew for it (`turned`).
     pub(super) fn ticking(&self) -> bool {
-        self.display.paced() && self.ticked
+        self.display.paced() && self.ticked.is_some_and(|at| since(at) < self.refresh() * 5 / 4)
+    }
+
+    /// The display's refresh interval, as it says, or where it says nothing (yet), a 60 Hz display's.
+    pub(super) fn refresh(&self) -> std::time::Duration {
+        self.display.refresh().unwrap_or(FRAME)
     }
 
     /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
@@ -127,8 +137,14 @@ impl Windows {
         // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
         let framing = self.framing();
         let ticked = self.display.frame();
-        self.ticked |= ticked.is_some();
-        let shown = ticked.or_else(|| (framing && !self.ticking() && since(self.framed) >= FRAME).then(now));
+        self.ticked = ticked.or(self.ticked);
+        // Where the loop's own clock stands in, its frame is the one the display would have shown a refresh after its
+        // last, at most a refresh late (a link that stopped, noticed a quarter of a refresh on), so what moves keeps the
+        // display's pace: at the clock's own time, a link's pause had it move a step and a half, then half a step.
+        let refresh = self.refresh();
+        let shown = ticked.or_else(|| (framing && !self.ticking() && since(self.framed) >= refresh).then(|| Some(self.framed + refresh).filter(|next| since(*next) < refresh).unwrap_or_else(now)));
+        // When the display showed the frame before, which a frame presented since was drawn after (`presented`).
+        let before = shown.map(|at| std::mem::replace(&mut self.showed, at));
         if let Some(at) = shown {
             self.framed = at;
             if let Some(check) = &self.check {
@@ -205,20 +221,23 @@ impl Windows {
             }
         }
         // A window hands the display at most one frame a refresh: what changes after it has drawn since the last tick is
-        // drawn on the next, as a browser draws on its frames, and where the display's link isn't ticking (idle, or just
-        // asked for), a refresh after the frame it drew. Drawn as each input or change came, frames queued ahead of the
-        // display, each shown a refresh late, and the thread waited for an image to draw on every frame (an iPhone's
-        // main thread, 120 times a second); and a finger lifting in the refresh after its last move drew again, so
-        // where it last was never showed, and a fling jumped as it was let go. A change before it has is drawn at once,
-        // so what the page answers just after a tick, or the first input, isn't held a refresh.
+        // drawn on the next, as a browser draws on its frames, and where the display's link isn't ticking (idle, just
+        // asked for, or stopped), a refresh after the frame it drew. Drawn as each input or change came, frames queued
+        // ahead of the display, each shown a refresh late, and the thread waited for an image to draw on every frame
+        // (an iPhone's main thread, 120 times a second); and a finger lifting in the refresh after its last move drew
+        // again, so where it last was never showed, and a fling jumped as it was let go. A change before it has is
+        // drawn at once, so what the page answers just after a tick, or the first input, isn't held a refresh.
         let ticking = self.ticking();
-        let refresh = self.display.refresh().unwrap_or(FRAME);
         let mut held = false;
         #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
         let phone = self.on_phone();
-        if shown.is_some() {
+        // A frame presented since the display showed the one before, in the quarter refresh before it showed this one
+        // or after, is too late for it: it's the next refresh's, which the window draws no other for. Forgotten, a
+        // link's tick at the moment the loop's own clock or input drew drew again at once, and so did input on the frame
+        // after, a frame never shown (a fling's lift).
+        if let (Some(at), Some(before)) = (shown, before) {
             for window in self.windows.values_mut() {
-                window.presented = None;
+                window.presented = window.presented.filter(|presented| *presented > before && at.saturating_duration_since(*presented) < refresh / 4);
             }
         }
         for window in self.windows.values_mut() {
@@ -431,9 +450,9 @@ impl Windows {
             if let Ok(screen) = &mut window.screen {
                 screen.presented();
             }
-            // Drawn where the display's link doesn't tick, it's the frame the display shows next, which the loop's own
-            // clock counts its next from.
-            if !ticking {
+            // Drawn where the display's link doesn't tick, as input came, it's the frame the display shows next, which the
+            // loop's own clock counts its next from; drawn on that clock's frame, it counts from that.
+            if !ticking && shown.is_none() {
                 self.framed = now();
             }
             // Its opening out of its icon starts from the frame it first shows something in.
@@ -493,7 +512,7 @@ impl Windows {
         // just started, or stopped, hasn't ticked.
         let waiting = held || (ticking && self.windows.values().any(|window| window.on_screen() && window.dirty));
         let wanted = self.framing() || waiting;
-        self.ticked &= wanted && self.wanted;
+        self.ticked = self.ticked.filter(|_| wanted && self.wanted);
         self.wanted = wanted;
         self.display.request_frame(wanted);
         self.display.flush();

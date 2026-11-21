@@ -20,7 +20,9 @@
 //! - **A tick each time the display shows a frame** (`Display::frame`), with when it showed it, while a frame is
 //!   wanted (`Display::request_frame`), and none while nothing moves: X11's Present, a Mac's CVDisplayLink, Windows'
 //!   compositor clock (DComposition), Android's Choreographer, an iPhone's CADisplayLink, the web's
-//!   `requestAnimationFrame`. A display that says nothing (`Display::paced` false) is ticked at 60 Hz by the loop.
+//!   `requestAnimationFrame`. A display that says nothing (`Display::paced` false), or whose link hasn't ticked for
+//!   a refresh and a quarter, is ticked by the loop's own clock, at the display's refresh (`Display::refresh`), or 60 Hz
+//!   where it doesn't say.
 //! - **A surface to present on**: a frame presented each tick while something moves, and nothing while it's still.
 
 use std::collections::{HashMap, VecDeque};
@@ -422,12 +424,14 @@ pub struct Windows {
     text: TextSystem,
     windows: HashMap<WindowId, Window>,
     next: WindowId,
-    /// When the display last showed a frame, as its platform says, or the loop's own clock stood in for it.
+    /// When the display last showed a frame, as its platform says, or the loop's own clock stood in for it (`showed`),
+    /// or a window last drew where its link doesn't tick: what the loop's own clock counts its next frame from.
     framed: web_time::Instant,
-    /// Whether the display's frames were asked for as the loop last turned, and whether one has come since they were
-    /// (`ticking`).
+    showed: web_time::Instant,
+    /// Whether the display's frames were asked for as the loop last turned, and when its link last ticked since they
+    /// were (`ticking`).
     wanted: bool,
-    ticked: bool,
+    ticked: Option<web_time::Instant>,
     /// The inspector's `host` check under way, and what the host has done since it started.
     check: Option<conformance::Check>,
     record: conformance::Record,

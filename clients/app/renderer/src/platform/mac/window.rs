@@ -158,7 +158,7 @@ impl NativeWindow {
 /// When the display last showed a frame, and what wakes the native thread to it.
 struct Frames {
     shown: Mutex<Option<std::time::Instant>>,
-    /// The display's refresh interval, as its link last said.
+    /// The display's refresh interval, as its link last said, or before it's ticked, its nominal one.
     refresh: Mutex<Option<std::time::Duration>>,
     ping: calloop::ping::Ping,
 }
@@ -197,6 +197,12 @@ impl DisplayLink {
         // The frames it tells of are the display's for as long as the program runs, as the native thread is.
         let told = Arc::into_raw(frames.clone()).cast_mut().cast::<c_void>();
         unsafe { link.as_ref().set_output_callback(Some(shown), told) };
+        // Its displays' refresh before it first ticks, which the loop's own clock stands in at till then: a ProMotion
+        // display's 120 Hz, not 60.
+        let nominal = unsafe { link.as_ref() }.nominal_output_video_refresh_period();
+        if nominal.timeValue > 0 && nominal.timeScale > 0 {
+            *frames.refresh.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Duration::from_secs_f64(nominal.timeValue as f64 / f64::from(nominal.timeScale)));
+        }
         Some(DisplayLink(link))
     }
 

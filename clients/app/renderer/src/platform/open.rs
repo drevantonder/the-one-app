@@ -23,7 +23,7 @@ impl Windows {
             let mut text = TextSystem::new(crate::FONT, fonts, !cfg!(feature = "fake"));
             #[cfg(feature = "fake")]
             text.monospace(fake::MONOSPACE);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), showed: now(), wanted: false, ticked: None, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
