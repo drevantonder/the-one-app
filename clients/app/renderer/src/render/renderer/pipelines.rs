@@ -1,6 +1,6 @@
 use super::super::bindings::{self, Binding, Data, Pipeline};
 use super::shadows::TILE_FORMAT;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 /// The pipelines a format of target draws with, and the layouts of what they bind: the frame's globals (group 0), a
 /// batch's instances or a blur's parameters (group 1), and the texture a batch samples (group 2).
@@ -13,13 +13,13 @@ pub(crate) struct Pipelines {
     pub(super) poly_sprites: wgpu::RenderPipeline,
     /// A raster's: a layer's texture drawn over what's there, premultiplied, as it was drawn over nothing.
     pub(super) rasters: wgpu::RenderPipeline,
-    /// A backdrop's and its blur's, which few windows draw: compiled after the rest, on a thread of their own, so a
-    /// window's first frame doesn't wait for them (`backdrops`).
-    pub(super) backdrops: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    /// A backdrop's, and each pass of its blur's.
+    pub(super) backdrops: wgpu::RenderPipeline,
+    pub(super) blur: wgpu::RenderPipeline,
     /// A shadow's tile's: what draws one (its blurred box, alone, into a texture of one channel), and what draws a
-    /// shadow from its tile. Compiled after the rest (`ready_tiles`); till then shadows are worked out where they're
-    /// drawn.
-    pub(super) tiles: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    /// shadow from its tile.
+    pub(super) coverage: wgpu::RenderPipeline,
+    pub(super) tiles: wgpu::RenderPipeline,
 }
 
 /// What every pipeline of a format is made from: the shaders, the target's format and blending, and the layouts of
@@ -192,8 +192,11 @@ type Compile<'a> = &'a (dyn Fn() -> wgpu::RenderPipeline + Sync);
 type Compile<'a> = &'a dyn Fn() -> wgpu::RenderPipeline;
 
 /// Compiles each pipeline at once, as each takes its compiler a while (Direct3D's most): on threads of their own, but
-/// on the web, which has none here and compiles in the browser's GPU process anyway, one after another.
+/// on the web, which has none here and compiles in the browser's GPU process anyway, one after another. On the fake
+/// platform, as long as a device a harness stands for takes to compile them (`fake::costs`).
 fn side_by_side<const N: usize>(compile: [Compile; N]) -> [wgpu::RenderPipeline; N] {
+    #[cfg(feature = "fake")]
+    std::thread::sleep(crate::platform::fake::costs().pipelines);
     #[cfg(target_arch = "wasm32")]
     return compile.map(|compile| compile());
     #[cfg(not(target_arch = "wasm32"))]
@@ -202,71 +205,33 @@ fn side_by_side<const N: usize>(compile: [Compile; N]) -> [wgpu::RenderPipeline;
 
 impl Pipelines {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
-        // As long as a device a harness stands for takes to compile them (`fake::costs`).
-        #[cfg(feature = "fake")]
-        std::thread::sleep(crate::platform::fake::costs().pipelines);
         let layouts = Layouts::new(device, queue, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
-        let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = side_by_side([
+        // All of them before a window's first frame, as Flutter's Impeller and Chromium's Graphite make theirs ahead:
+        // a pipeline compiled as a frame first needs it made that frame wait, the first to show glass half a second on
+        // the Surface while its blur's were compiled.
+        let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters, backdrops, blur, coverage, tiles] = side_by_side([
             &|| l.pipeline(&bindings::QUADS, blend),
             &|| l.pipeline(&bindings::SHADOWS, blend),
             &|| l.pipeline(&bindings::UNDERLINES, blend),
             &|| l.pipeline(&bindings::MONO_SPRITES, blend),
             &|| l.pipeline(&bindings::POLY_SPRITES, blend),
             &|| l.pipeline(&bindings::RASTERS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
-        ]);
-        Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, rasters, backdrops: OnceLock::new(), tiles: OnceLock::new() }
-    }
-
-    /// A shadow's tile's pipelines (`tiles`), compiled now unless they are, or waited for where they're being.
-    pub(super) fn tiles(&self) -> &(wgpu::RenderPipeline, wgpu::RenderPipeline) {
-        self.tiles.get_or_init(|| {
-            let l = &self.layouts;
-            // A tile holds how much of each point the blurred box covers, nothing else, and replaces what's there.
-            let coverage = l.pipeline_into(TILE_FORMAT, &bindings::SHADOW_COVERAGE, None);
-            (coverage, l.pipeline(&bindings::SHADOW_TILES, Some(l.blend)))
-        })
-    }
-
-    /// A shadow's tile's pipelines once they're compiled, which a frame doesn't wait for where they're compiled on a
-    /// thread of their own; else (the web, and the fake platform, whose frames are on a clock of its own that a
-    /// thread's real time can't be ordered against, so a frame is drawn the same on every run) compiled as they're
-    /// first needed.
-    pub(super) fn ready_tiles(&self) -> Option<&(wgpu::RenderPipeline, wgpu::RenderPipeline)> {
-        #[cfg(any(target_arch = "wasm32", feature = "fake"))]
-        return Some(self.tiles());
-        #[cfg(not(any(target_arch = "wasm32", feature = "fake")))]
-        self.tiles.get()
-    }
-
-    /// A backdrop's pipeline and its blur's, compiled now unless they are, or waited for where they're being.
-    pub(super) fn backdrops(&self) -> &(wgpu::RenderPipeline, wgpu::RenderPipeline) {
-        self.backdrops.get_or_init(|| {
-            let l = &self.layouts;
+            &|| l.pipeline(&bindings::BACKDROPS, blend),
             // Each pass of a blur replaces what's in its target.
-            let [backdrops, blur] = side_by_side([&|| l.pipeline(&bindings::BACKDROPS, Some(l.blend)), &|| l.pipeline(&bindings::BLUR, None)]);
-            (backdrops, blur)
-        })
+            &|| l.pipeline(&bindings::BLUR, None),
+            // A tile holds how much of each point the blurred box covers, nothing else, and replaces what's there.
+            &|| l.pipeline_into(TILE_FORMAT, &bindings::SHADOW_COVERAGE, None),
+            &|| l.pipeline(&bindings::SHADOW_TILES, blend),
+        ]);
+        Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, rasters, backdrops, blur, coverage, tiles }
     }
 
     /// The pipelines for targets of `format`, compiled the first time a renderer draws to one, or ahead of it
     /// (`Context::prepare`), which one that comes meanwhile waits for: only it, as each format's are compiled apart.
     pub(crate) fn shared(device: &wgpu::Device, queue: &wgpu::Queue, compiled: &crate::render::context::Compiled, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<Pipelines> {
         Self::slot(compiled, format, premultiplied)
-            .get_or_init(|| {
-                let pipelines = Arc::new(Pipelines::new(device, queue, format, premultiplied));
-                // The rest compiled in the background where there are threads; on the web and the fake platform, as
-                // each is first drawn (`ready_tiles`).
-                #[cfg(not(any(target_arch = "wasm32", feature = "fake")))]
-                {
-                    let compiling = pipelines.clone();
-                    std::thread::spawn(move || {
-                        compiling.backdrops();
-                        compiling.tiles();
-                    });
-                }
-                pipelines
-            })
+            .get_or_init(|| Arc::new(Pipelines::new(device, queue, format, premultiplied)))
             .clone()
     }
 

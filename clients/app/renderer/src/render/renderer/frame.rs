@@ -142,32 +142,30 @@ impl Renderer {
             .collect();
         // The tiles of the frame's shadows that haven't one yet, each its box alone, blurred, in a frame of its own.
         let mut tiles: Vec<(TileKey, (u32, u32), (u64, u64), (u64, u64))> = Vec::new();
-        if self.pipelines.ready_tiles().is_some() {
-            let drawn: std::collections::BTreeSet<usize> = planned.iter().flatten().flat_map(|planned| planned.batches.iter().copied()).collect();
-            for at in drawn {
-                let PrimitiveBatch::Shadows(shadows) = &batches[at] else { continue };
-                for shadow in shadows.iter() {
-                    let Some((key, tile)) = tiled(shadow) else { continue };
-                    if self.tiles.contains_key(&key) || tiles.iter().any(|(planned, ..)| *planned == key) {
-                        continue;
-                    }
-                    let blur = shadow.blur_radius.0;
-                    let side = [(tile[0] + 6.0 * blur).ceil() as u32, (tile[1] + 6.0 * blur).ceil() as u32];
-                    let globals = GlobalParams { viewport_size: [side[0] as f32, side[1] as f32], origin: [0.0; 2], premultiplied_alpha: 0, pad: [0; 3] };
-                    let globals = self.push(bytemuck::bytes_of(&globals));
-                    let mut alone = shadow.clone();
-                    alone.bounds = crate::geometry::Bounds {
-                        origin: crate::geometry::Point { x: crate::geometry::ScaledPixels(3.0 * blur), y: crate::geometry::ScaledPixels(3.0 * blur) },
-                        size: crate::geometry::Size { width: crate::geometry::ScaledPixels(tile[0]), height: crate::geometry::ScaledPixels(tile[1]) },
-                    };
-                    alone.content_mask.bounds = crate::geometry::Bounds {
-                        origin: crate::geometry::Point { x: crate::geometry::ScaledPixels(0.0), y: crate::geometry::ScaledPixels(0.0) },
-                        size: crate::geometry::Size { width: crate::geometry::ScaledPixels(side[0] as f32), height: crate::geometry::ScaledPixels(side[1] as f32) },
-                    };
-                    alone.transformation = TransformationMatrix::unit();
-                    let instance = self.push_instances(std::slice::from_ref(&alone));
-                    tiles.push((key, (side[0], side[1]), globals, instance));
+        let drawn: std::collections::BTreeSet<usize> = planned.iter().flatten().flat_map(|planned| planned.batches.iter().copied()).collect();
+        for at in drawn {
+            let PrimitiveBatch::Shadows(shadows) = &batches[at] else { continue };
+            for shadow in shadows.iter() {
+                let Some((key, tile)) = tiled(shadow) else { continue };
+                if self.tiles.contains_key(&key) || tiles.iter().any(|(planned, ..)| *planned == key) {
+                    continue;
                 }
+                let blur = shadow.blur_radius.0;
+                let side = [(tile[0] + 6.0 * blur).ceil() as u32, (tile[1] + 6.0 * blur).ceil() as u32];
+                let globals = GlobalParams { viewport_size: [side[0] as f32, side[1] as f32], origin: [0.0; 2], premultiplied_alpha: 0, pad: [0; 3] };
+                let globals = self.push(bytemuck::bytes_of(&globals));
+                let mut alone = shadow.clone();
+                alone.bounds = crate::geometry::Bounds {
+                    origin: crate::geometry::Point { x: crate::geometry::ScaledPixels(3.0 * blur), y: crate::geometry::ScaledPixels(3.0 * blur) },
+                    size: crate::geometry::Size { width: crate::geometry::ScaledPixels(tile[0]), height: crate::geometry::ScaledPixels(tile[1]) },
+                };
+                alone.content_mask.bounds = crate::geometry::Bounds {
+                    origin: crate::geometry::Point { x: crate::geometry::ScaledPixels(0.0), y: crate::geometry::ScaledPixels(0.0) },
+                    size: crate::geometry::Size { width: crate::geometry::ScaledPixels(side[0] as f32), height: crate::geometry::ScaledPixels(side[1] as f32) },
+                };
+                alone.transformation = TransformationMatrix::unit();
+                let instance = self.push_instances(std::slice::from_ref(&alone));
+                tiles.push((key, (side[0], side[1]), globals, instance));
             }
         }
         // What a batch's instances bind is as much as the largest needs, from its offset, so one bind group serves all.
@@ -371,7 +369,7 @@ impl Renderer {
                 PrimitiveBatch::PolychromeSprites { texture_id, sprites } => (&self.pipelines.poly_sprites, Some(*texture_id), sprites.len()),
                 PrimitiveBatch::Backdrops(_) => {
                     let Some((blurred, one)) = blurred else { continue };
-                    pass.set_pipeline(&self.pipelines.backdrops().0);
+                    pass.set_pipeline(&self.pipelines.backdrops);
                     pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
                     pass.set_bind_group(2, &self.texture(blurred), &[]);
                     pass.draw(0..4, *one as u32..*one as u32 + 1);

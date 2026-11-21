@@ -87,6 +87,8 @@ pub struct Renderer {
     work: std::cell::Cell<Work>,
     /// Its thread's time on a CPU drawing since it was last asked (`drawing`).
     on_cpu: std::cell::Cell<web_time::Duration>,
+    /// Its thread's time drawing since it was last asked that wasn't on a CPU (`waited`).
+    waiting: std::cell::Cell<web_time::Duration>,
     /// Its passes' time on the GPU, where the GPU can say (`Stamps`), and how long it last waited for images of its
     /// surfaces to draw on.
     stamps: Option<Stamps>,
@@ -219,6 +221,7 @@ impl Renderer {
             passes: Default::default(),
             work: Default::default(),
             on_cpu: Default::default(),
+            waiting: Default::default(),
             stamps: Stamps::new(&context.device, &context.queue),
             acquired: Default::default(),
             submitted: Default::default(),
@@ -294,6 +297,12 @@ impl Renderer {
     /// and handing them to the GPU, not the GPU's own time, nor waiting for it.
     pub fn drawing(&self) -> web_time::Duration {
         self.on_cpu.take()
+    }
+
+    /// Its thread's time drawing frames since this was last asked that it wasn't on a CPU: waiting, for pipelines being
+    /// compiled, an image to draw on, or the GPU.
+    pub fn waited(&self) -> web_time::Duration {
+        self.waiting.take()
     }
 
     fn drew(&self) {
@@ -419,9 +428,11 @@ impl Renderer {
     /// Draws into each target the box of `scene` as big as it whose top left is its origin of `origins`, in device
     /// pixels, all in one submit. → whether each was drawn, which isn't so where one had no image to draw on.
     pub fn draw(&mut self, scene: &Scene, origins: &[[f32; 2]]) -> bool {
-        let started = crate::platform::on_cpu();
+        let (started, began) = (crate::platform::on_cpu(), web_time::Instant::now());
         let drawn = self.draw_frame(scene, origins);
-        self.on_cpu.set(self.on_cpu.get() + crate::platform::on_cpu().saturating_sub(started));
+        let on_cpu = crate::platform::on_cpu().saturating_sub(started);
+        self.on_cpu.set(self.on_cpu.get() + on_cpu);
+        self.waiting.set(self.waiting.get() + began.elapsed().saturating_sub(on_cpu));
         drawn
     }
 

@@ -119,7 +119,9 @@ export async function run(at, folder, scene, requests, seed = 0) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
   }
-  const harnessed = Bun.spawn(capped([harness, ...args]), { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  // Its pipelines compile as slowly as the Surface's (`open.pipelines_ms`), so a frame that waits for some is a long one.
+  const compiling = { ONE_PIPELINES_MS: String(devices.measured.surface.open.pipelines_ms) }
+  const harnessed = Bun.spawn(capped([harness, ...args]), { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env: { ...env, ...compiling } })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: [stderr.trim(), stopped(harnessed.exitCode)].filter(Boolean).join("\n"), failed: harnessed.exitCode !== 0 }
 }

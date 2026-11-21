@@ -172,7 +172,7 @@ impl Renderer {
         for (from, into, params) in passes {
             let texture = self.texture(from);
             let mut pass = self.pass(encoder, into, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), self.stamps.as_ref().and_then(|stamps| stamps.pass(true)));
-            pass.set_pipeline(&self.pipelines.backdrops().1);
+            pass.set_pipeline(&self.pipelines.blur);
             pass.set_bind_group(0, globals, &[]);
             pass.set_bind_group(2, &texture, &[]);
             for blur in blurs {

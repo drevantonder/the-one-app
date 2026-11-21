@@ -33,14 +33,12 @@ pub(super) fn tiled(shadow: &Shadow) -> Option<(TileKey, [f32; 2])> {
 impl Renderer {
     /// Draws a batch of shadows, each from its tile where it has one, else worked out where it's drawn, in runs.
     pub(super) fn draw_shadows(&self, pass: &mut wgpu::RenderPass<'_>, shadows: &[Shadow], instances: &wgpu::BindGroup, offset: u32) {
-        let tiles = self.pipelines.ready_tiles();
         pass.set_bind_group(1, instances, &[offset]);
         let mut at = 0;
         while at < shadows.len() {
-            let tile = tiles.zip(tiled(&shadows[at]).and_then(|(key, _)| self.tiles.get(&key)));
-            match tile {
-                Some(((_, pipeline), (_, group))) => {
-                    pass.set_pipeline(pipeline);
+            match tiled(&shadows[at]).and_then(|(key, _)| self.tiles.get(&key)) {
+                Some((_, group)) => {
+                    pass.set_pipeline(&self.pipelines.tiles);
                     pass.set_bind_group(2, group, &[]);
                     pass.draw(0..10, at as u32..at as u32 + 1);
                     self.drew();
@@ -48,7 +46,7 @@ impl Renderer {
                 }
                 None => {
                     // The run of those worked out where they're drawn.
-                    let end = (at..shadows.len()).find(|one| tiles.is_some() && tiled(&shadows[*one]).is_some_and(|(key, _)| self.tiles.contains_key(&key))).unwrap_or(shadows.len());
+                    let end = (at..shadows.len()).find(|one| tiled(&shadows[*one]).is_some_and(|(key, _)| self.tiles.contains_key(&key))).unwrap_or(shadows.len());
                     pass.set_pipeline(&self.pipelines.shadows);
                     pass.draw(0..10, at as u32..end as u32);
                     self.drew();
@@ -82,7 +80,7 @@ impl Renderer {
             // shadow a dark square round what casts it, for as long as the tile was kept; it's drawn once a shadow's
             // shape, no frame's cost.
             let mut pass = self.pass(encoder, &view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), None);
-            pass.set_pipeline(&self.pipelines.tiles().0);
+            pass.set_pipeline(&self.pipelines.coverage);
             pass.set_bind_group(0, &globals, &[]);
             pass.set_bind_group(1, instances, &[instance.0 as u32]);
             pass.draw(0..4, 0..1);

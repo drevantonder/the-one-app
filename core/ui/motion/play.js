@@ -239,6 +239,13 @@ async function play(built, scene, name, motion, hz, folder) {
     if (!frames.some((frame) => frame.rect)) failed.push("what it follows is never drawn")
     else if (stray) failed.push(`at frame ${stray.n + 1} (${frames[stray.n].at} ms) ${stray.why}`)
   }
+  // No frame waits for pipelines to compile, as the first to draw glass did while its blur's were compiled as it drew
+  // (half a second on the Surface): the harness's compile as long as the Surface's (`run`), and a frame's drawing by
+  // the clock, what its thread waited for too.
+  const compiling = devices.measured.surface.open.pipelines_ms
+  const drawing = (frame) => (frame.draw_ms ?? 0) + (frame.draw_wait_ms ?? 0)
+  const waited = ssh ? -1 : frames.findIndex((frame) => drawing(frame) >= compiling)
+  if (waited >= 0) failed.push(`frame ${waited + 1} (${frames[waited].at} ms) took ${drawing(frames[waited]).toFixed(0)} ms to draw, as long as pipelines take to compile (${compiling} ms)`)
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
   // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.
