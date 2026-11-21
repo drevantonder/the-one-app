@@ -1,5 +1,5 @@
 // Draws every scene on a native host, and with `--web` on the web too, and compares them: `bun scenes.js [<folder>…] [--scene <words>]
-// [--out <dir>] [--against <dir>] [--dark] [--touch] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
+// [--out <dir>] [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
 // harness>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
 // --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
@@ -11,7 +11,7 @@
 // page, `client/index.html` unless said, and a link after `#`), `component` (a component its client exports, drawn alone, in
 // place of a page, as another app's page draws it), `uses` (other apps whose components the page draws, as Settings draws its sections: each is built, and served beside the page as `/<app>/client/`), `taps` (what's done first: pressed by what each is named or
 // says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the web names it, with `ctrl`, `shift`, `alt`
-// or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), `errors` (words of the errors it logs, as a page that can't reach its server does: any other the page logs fails the scene), `timeZone` (the IANA name of the device's, `UTC` unless said: a fixture's instants are said in it, as a person in it reads them), `latency` (ms each tool's answer takes to come on the page's clock, as a server's round trip: for checks of what shows meanwhile), and `like` (another scene's name, as Storybook's args are a
+// or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone: true for any window narrower than COMPACT unless the scene says `false`, as a narrow computer's window is), `errors` (words of the errors it logs, as a page that can't reach its server does: any other the page logs fails the scene), `timeZone` (the IANA name of the device's, `UTC` unless said: a fixture's instants are said in it, as a person in it reads them), `latency` (ms each tool's answer takes to come on the page's clock, as a server's round trip: for checks of what shows meanwhile), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal, and `{ "$image": "data:image/png;base64,…" }` a picture, as a server answers one (MCP's `image`: a screenshot). A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
@@ -33,9 +33,9 @@
 // scene whose page takes longer than OPENS_WITHIN_MS to it, as one that asks again for what an answer said or opens on
 // a tool that changes something does, fails, which the exit status says.
 //
-// A scene under a finger is on a phone, whose window's top and bottom the device keeps for itself (IPHONE's, unless it
-// says its own `safeArea`): words or a control drawn under its status bar, or under its home indicator but for what
-// scrolls there, fail it. `--touch` draws every scene a phone's width (under COMPACT) under a finger, as on a phone.
+// A scene a phone's width (under COMPACT) is a phone's: under a finger, in a window whose top and bottom the device keeps
+// for itself (IPHONE's, unless it says its own `safeArea`), so words or a control drawn under its status bar, or under its
+// home indicator but for what scrolls there, fail it. A narrow computer's window is a scene of its own, `touch: false`.
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
 import { basename, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -44,7 +44,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, copied, env, library, pageFolder, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, library, pageFolder, phone, runThere, scenesOf as gallery, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -54,9 +54,8 @@ const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : u
 // Its own worktree's, never a folder every agent on the machine shares, where one ran with another's UI build.
 const out = resolve(option("--out") ?? join(root, "target", "scenes"))
 const dark = flag("--dark")
-const touched = flag("--touch")
 const onTheWeb = flag("--web")
-// Every scene in a window this size, as a computer's, where it says none of its own.
+// Every scene in a window this size, a phone's if it is under COMPACT and a computer's if not, where it says none of its own.
 const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
 // A device over ssh (`--ssh`, with its own build of the harness, `--harness`) draws each scene too, as motion.js plays there.
@@ -83,20 +82,17 @@ async function scenesOf(target, built) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch = false, timeZone = "UTC", errors, safeArea } = whole(scene)
+      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch, timeZone = "UTC", errors, safeArea } = whole(scene)
       const at = whole(scene).page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")
       const [page, link] = at.split("#")
       const eased = Object.values(whole(scene).motions ?? {}).find((motion) => motion.eases && motion.gesture?.trace)
       const wheel = eased && JSON.parse(readFileSync(join(target, "client", eased.gesture.trace), "utf8")).find((event) => event.kind === "wheel")
-      const fingered = touch || (touched && size[0] < COMPACT)
-      return { name, page, link, uses, answers, taps, size, touch: fingered, timeZone, errors, safeArea: safeArea ?? (fingered ? IPHONE : undefined), wheel }
+      return { ...phone({ name, page, link, uses, answers, taps, size, touch: sized ? undefined : touch, timeZone, errors, safeArea: sized ? undefined : safeArea }), wheel }
     })
   }
   // The gallery lists its own, drawn at `#scenes` by the native harness (motion.js).
   return (await gallery(target, built, join(out, basename(target), ".scenes"), true)).map((scene) => {
-    const size = sized ?? scene.size
-    const fingered = scene.touch || (touched && size[0] < COMPACT)
-    return { ...scene, size, touch: fingered, safeArea: scene.safeArea ?? (fingered ? IPHONE : undefined), timeZone: "UTC" }
+    return { ...(sized ? phone({ ...scene, size: sized, touch: undefined, safeArea: undefined }) : scene), timeZone: "UTC" }
   })
 }
 
@@ -355,13 +351,7 @@ function native(built, scene, folder, used) {
   return { tree, measured: measured && JSON.parse(measured[1]), unsafe, answers: said, at, asked, requests }
 }
 
-/// A phone's safe area, top, right, bottom and left, as an iPhone with a Dynamic Island has it upright (14 Pro to 17):
-/// its status bar and its home indicator.
-const IPHONE = [59, 0, 34, 0]
 const insets = ([top, right, bottom, left]) => ({ top, right, bottom, left })
-/// The narrowest a window is that isn't a phone's, in points: Material's compact width class ends there.
-const COMPACT = 600
-
 /// What a phone draws over a window's words and controls (the harness's `query` of every node, at rest): each drawn under
 /// its status bar, or under its home indicator unless it's in what scrolls, which goes under it as UIKit's scroll views'
 /// content does. Under the status bar, what's scrolled there is meant to be, as under a bar, and so is what covers the

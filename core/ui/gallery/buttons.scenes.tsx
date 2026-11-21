@@ -70,5 +70,5 @@ export default {
       <Spinner />
     </View>
   ),
-  "Buttons/Pressed where it's drawn": { render: () => <Moved />, taps: [{ x: 210, y: 36 }] },
+  "Buttons/Pressed where it's drawn": { render: () => <Moved />, taps: [{ role: "button", name: "Moved" }] },
 } satisfies Scenes

@@ -121,6 +121,20 @@ export async function run(at, folder, scene, requests, seed = 0) {
 }
 
 
+/// A phone's safe area, top, right, bottom and left, as an iPhone with a Dynamic Island has it upright (14 Pro to 17):
+/// its status bar and its home indicator.
+export const IPHONE = [59, 0, 34, 0]
+/// The narrowest a window is that isn't a phone's, in points: Material's compact width class ends there.
+export const COMPACT = 600
+
+/// A scene as a person has it: a window narrower than COMPACT is a phone's, under a finger and with IPHONE's safe area,
+/// unless the scene says otherwise (`touch: false` for a narrow computer window, which it says it's for, or its own
+/// `safeArea`); a wider one is a computer's.
+export const phone = ({ touch, safeArea, ...scene }) => {
+  const fingered = touch ?? scene.size[0] < COMPACT
+  return { ...scene, touch: fingered, safeArea: safeArea ?? (fingered ? IPHONE : undefined) }
+}
+
 /// A folder's scenes that have motions, or with `all`, every one an app's page draws, each with its page, link,
 /// answers, taps, size and touch.
 export async function scenesOf(target, built, folder, all = false) {
@@ -130,9 +144,9 @@ export async function scenesOf(target, built, folder, all = false) {
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
       .filter((scene) => all || (checking ? scene.checks : scene.motions))
-      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", safeArea, errors, latency, motions, checks, seeds }) => {
+      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch, timeZone = "UTC", safeArea, errors, latency, motions, checks, seeds }) => {
         const [at, link] = (page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")).split("#")
-        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, errors, latency, motions, checks, seeds }
+        return phone({ name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, errors, latency, motions, checks, seeds })
       })
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -144,5 +158,5 @@ export async function scenesOf(target, built, folder, all = false) {
   if (!text) throw new Error(`The gallery listed no scenes: ${listed.said}`)
   return JSON.parse(JSON.parse(`"${text}"`))
     .filter((scene) => all || (checking ? scene.checks : scene.motions))
-    .map(({ name, taps = [], size = [390, 844], touch = false, safeArea, errors, motions, checks, seeds }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, safeArea, errors, motions, checks, seeds }))
+    .map(({ name, taps = [], size = [390, 844], touch, safeArea, errors, motions, checks, seeds }) => phone({ name, page: "index.html", link: name, answers: {}, taps, size, touch, safeArea, errors, motions, checks, seeds }))
 }

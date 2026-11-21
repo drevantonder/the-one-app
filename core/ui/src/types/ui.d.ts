@@ -462,8 +462,8 @@ export declare function Widget(props: {
 // draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
 // (`alone`: something over the page), drawn edge to edge in its window, as a whole screen is, rather than inset in it
 // (`layout: "fullscreen"`, as Storybook's), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
-// finger points at it (`touch`), what its window keeps at each edge (`safeArea`, top, right, bottom and left: a phone's
-// status bar and home indicator), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
+// finger points at it (`touch`: a window under 600 wide is a phone's unless it says `false`), what its window keeps at each
+// edge (`safeArea`, top, right, bottom and left: a phone's status bar and home indicator, an iPhone's for a touch scene), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
 // people do with it and what must hold as they do (`checks`, `bun motion.js --checks`), with the seeds a check once
 // failed on (`seeds`). A page that logs an error fails the scene, as a browser's console does a test, but for the
 // words a scene that shows an error says it logs (`errors`: "Couldn't reach the network"). Its name is its family's and its own: "Buttons/Variants".

@@ -172,7 +172,8 @@ export default {
     taps: ["Delete Note"],
     render: () => <Button onPress={() => toast("Note deleted", { action: { label: "Undo", run: () => {} } })}>Delete Note</Button>,
   },
-  "Over the page/Toast, by itself": { render: () => <Toasts />, checks: toastChecks },
+  // Hovered, as a pointer does: a computer's, in a narrow window.
+  "Over the page/Toast, by itself": { render: () => <Toasts />, touch: false, checks: toastChecks },
   "Over the page/A tool's error as a toast": {
     alone: true,
     taps: ["Sync"],
@@ -202,8 +203,10 @@ export default {
   },
   // What people expect of a dialog, from the UI SDK's own tests (tests/specs/dialog.spec.ts at the commit dialog.ts
   // names).
+  // Its glass is a computer's: under a finger an alert is drawn plain.
   "Over the page/An alert asked": {
     render: () => <Asking />,
+    touch: false,
     checks: {
       "It opens over the page, its glass blurred": ["Use Key", { expect: { shown: { role: "alertdialog" } } }, { expect: { blur: true } }],
       "It dims the page behind it": ["Use Key", { wait: 400 }, { expect: { dimmed: true } }],
@@ -233,7 +236,8 @@ export default {
   },
   "Over the page/Menu, closed": () => <OwnMenu />,
   "Over the page/Menu, open": { render: () => <OwnMenu />, taps: ["Open Menu"] },
-  "Over the page/Menu, what's chosen": { render: () => <Chosen />, checks: menuChecks },
+  // Hovered, as a pointer does: a computer's, in a narrow window.
+  "Over the page/Menu, what's chosen": { render: () => <Chosen />, touch: false, checks: menuChecks },
   "Over the page/Menu, its items asked for again": {
     render: () => <Refreshed />,
     checks: {

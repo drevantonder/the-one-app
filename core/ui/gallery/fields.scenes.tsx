@@ -177,8 +177,10 @@ export default {
   // What people expect of a select, from the UI SDK's own tests (tests/specs/select.spec.ts at the commit select.ts
   // names).
   "Fields/A select chosen by its keys": { render: () => <Picked />, taps: [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Enter" }] },
+  // A computer's popup, in a narrow window: under a finger a select is the system's own picker.
   "Fields/A select and what's chosen": {
     render: () => <Picked />,
+    touch: false,
     checks: {
       "A press opens its list, drawn whole": [face, { expect: { shown: { role: "listbox" } } }, { expect: { states: { of: face, is: { expanded: true } } } }],
       "A press on its face again closes it": [face, { wait: 300 }, face, { expect: { gone: { role: "listbox" } } }],
@@ -254,7 +256,8 @@ export default {
       "A note is capitalised as sentences": [{ role: "textbox", name: "Note" }, { expect: { keyboard: sentences } }],
     },
   },
-  "Fields/A select open": { render: () => <Fields />, taps: [{ role: "combobox", name: "Fruit" }] },
+  // A computer's popup menu, in a narrow window: under a finger a select is the system's own picker, which isn't drawn here.
+  "Fields/A select open": { render: () => <Fields />, touch: false, taps: [{ role: "combobox", name: "Fruit" }] },
   // The caret steps over an emoji, a flag and a letter with its accent whole, and Backspace takes an emoji whole:
   // End, then back past "é" and the flag, and Backspace deletes the family, leaving "a🇦🇺é".
   "Fields/Caret by grapheme": {

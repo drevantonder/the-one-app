@@ -84,6 +84,7 @@ export default {
   },
   // A trackpad's swipe drags it as a finger does, the fingers' alone: the pointer, nudged as they go, doesn't move it.
   "Motion/Card swiped by a trackpad": {
+    touch: false,
     motions: { "Swiped, the pointer nudged": { follow: "Swipe me", gesture: { trace: "traces/trackpad-swipe-right.json" }, steady: true } },
     render: () => (
       <View style={look.page}>

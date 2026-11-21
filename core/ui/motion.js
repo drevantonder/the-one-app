@@ -58,7 +58,7 @@ import { cpuName, hostScore } from "./motion/tiers.js"
 // What scenes.js and calibrate.js import from here.
 export { capped, env, FACES, stopped } from "./motion/options.js"
 export { moves, selector } from "./motion/gesture.js"
-export { runThere, scenesOf } from "./motion/harness.js"
+export { COMPACT, IPHONE, phone, runThere, scenesOf } from "./motion/harness.js"
 export { build, COMPONENTS, copied, library, pageFolder, stale, usedApp } from "./motion/pages.js"
 
 /// Every folder with motions, or with `--checks` every folder with scenes: the gallery, and each app's.
