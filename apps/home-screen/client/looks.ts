@@ -143,6 +143,8 @@ export const looks = styles({
   openedArea: { position: "absolute", top: 0, start: 0, overflow: "hidden", pointerEvents: "auto" },
   // Each of its apps flies from its icon in the square.
   flies: { transitionProperty: ["scale", "translateX", "translateY"], transition: tokens.motion.smooth },
+  // Over its app, across its middle, for what flies with it unscaled.
+  badged: { position: "absolute", top: 0, start: 0, end: 0, alignItems: "center", pointerEvents: "none" },
   scaledAt: (scale: number, translateX: number, translateY: number) => ({ scale, translateX, translateY }),
   // Its name and its apps' come in once its apps have nearly got where they go, and go first as it closes.
   named: { opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle, transitionDelay: 250 },

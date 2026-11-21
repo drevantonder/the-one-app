@@ -5,7 +5,7 @@ import { looks } from "./looks.ts"
 import { home, room, tapping, windowWidth } from "./store.ts"
 import { type Owner, badgeOf, opens, press } from "./owners.ts"
 import { holds } from "./holds.ts"
-import { Tile } from "./tiles.tsx"
+import { Count, Tile } from "./tiles.tsx"
 import { handed, openedCategory, places } from "./library.tsx"
 
 /// How large an opened category's apps' icons are, how wide each is with its name, and the gap between them across,
@@ -52,12 +52,22 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
   // Each app is drawn on its icon in its square, as it was drawn when it was pressed, while it's closed, as large as
   // that is. A scale is around its middle, and its icon is at its top, in the middle across.
   const square = () => places[props.made] ?? { apps: [] }
-  const flown = (index: number) => {
+  const flight = (index: number) => {
     const at = measured()?.[index]
     const icon = square().apps[index]
-    if (props.open || !at || !icon) return undefined
-    const scale = Math.max(icon.width / ICON, 0.01)
+    return props.open || !at || !icon ? undefined : { at, icon, scale: Math.max(icon.width / ICON, 0.01) }
+  }
+  const flown = (index: number) => {
+    const flying = flight(index)
+    if (!flying) return undefined
+    const { at, icon, scale } = flying
     return looks.scaledAt(scale, icon.x + icon.width / 2 - area().x - at.x - at.width / 2, icon.y - area().y - at.y - at.height / 2 + (scale * at.height) / 2)
+  }
+  // A badge is as large as it is on the icon in the square, all the way, as an iPhone's is: it isn't scaled with its app,
+  // but moves with its icon's top right corner, which is `scale` times as far from the app's middle there.
+  const flownBadge = (index: number) => {
+    const flying = flight(index)
+    return flying && looks.scaledAt(1, flying.icon.x + flying.icon.width - area().x - flying.at.x - (flying.at.width + ICON) / 2, flying.icon.y - area().y - flying.at.y)
   }
   const named = () => (props.open ? looks.named : looks.unnamed)
   // In a launcher's card, its name and its apps are a column in the card's middle, as Home's pages are, as wide as its
@@ -87,8 +97,13 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
                     // What's held here is an app of the App Library, as there: its menu, or carried onto Home's pages.
                     const held = holds(() => ({ item: opens(entrypoint()), listed: entrypoint(), page: 0, index: -1, from: "library" }), () => true)
                     return (
-                      <View onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, apps: { ...laid.apps, [index()]: event.currentTarget.getBoundingClientRect() } }))}>
-                        <Tile name={entrypoint().name} icon={entrypoint().icon} size={ICON} scale={1} style={[measured() && looks.flies, flown(index())]} nameStyle={named()} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} holds={held} onPress={(behind, from) => press(entrypoint(), props.owner, behind, from)} />
+                      <View style={looks.slots} onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, apps: { ...laid.apps, [index()]: event.currentTarget.getBoundingClientRect() } }))}>
+                        <Tile name={entrypoint().name} icon={entrypoint().icon} size={ICON} scale={1} style={[measured() && looks.flies, flown(index())]} nameStyle={named()} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} counted={false} holds={held} onPress={(behind, from) => press(entrypoint(), props.owner, behind, from)} />
+                        <View aria-hidden="true" style={looks.badged}>
+                          <View style={[looks.slots, looks.square(ICON), measured() && looks.flies, flownBadge(index())]}>
+                            <Count count={badgeOf(entrypoint() as Entrypoint, props.owner)} />
+                          </View>
+                        </View>
                       </View>
                     )
                   }}

@@ -2795,6 +2795,28 @@
             "name": "Productivity"
           }
         }
+      },
+      "Close it, its badge": {
+        "from": {
+          "x": 300,
+          "y": 700
+        },
+        "gesture": {
+          "moves": [
+            {
+              "ms": 90
+            }
+          ]
+        },
+        "follow": {
+          "role": "button",
+          "name": "Tasks",
+          "within": {
+            "role": "dialog",
+            "name": "Productivity"
+          }
+        },
+        "sized": true
       }
     }
   },

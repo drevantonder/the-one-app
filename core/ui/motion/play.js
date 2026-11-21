@@ -1,4 +1,5 @@
 // A motion played on a scene, and a round of them over folders.
+import { PNG } from "pngjs"
 import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { basename, join, relative } from "node:path"
 import { against, only, out, present, rates, ssh } from "./options.js"
@@ -139,6 +140,27 @@ async function play(built, scene, name, motion, hz, folder) {
     const hidden = first < 0 ? -1 : frames.findIndex((frame, n) => n >= first && n <= last && frame.holds === 0)
     if (first < 0) failed.push("what it follows doesn't move")
     else if (hidden >= 0) failed.push(`${JSON.stringify(motion.holds)} isn't drawn at frame ${hidden + 1} (${frames[hidden].at} ms), while what moves is on its way (frames ${first + 1} to ${last + 1})`)
+  }
+  // The red of a badge beside what `follow` names (an app) is as wide in every frame as in the first, as an iPhone's badge isn't
+  // scaled with its app: read from the frames' pictures, the box of the red pixels in the app's top right corner.
+  if (motion.sized) {
+    const widths = frames.flatMap((frame, n) => {
+      if (!frame.rect || !frame.png) return []
+      const { data, width, height } = PNG.sync.read(Buffer.from(frame.png, "base64"))
+      const k = width / scene.size[0]
+      const [left, right, top, bottom] = [frame.rect.x, frame.rect.x + frame.rect.width + 12, frame.rect.y - 12, frame.rect.y + frame.rect.width * 0.5].map((point) => Math.round(point * k))
+      let [min, max] = [Infinity, -Infinity]
+      for (let y = Math.max(top, 0); y < Math.min(bottom, height); y++)
+        for (let x = Math.max(left, 0); x < Math.min(right, width); x++) {
+          const at = (y * width + x) * 4
+          if (data[at] > 200 && data[at + 1] < 110 && data[at + 2] < 110) [min, max] = [Math.min(min, x), Math.max(max, x)]
+        }
+      return max < min ? [] : [{ n, width: (max - min + 1) / k }]
+    })
+    const [first] = widths
+    const off = widths.find((one) => Math.abs(one.width - first.width) > 1.5)
+    if (!first) failed.push("no badge is drawn at the corner of what it follows")
+    else if (off) failed.push(`its badge is ${off.width.toFixed(1)} pt wide at frame ${off.n + 1} (${frames[off.n].at} ms), ${first.width.toFixed(1)} in the first it's drawn in`)
   }
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
