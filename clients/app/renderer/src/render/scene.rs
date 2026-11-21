@@ -92,7 +92,7 @@ impl Scene {
     /// Draws raster `id`'s image (`Renderer::picture`) over `bounds`, `opacity` as opaque, over what's drawn there.
     pub fn picture(&mut self, id: u32, bounds: Bounds<ScaledPixels>, opacity: f32) {
         let transformation = TransformationMatrix::unit();
-        self.insert_primitive(Raster { order: 0, raster: id, opacity, pad: 0, bounds, content_mask: ContentMask { bounds }, transformation });
+        self.insert_primitive(Raster { order: 0, raster: id, opacity, pad: 0, bounds, content_mask: ContentMask { bounds }, transformation, slot: Bounds::default() });
     }
 
     /// Draws `recording` in this scene as an image of it, drawn once, grown `scale` times and moved `by` (`p ↦
@@ -112,6 +112,7 @@ impl Scene {
                 bounds,
                 content_mask: ContentMask { bounds: mask },
                 transformation: TransformationMatrix::unit(),
+                slot: Bounds::default(),
             });
         }
         // What's drawn in it as images is drawn into their textures before it.
@@ -513,13 +514,8 @@ impl<'a> Iterator for BatchIterator<'a> {
             PrimitiveKind::Shadow => Some(PrimitiveBatch::Shadows(batch!(self, shadows_iter, shadows_start, shadows, batch_kind, max))),
             PrimitiveKind::Quad => Some(PrimitiveBatch::Quads(batch!(self, quads_iter, quads_start, quads, batch_kind, max))),
             PrimitiveKind::Backdrop => Some(PrimitiveBatch::Backdrops(batch!(self, backdrops_iter, backdrops_start, backdrops, batch_kind, max))),
-            // Each raster its own batch, as each is its own texture.
-            PrimitiveKind::Raster => {
-                let start = self.rasters_start;
-                self.rasters_iter.next();
-                self.rasters_start = start + 1;
-                Some(PrimitiveBatch::Rasters(&self.rasters[start..start + 1]))
-            }
+            // Drawn a draw for each texture in a row of its batch (`Renderer::draw_run`).
+            PrimitiveKind::Raster => Some(PrimitiveBatch::Rasters(batch!(self, rasters_iter, rasters_start, rasters, batch_kind, max))),
             PrimitiveKind::Underline => {
                 Some(PrimitiveBatch::Underlines(batch!(self, underlines_iter, underlines_start, underlines, batch_kind, max)))
             }
@@ -802,8 +798,9 @@ impl From<Backdrop> for Primitive {
     }
 }
 
-/// An image of a layer's scene (`Recording`), drawn once into a texture of its own, drawn `opacity` as opaque in
-/// `bounds`, cut to `content_mask`: what a compositor draws a layer as.
+/// An image of a layer's scene (`Recording`), drawn once into its texture, drawn `opacity` as opaque in `bounds`, cut
+/// to `content_mask`: what a compositor draws a layer as. Where it is in its texture (`slot`, in texels) is the
+/// renderer's, which packs the images made in a frame into one (`Renderer::draw_frame`).
 #[derive(Clone, Debug)]
 #[repr(C)]
 pub(crate) struct Raster {
@@ -814,6 +811,7 @@ pub(crate) struct Raster {
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,
     pub transformation: TransformationMatrix,
+    pub slot: Bounds<ScaledPixels>,
 }
 
 impl From<Raster> for Primitive {

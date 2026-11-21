@@ -1,4 +1,4 @@
-use super::super::scene::{Recording, TransformationMatrix};
+use super::super::scene::{Raster, Recording, TransformationMatrix};
 use super::*;
 
 /// What a target draws of a frame: the batches that reach its box of the scene, by where they are among the scene's,
@@ -32,6 +32,39 @@ impl Renderer {
         self.data.clear();
         let gamma = self.gamma;
         let gamma = self.push(bytemuck::bytes_of(&gamma));
+        // The frame's rasters' scenes that haven't an image yet, packed into a texture for each depth they're drawn at
+        // (what's an image in one is drawn into its own texture before it) and drawn there in one pass, their batches
+        // together, from their slots: where each took a pass and its own draws, and a draw of its own to draw it, a
+        // launcher's category opening, each of its apps' icon and name a layer, made 7 passes and 14 draws more.
+        let new: Vec<&Recording> = scene.recordings.iter().filter(|recording| !self.rasters.contains_key(&recording.id)).collect();
+        let mut depths: std::collections::HashMap<u32, usize> = Default::default();
+        for recording in &new {
+            let depth = recording.scene.rasters.iter().filter_map(|raster| depths.get(&raster.raster)).map(|depth| depth + 1).max().unwrap_or(0);
+            depths.insert(recording.id, depth);
+        }
+        let largest = self.device.limits().max_texture_dimension_2d;
+        let mut rastering: Vec<(Scene, wgpu::TextureView, (u64, u64), Vec<(u64, u64)>)> = Vec::new();
+        for depth in 0..depths.values().max().map_or(0, |most| most + 1) {
+            let these: Vec<&Recording> = new.iter().filter(|recording| depths[&recording.id] == depth).copied().collect();
+            for (size, placed) in pack(&these.iter().map(|recording| recording.size).collect::<Vec<_>>(), largest) {
+                let texture = self.made((size[0], size[1]), LAYER);
+                let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+                let sheet = Arc::new(Sheet { group: self.texture(&view), texture });
+                let mut drawn = Scene::default();
+                for (at, [x, y]) in placed {
+                    let recording = these[at];
+                    let px = crate::geometry::ScaledPixels;
+                    let slot = Bounds { origin: crate::geometry::Point { x: px(x as f32), y: px(y as f32) }, size: crate::geometry::Size { width: px(recording.size[0] as f32), height: px(recording.size[1] as f32) } };
+                    drawn.splice(&recording.scene, 1.0, [x as f32 - recording.origin[0], y as f32 - recording.origin[1]], 1.0, slot);
+                    self.rasters.insert(recording.id, (sheet.clone(), slot));
+                }
+                drawn.sort();
+                let globals = GlobalParams { viewport_size: [size[0] as f32, size[1] as f32], origin: [0.0; 2], premultiplied_alpha: u32::from(self.premultiplied), pad: [0; 3] };
+                let globals = self.push(bytemuck::bytes_of(&globals));
+                let instances = drawn.batches().map(|batch| self.push_batch(&batch)).collect();
+                rastering.push((drawn, view, globals, instances));
+            }
+        }
         let batches: Vec<PrimitiveBatch<'_>> = scene.batches().collect();
         let instances: Vec<(u64, u64)> = batches.iter().map(|batch| self.push_batch(batch)).collect();
         // What each batch is: its kind, texture and instances.
@@ -137,21 +170,6 @@ impl Renderer {
                 }
             }
         }
-        // The frame's rasters' scenes that haven't a texture yet, each drawn into one of its own, from its origin.
-        let recordings: Vec<Recording> = scene.recordings.iter().filter(|recording| !self.rasters.contains_key(&recording.id)).cloned().collect();
-        let mut rastering: Vec<(Recording, (u64, u64), Vec<(u64, u64)>)> = Vec::new();
-        for recording in recordings {
-            let globals = GlobalParams {
-                viewport_size: [recording.size[0] as f32, recording.size[1] as f32],
-                origin: recording.origin,
-                premultiplied_alpha: u32::from(self.premultiplied),
-                pad: [0; 3],
-            };
-            let globals = self.push(bytemuck::bytes_of(&globals));
-            let scene = recording.scene.clone();
-            let instances = scene.batches().map(|batch| self.push_batch(&batch)).collect();
-            rastering.push((recording, globals, instances));
-        }
         // What a batch's instances bind is as much as the largest needs, from its offset, so one bind group serves all.
         let largest = instances
             .iter()
@@ -180,12 +198,14 @@ impl Renderer {
         for (key, (width, height), globals, instance) in tiles {
             self.draw_tile(&mut encoder, &buffer, &group, key, (width, height), globals, gamma, instance);
         }
-        for (recording, globals, offsets) in rastering {
-            self.draw_raster(&mut encoder, &buffer, &group, &recording, globals, gamma, &offsets);
+        for (drawn, view, globals, offsets) in rastering {
+            self.draw_sheet(&mut encoder, &buffer, &group, &drawn, &view, globals, gamma, &offsets);
         }
-        let gone: Vec<wgpu::Texture> = self.rasters.extract_if(|id, _| !scene.recordings.iter().any(|recording| recording.id == *id) && !scene.rasters.iter().any(|raster| raster.raster == *id)).map(|(_, (texture, _))| texture).collect();
-        for texture in gone {
-            self.let_go(texture);
+        let gone: Vec<Arc<Sheet>> = self.rasters.extract_if(|id, _| !scene.recordings.iter().any(|recording| recording.id == *id) && !scene.rasters.iter().any(|raster| raster.raster == *id)).map(|(_, (sheet, _))| sheet).collect();
+        for sheet in gone {
+            if let Some(sheet) = Arc::into_inner(sheet) {
+                self.let_go(sheet.texture);
+            }
         }
         // Then each target, in runs of batches, one pass each, broken at each backdrop that blurs what's drawn before
         // it afresh.
@@ -326,12 +346,20 @@ impl Renderer {
                 continue;
             }
             if let PrimitiveBatch::Rasters(rasters) = &batches[at] {
-                if let Some((_, group)) = self.rasters.get(&rasters[0].raster) {
-                    pass.set_pipeline(&self.pipelines.rasters);
-                    pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
-                    pass.set_bind_group(2, group, &[]);
-                    pass.draw(0..4, 0..1);
-                    self.drew();
+                pass.set_pipeline(&self.pipelines.rasters);
+                pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
+                // A draw for each texture in a row of them, of the images in it.
+                let sheet = |raster: &Raster| self.rasters.get(&raster.raster).map(|(sheet, _)| sheet);
+                let mut start = 0;
+                while start < rasters.len() {
+                    let first = sheet(&rasters[start]);
+                    let end = start + 1 + rasters[start + 1..].iter().take_while(|raster| sheet(raster).zip(first).is_some_and(|(one, other)| Arc::ptr_eq(one, other))).count();
+                    if let Some(first) = first {
+                        pass.set_bind_group(2, &first.group, &[]);
+                        pass.draw(0..4, start as u32..end as u32);
+                        self.drew();
+                    }
+                    start = end;
                 }
                 continue;
             }
@@ -441,23 +469,52 @@ impl Renderer {
             PrimitiveBatch::MonochromeSprites { sprites, .. } => self.push_instances(sprites),
             PrimitiveBatch::PolychromeSprites { sprites, .. } => self.push_instances(sprites),
             PrimitiveBatch::Backdrops(backdrops) => self.push_instances(backdrops),
-            PrimitiveBatch::Rasters(rasters) => self.push_instances(rasters),
+            PrimitiveBatch::Rasters(rasters) => {
+                let placed: Vec<Raster> = rasters.iter().map(|raster| Raster { slot: self.rasters.get(&raster.raster).map_or_else(Default::default, |(_, slot)| *slot), ..raster.clone() }).collect();
+                self.push_instances(&placed)
+            }
         }
     }
 
-    /// Draws a raster's scene (`recording`) into a texture of its own, over nothing, from its origin (with its own
-    /// `globals`, the frame's `gamma`, and its batches' instances at `offsets`), and keeps it, by its id: in one pass,
-    /// as a raster's backdrops draw nothing.
+    /// Draws the images packed in a texture (`drawn`, their scenes in their slots) into it (`view`), over nothing, with
+    /// its own `globals`, the frame's `gamma`, and its batches' instances at `offsets`: in one pass, as a raster's
+    /// backdrops draw nothing.
     #[allow(clippy::too_many_arguments)]
-    fn draw_raster(&mut self, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, group: &wgpu::BindGroup, recording: &Recording, globals: (u64, u64), gamma: (u64, u64), offsets: &[(u64, u64)]) {
-        let texture = self.made((recording.size[0].max(1), recording.size[1].max(1)), LAYER);
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    fn draw_sheet(&mut self, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, group: &wgpu::BindGroup, drawn: &Scene, view: &wgpu::TextureView, globals: (u64, u64), gamma: (u64, u64), offsets: &[(u64, u64)]) {
         let globals = self.pipelines.layouts.globals(buffer, globals, gamma);
-        let batches: Vec<PrimitiveBatch<'_>> = recording.scene.batches().collect();
+        let batches: Vec<PrimitiveBatch<'_>> = drawn.batches().collect();
         let instances = Instances { group: group.clone(), offsets: offsets.iter().map(|(offset, _)| *offset as u32).collect() };
-        let run: Vec<(usize, Option<(wgpu::TextureView, usize)>)> = (0..batches.len()).filter(|at| !matches!(batches[*at], PrimitiveBatch::Backdrops(_))).map(|at| (at, None)).collect();
-        self.draw_run(encoder, &view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), &globals, &batches, &instances, &run);
-        let bound = self.texture(&view);
-        self.rasters.insert(recording.id, (texture, bound));
+        let run: Vec<(usize, Option<(wgpu::TextureView, usize)>)> = (0..batches.len()).map(|at| (at, None)).collect();
+        self.draw_run(encoder, view, wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), &globals, &batches, &instances, &run);
     }
+}
+
+/// Packs images of `sizes` into textures no wider or taller than `largest`, on shelves, tallest first, each as wide
+/// as the widest or a square of their area, each from a multiple of the dither's tile (`dither` in shaders.wgsl), so
+/// it's dithered as it is in a texture of its own. → each texture's size, and where each image (by where it is in
+/// `sizes`) is in it.
+fn pack(sizes: &[[u32; 2]], largest: u32) -> Vec<([u32; 2], Vec<(usize, [u32; 2])>)> {
+    const TILE: u32 = 64;
+    let cell = |length: u32| length.next_multiple_of(TILE);
+    let area: f64 = sizes.iter().map(|[width, height]| f64::from(cell(*width)) * f64::from(cell(*height))).sum();
+    let wide = sizes.iter().map(|[width, _]| cell(*width)).max().unwrap_or(0).max(area.sqrt().ceil() as u32).min(largest);
+    let mut order: Vec<usize> = (0..sizes.len()).collect();
+    order.sort_by_key(|at| std::cmp::Reverse(sizes[*at][1]));
+    let mut sheets: Vec<([u32; 2], Vec<(usize, [u32; 2])>)> = Vec::new();
+    let (mut x, mut y, mut shelf) = (0, 0, 0);
+    for at in order {
+        let [width, height] = sizes[at];
+        if x > 0 && x + width > wide {
+            (x, y, shelf) = (0, y + shelf, 0);
+        }
+        if sheets.is_empty() || y + height > largest {
+            sheets.push(([0, 0], Vec::new()));
+            (x, y, shelf) = (0, 0, 0);
+        }
+        let (size, placed) = sheets.last_mut().expect("pushed above");
+        placed.push((at, [x, y]));
+        *size = [size[0].max(x + width), size[1].max(y + height)];
+        (x, shelf) = ((x + cell(width)).min(largest), shelf.max(cell(height)));
+    }
+    sheets
 }

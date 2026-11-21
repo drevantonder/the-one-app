@@ -76,8 +76,8 @@ pub struct Renderer {
     /// The bind group of the frame's data for its batches' instances, each at its offset, and how much of the data
     /// from there it binds; made again only as the data's buffer is, or a batch needs more.
     instances: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
-    /// Each raster's texture, by its id, drawn the first frame it's in, kept while frames have it, and its bind group.
-    rasters: std::collections::HashMap<u32, (wgpu::Texture, wgpu::BindGroup)>,
+    /// Each raster's texture and its slot in it, by its id, drawn the first frame it's in, kept while frames have it.
+    rasters: std::collections::HashMap<u32, (Arc<Sheet>, Bounds<ScaledPixels>)>,
     /// Each atlas texture's bind group, as of the atlas's having made so many textures.
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
     /// How many draw calls and render passes the last frame made (`draws`, `passes`).
@@ -140,6 +140,13 @@ const LAYER: wgpu::TextureUsages = wgpu::TextureUsages::RENDER_ATTACHMENT.union(
 struct Kept {
     texture: wgpu::Texture,
     drawn: Drawn,
+}
+
+/// A texture rasters' images are drawn in, those a frame first draws packed together (`Raster::slot`), with its bind
+/// group: kept while any of them is, as a compositor's tiles are.
+struct Sheet {
+    texture: wgpu::Texture,
+    group: wgpu::BindGroup,
 }
 
 impl Renderer {
@@ -263,8 +270,9 @@ impl Renderer {
             wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: None },
             size,
         );
-        let bound = self.texture(&texture.create_view(&wgpu::TextureViewDescriptor::default()));
-        self.rasters.insert(id, (texture, bound));
+        let group = self.texture(&texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        let slot = Bounds { origin: crate::geometry::Point { x: ScaledPixels(0.0), y: ScaledPixels(0.0) }, size: crate::geometry::Size { width: ScaledPixels(width as f32), height: ScaledPixels(height as f32) } };
+        self.rasters.insert(id, (Arc::new(Sheet { texture, group }), slot));
     }
 
     /// Waits until the GPU has done all it was given, and reads its timestamps of the frame it last drew, which `gpu`
@@ -354,12 +362,16 @@ impl Renderer {
     pub fn memory(&self) -> serde_json::Value {
         let backdrop = self.targets.iter().flat_map(|target| target.backdrop.iter()).flat_map(|backdrop| backdrop.source.iter().chain(backdrop.levels.iter().flatten().flatten())).map(|(texture, _)| bytes(texture));
         let blurred = self.targets.iter().flat_map(|target| target.blurred.values()).map(|(view, _)| bytes(view.texture()));
+        // Each raster's sheet once, however many of them it holds.
+        let mut sheets: Vec<&Arc<Sheet>> = self.rasters.values().map(|(sheet, _)| sheet).collect();
+        sheets.sort_by_key(|sheet| Arc::as_ptr(sheet));
+        sheets.dedup_by(|one, other| Arc::ptr_eq(one, other));
         serde_json::json!({
             "surface": self.targets.iter().map(Target::surface_bytes).sum::<u64>(),
             "kept": self.targets.iter().filter_map(|target| target.kept.as_ref()).map(|kept| bytes(&kept.texture)).sum::<u64>(),
             "spare": self.spare.iter().map(bytes).sum::<u64>(),
             "backdrop": backdrop.chain(blurred).sum::<u64>(),
-            "rasters": self.rasters.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
+            "rasters": sheets.iter().map(|sheet| bytes(&sheet.texture)).sum::<u64>(),
             "tiles": self.tiles.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
             "buffer": self.buffer.as_ref().map_or(0, wgpu::Buffer::size),
         })

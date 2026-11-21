@@ -1461,6 +1461,7 @@ struct Raster {
     bounds: Bounds,
     content_mask: Bounds,
     transformation: TransformationMatrix,
+    slot: Bounds,
 }
 @group(1) @binding(0) var<storage, read> b_rasters: array<Raster>;
 
@@ -1485,9 +1486,13 @@ fn vs_raster(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) ins
 
 // Its texture holds what was drawn over nothing, so each texel's colour is already multiplied by its alpha: it's drawn
 // over what's there as it is, as opaque as the raster is (the pipeline blends premultiplied, whatever the target's).
+// It's read from its slot in its texture, held to its slot's edge texels as a texture of its own is by its sampler's
+// clamp to its edge, so what's beside it in the texture never bleeds in.
 @fragment
 fn fs_raster(input: RasterVarying) -> @location(0) vec4<f32> {
-    let texel = textureSample(t_sprite, s_sprite, input.uv);
+    let slot = b_rasters[input.raster_id].slot;
+    let at = slot.origin + clamp(input.uv * slot.size, vec2<f32>(0.5), slot.size - vec2<f32>(0.5));
+    let texel = textureSample(t_sprite, s_sprite, at / vec2<f32>(textureDimensions(t_sprite)));
     if (any(input.clip_distances < vec4<f32>(0.0))) {
         return vec4<f32>(0.0);
     }
