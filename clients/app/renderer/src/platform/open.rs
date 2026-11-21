@@ -137,7 +137,7 @@ impl Windows {
                 cover: if panel || screen_failed { Cover::Gone } else { Cover::Over(None) },
                 loading: false,
                 uncovered: false,
-                presented: false,
+                presented: None,
                 frames: 0,
                 timing: Default::default(),
                 waiting: VecDeque::new(),

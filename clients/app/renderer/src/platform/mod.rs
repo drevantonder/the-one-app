@@ -383,8 +383,8 @@ struct Window {
     uncovered: bool,
     /// Its frames while something on it moves.
     timing: frame_timing::Timing,
-    /// Whether it's handed the display a frame since the display's last tick (`Windows::turned`).
-    presented: bool,
+    /// When it last handed the display a frame, since the display's last tick (`Windows::turned`).
+    presented: Option<web_time::Instant>,
     /// How many frames it's presented, all told.
     frames: u64,
     /// What the person did that waits, in order, for its page to catch up with what they did before (`Windows::input`).
