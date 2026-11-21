@@ -5,7 +5,7 @@ use std::process::ExitCode;
 /// only argument.
 fn main() -> ExitCode {
     // An app's own window, as the app's window or the system starts it (`app::host`).
-    #[cfg(all(feature = "window", not(any(target_os = "android", target_os = "ios"))))]
+    #[cfg(all(feature = "window", not(mobile)))]
     if let (Some(entrypoint), 1) = (std::env::var("ONE_APP").ok(), std::env::args().len()) {
         let link = std::env::var("ONE_OPEN").unwrap_or_else(|_| entrypoint.clone());
         return app::host::run(entrypoint, std::env::var("ONE_SUBJECT").ok(), link);

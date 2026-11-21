@@ -147,7 +147,7 @@ pub(super) fn respond(
         "ui/open-link" => match params["url"].as_str().unwrap_or_default() {
             // The launcher opens an app in its own window, for whoever it's for, and goes, as the web launcher's
             // page does (`go` in client.js).
-            #[cfg(desktop)]
+            #[cfg(not(mobile))]
             url if url.starts_with("one:") && state.launcher => {
                 let (link, subject) = (url["one:".len()..].to_owned(), params["subject"].as_str().map(str::to_owned));
                 if params["behind"] != true {
@@ -256,7 +256,7 @@ pub(super) fn respond(
             None => Some(Err(json!({"code": -32601, "message": format!("Only the client's own page asks {method}")}))),
             Some(unopened) if method == "one/unopened" => Some(Ok(json!({"name": unopened.name, "why": unopened.why, "crashed": unopened.crashed}))),
             // The launcher opens again in its panel's place, as it does once its page is updated.
-            #[cfg(desktop)]
+            #[cfg(not(mobile))]
             Some(_) if state.launcher => {
                 computer::reload_native();
                 Some(Ok(json!({})))

@@ -61,7 +61,7 @@ pub(super) async fn unopened_launcher(_: &str, _: String, _: bool) -> Option<Win
 /// The launcher's panel in place of one whose page didn't open, or `crashed` once it had: its problem box, with Try
 /// Again, or Reload where it crashed, on the client's own page (`UNOPENED`), or where that can't be drawn either, why
 /// in words alone; where this computer's native windows can't start, none.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(super) async fn unopened_launcher(entrypoint: &str, why: String, crashed: bool) -> Option<WindowId> {
     let name = named(entrypoint, None).await;
     let said = if crashed { format!("{name} stopped working: {why}") } else { format!("{name} didn't open: {why}") };
@@ -98,7 +98,7 @@ pub(super) async fn unopened_launcher(entrypoint: &str, why: String, crashed: bo
 
 /// The launcher's panel `old`, whose page failed as it started, or `crashed` once it had, replaced by one with its
 /// problem box (`unopened_launcher`), which shows if it was showing. The old one goes first.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(super) fn replace_launcher(entrypoint: String, why: String, crashed: bool, old: Option<WindowId>) {
     let (showing_to, showing) = tokio::sync::oneshot::channel();
     if let (Some(old), Ok(native)) = (old, Native::get()) {
@@ -127,7 +127,7 @@ pub(crate) enum Instead {
 
 /// Opens the launcher, put away until it's summoned, with `instead` in place of the Home Screen. → its window, once
 /// it's open.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(crate) async fn launcher_instead(instead: Instead) -> Option<WindowId> {
     let entrypoint = match &instead {
         Instead::Unopened(unopened) => unopened.entrypoint.clone(),

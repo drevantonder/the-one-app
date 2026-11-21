@@ -591,7 +591,7 @@ mod device {
 /// windows by in the taskbar, a Mac bundle's identifier, and a Linux window's class. It's this app's identifier, then
 /// the app's name, its page's if it isn't the app's first, and who it's for, if not its user, last part first:
 /// `app.theone.client.notes`, `app.theone.client.sign-in.users`, `app.theone.client.notes.family.groups`.
-#[cfg(desktop)]
+#[cfg(any(not(mobile), target_os = "linux"))]
 pub fn app_id(entrypoint: &str, subject: Option<&str>) -> String {
     let mut parts = entrypoint.split('/');
     let mut id = parts.next().unwrap_or_default().to_owned();
@@ -608,7 +608,7 @@ pub fn app_id(entrypoint: &str, subject: Option<&str>) -> String {
 }
 
 /// An app's screen's name, as its shortcut has it, once this device has listed them.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn name(entrypoint: &str) -> Option<String> {
     let kept = KEPT.lock().expect("no keep panics");
     kept.iter().flatten().find(|shortcut| shortcut.entrypoint == entrypoint).map(|shortcut| shortcut.name.clone())

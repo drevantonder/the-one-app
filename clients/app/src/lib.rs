@@ -23,11 +23,11 @@ use notifications_client as notifications;
 
 pub mod phone;
 mod shortcuts;
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub mod computer;
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 mod login;
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub mod host;
 mod hosts;
 mod memory;
@@ -36,7 +36,7 @@ mod native;
 #[cfg(mobile)]
 pub(crate) mod page;
 // The app's name, as `tauri.conf.json` has it (`build.rs`).
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 include!(concat!(env!("OUT_DIR"), "/name.rs"));
 mod updater;
 
@@ -61,18 +61,20 @@ pub(crate) use views::*;
 pub(crate) use mobile::*;
 
 /// The app on a computer: the launcher and its client (`computer`).
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn run() {
     computer::run()
 }
 
 #[cfg(mobile)]
-#[tauri::mobile_entry_point]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), tauri::mobile_entry_point)]
 pub fn run() {
     use tauri::http::{Response, StatusCode, header};
     let started = Instant::now();
-    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init()).plugin(notifications::plugin());
-    let builder = builder.plugin(tauri_plugin_deep_link::init());
+    let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init()).plugin(tauri_plugin_deep_link::init());
+    // A phone's push, which Linux has none of.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    let builder = builder.plugin(notifications::plugin());
     #[cfg(target_os = "ios")]
     let builder = builder.plugin(tauri_plugin_haptics::init());
     #[cfg(target_os = "ios")]

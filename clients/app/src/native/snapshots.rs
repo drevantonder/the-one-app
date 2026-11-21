@@ -28,7 +28,7 @@ pub(crate) fn forget_snapshots() {
 /// Where an app's window is kept where it was left (`WindowOptions::frame`): a computer's app window's, by its app,
 /// its page and who it's for.
 pub(super) fn frame_file(launcher: bool, sheet: bool, entrypoint: &str, subject: Option<&str>) -> Option<std::path::PathBuf> {
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     if !launcher && !sheet {
         return crate::app().shell.home().ok().map(|home| home.join("windows").join(format!("{}.json", crate::shortcuts::app_id(entrypoint, subject))));
     }

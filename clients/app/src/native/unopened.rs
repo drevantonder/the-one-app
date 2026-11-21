@@ -49,7 +49,7 @@ pub(crate) struct Unopened {
 
 impl Unopened {
     /// The Home Screen, which didn't open for `why` before its page was known.
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     pub(crate) fn launcher(why: String) -> Self {
         Unopened { entrypoint: UNOPENED.trim_start_matches('/').to_owned(), subject: None, link: String::new(), name: "The Home Screen".to_owned(), why, crashed: false }
     }

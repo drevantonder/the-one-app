@@ -30,7 +30,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use url::Url;
 
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 use crate::{NAME, computer};
 #[cfg(mobile)]
 use computer::NAME;
@@ -389,7 +389,7 @@ fn options(kind: &Kind, entrypoint: &str, subject: Option<&str>, name: &str) -> 
 fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: Option<&str>, link: &str, window: &Arc<OnceLock<WindowId>>, started: Instant) -> impl FnMut(Event) + 'static {
     let launcher = matches!(kind, Kind::Launcher(..));
     // A launcher whose page fails as it starts has its problem box in its place, in a panel of its own.
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     let launcher_page = matches!(kind, Kind::Launcher(_, None));
     // An app's own window, which says why in a window of the client's own if its page doesn't start (`unopened`).
     let app_window = matches!(kind, Kind::App(_));
@@ -443,7 +443,7 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
             // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
             Event::Unfocused => crate::spawn(crate::updater::ready()),
             Event::Quit => {
-                #[cfg(desktop)]
+                #[cfg(not(mobile))]
                 computer::quit();
             }
             // Closed before it was done, the recovery key wasn't seen or used. The launcher's closed as nothing of the
@@ -468,11 +468,11 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 if let Ok(views) = crate::views() {
                     views.client.report(json!({"name": "one.client.native.crash", "error": why, "attributes": {"one.view": app}}));
                 }
-                #[cfg(desktop)]
+                #[cfg(not(mobile))]
                 if launcher_page {
                     return replace_launcher(entrypoint.clone(), why, true, shown.get().copied());
                 }
-                #[cfg(desktop)]
+                #[cfg(not(mobile))]
                 if launcher {
                     return computer::reload_native();
                 }
@@ -492,7 +492,7 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
                 if launcher {
                     computer::unopened(why.clone(), false);
                 }
-                #[cfg(desktop)]
+                #[cfg(not(mobile))]
                 if launcher_page {
                     replace_launcher(entrypoint.clone(), why, false, shown.get().copied());
                     return;
@@ -507,12 +507,12 @@ fn events(kind: &Kind, to: &UnboundedSender<Value>, entrypoint: &str, subject: O
             // phone opens it in its page.
             Event::Mismatched(why) => {
                 reported(&entrypoint, started, &why);
-                #[cfg(desktop)]
+                #[cfg(not(mobile))]
                 if launcher_page {
                     replace_launcher(entrypoint.clone(), why, false, shown.get().copied());
                     return;
                 }
-                #[cfg(desktop)]
+                #[cfg(not(mobile))]
                 if app_window {
                     close(&shown);
                     crate::hosts::forget(&entrypoint, subject.as_deref());
@@ -725,7 +725,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
 /// unified toolbar; elsewhere the same height, under the window's own frame.
 #[cfg(target_os = "macos")]
 const BAR: (f64, f64) = (52.0, 20.0 + 2.0 * 20.0 + 14.0 + 8.0);
-#[cfg(all(desktop, not(target_os = "macos")))]
+#[cfg(all(not(mobile), not(target_os = "macos")))]
 const BAR: (f64, f64) = (52.0, 12.0);
 /// A phone's window has none: the activity keeps the page clear of the system's bars (`MainActivity`).
 #[cfg(mobile)]
@@ -809,7 +809,7 @@ pub(crate) mod computer {
 /// Opens what a `one:` link from the launcher says, `<app>[/<page>][#<fragment>]`, for `subject`, in its own window,
 /// and puts the launcher away, as the web launcher's page does (`go` in client.js): an app by its name opens its first
 /// page, as its app lists it last; the launcher's own app brings it forward.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(crate) async fn go(link: String, subject: Option<String>) {
     let (entrypoint, fragment) = link.split_once('#').map_or((link.as_str(), None), |(page, fragment)| (page, Some(fragment)));
     let page = match entrypoint.contains('/') {
@@ -829,7 +829,7 @@ pub(crate) async fn go(link: String, subject: Option<String>) {
 
 /// The page `app` opens first, for `subject`, as its apps are listed (`launcherIn` in apps.js): the last one listed,
 /// or the launcher's, for its own app.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(crate) async fn first(app: &str, subject: Option<&str>) -> Option<String> {
     let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.ok()?;
     let pages: Vec<(String, &Value)> = pages(&listed).collect();
@@ -841,7 +841,7 @@ pub(crate) async fn first(app: &str, subject: Option<&str>) -> Option<String> {
 }
 
 /// The pages listed, each `<app>/<page>`, with its `_meta`, as an MCP App's are at ui://<app>/<version>/<page>.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(crate) fn pages(listed: &Value) -> impl Iterator<Item = (String, &Value)> {
     listed["resources"].as_array().into_iter().flatten().filter(|resource| resource["mimeType"] == "text/html;profile=mcp-app").filter_map(|resource| {
         let mut parts = resource["uri"].as_str()?.strip_prefix("ui://")?.split('/');

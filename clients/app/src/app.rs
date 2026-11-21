@@ -76,6 +76,6 @@ pub(crate) fn views() -> Result<&'static Views, String> {
 pub(crate) fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
     #[cfg(mobile)]
     tauri::async_runtime::spawn(future);
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     crate::computer::runtime().spawn(future);
 }

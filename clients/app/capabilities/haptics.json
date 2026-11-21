@@ -1,8 +1,8 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "haptics",
-  "description": "The app's own page plays the haptics an app asks for (`one/haptic`): an iPhone's, and on a computer nothing. Android's plays them through the web view (`MainActivity`).",
+  "description": "The app's own page plays the haptics an app asks for (`one/haptic`): an iPhone's. Android's plays them through the web view (`MainActivity`).",
   "windows": ["main"],
-  "platforms": ["iOS", "macOS", "windows", "linux"],
+  "platforms": ["iOS"],
   "permissions": ["haptics:allow-impact-feedback", "haptics:allow-selection-feedback", "haptics:allow-notification-feedback"]
 }

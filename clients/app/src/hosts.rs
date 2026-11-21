@@ -22,7 +22,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 use crate::computer;
 
 /// The events the launcher's page hears that an app's window hears too. A `one:` link (`open`) is told only to the
@@ -50,7 +50,7 @@ struct Host {
 /// Where the channel is, named after the client's folder, so a client of each folder has its own: a Unix socket in
 /// this user's own folder for them (Linux's `XDG_RUNTIME_DIR`, a Mac's `TMPDIR`), as a socket's address is short, and
 /// on Windows a named pipe.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn address(home: &std::path::Path) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -67,7 +67,7 @@ pub fn address(home: &std::path::Path) -> String {
 
 /// Tells the app already running for `home`, if there is one, that it was started again, with the `one:` link it was
 /// started with: the Dock's or taskbar's icon clicked, or a link opened. → whether it was told, so this start ends.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn again(home: &std::path::Path, link: Option<&str>) -> bool {
     use std::io::Write;
     let line = format!("{}\n", json!({"again": {"link": link}}));
@@ -79,7 +79,7 @@ pub fn again(home: &std::path::Path, link: Option<&str>) -> bool {
 }
 
 /// Serves the channel for as long as this program runs, on its runtime.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn serve(home: &std::path::Path) -> anyhow::Result<()> {
     let address = address(home);
     let _inside = computer::runtime().enter();
@@ -140,7 +140,7 @@ pub fn close_all_but(kept: Option<&str>) {
 }
 
 /// The apps whose windows are open, each as `open_window` opens it: its entrypoint and who it's for.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn open_now() -> Vec<(String, Option<String>)> {
     let open = HOSTS.open.lock().expect("no host panics");
     open.keys()
@@ -152,13 +152,13 @@ pub fn open_now() -> Vec<(String, Option<String>)> {
 /// Opens an app in its own window, drawn here (`renderer`), at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link
 /// says it), or brings its window forward there if it's open. One whose page this program can't draw, or that didn't
 /// open, is a window that says so, and Telemetry hears why (`native::open`).
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     open(entrypoint, subject, link)
 }
 
 /// Opens an app's native window again, in place of the one it had, as it reloads its page.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
     open(entrypoint, subject, link)
@@ -217,7 +217,7 @@ pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) 
     Ok(())
 }
 
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     let mut open = HOSTS.open.lock().expect("no host panics");
@@ -265,7 +265,7 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
     let mut key = None;
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
-        #[cfg(desktop)]
+        #[cfg(not(mobile))]
         if let Some(again) = message.get("again") {
             computer::again(again["link"].as_str().map(str::to_owned));
             return;
@@ -374,7 +374,7 @@ async fn change(args: &Value) -> Result<Value, String> {
         return Err("This device has no Settings to open here.".into());
     }
     if let Some(on) = args.get("login") {
-        #[cfg(desktop)]
+        #[cfg(not(mobile))]
         return crate::login::set(on == true).map(|()| json!({"message": ""})).map_err(|error| format!("{error:#}"));
         #[cfg(mobile)]
         return Err(format!("This device has no login items ({on})."));
@@ -401,14 +401,14 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             #[allow(unused_mut)]
             let mut started = start().await?;
             // A phone's page names its apps, not its shortcuts.
-            #[cfg(desktop)]
+            #[cfg(not(mobile))]
             if !launcher {
                 started["name"] = json!(text("entrypoint").and_then(|entrypoint| crate::shortcuts::name(&entrypoint)));
             }
             Ok(started)
         }
         // An app opened from the launcher comes in front, and the launcher goes.
-        #[cfg(desktop)]
+        #[cfg(not(mobile))]
         "open_window" => {
             open_window(text("entrypoint").unwrap_or_default(), text("subject"), text("link").unwrap_or_default())?;
             if launcher {
@@ -421,15 +421,15 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         "open_window" => Ok(done(app().shell.emit("open", json!(text("link").unwrap_or_default())))),
         // The Home Screen, from an app's own window: on a phone under every app's window, which close, and not
         // itself, which closing every window did, black until the app started again.
-        #[cfg(desktop)]
+        #[cfg(not(mobile))]
         "front" => Ok(done(computer::summon())),
         #[cfg(mobile)]
         "front" => Ok(done(crate::native::computer::summon())),
         // Escape on the launcher, or its page done with it (`leave`).
-        #[cfg(desktop)]
+        #[cfg(not(mobile))]
         "hide" => Ok(done(computer::hide(true))),
         // As tall as the launcher's content, or its tallest (`fit` in bridge.js).
-        #[cfg(desktop)]
+        #[cfg(not(mobile))]
         "resize" if launcher => Ok(done(computer::resize(None, args["height"].as_f64()))),
         "theme" if launcher => Ok(done(theme(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
         "theme" => Ok(done(chose(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),

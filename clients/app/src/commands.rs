@@ -2,7 +2,7 @@
 
 use std::sync::atomic::Ordering;
 
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 use ::client::Connection;
 use serde_json::{Value, json};
 
@@ -60,7 +60,7 @@ pub(crate) fn client() -> Result<Value, String> {
 /// Whether the app opens when this device's person logs in, as the system says; null on a device that has no such
 /// thing (a phone's), or whose build keeps none (`login`).
 pub(crate) fn login() -> Option<bool> {
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     return login::enabled();
     #[cfg(mobile)]
     None
@@ -171,10 +171,10 @@ pub(crate) async fn retry() -> Result<(), String> {
         return Ok(());
     };
     // A computer's launcher, which said Update Required for being behind, shows the Home Screen again.
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     let behind = matches!(views.client.state().borrow().connection(), Connection::Behind(_));
     views.client.retry().await.map_err(|error| error.to_string())?;
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     if behind {
         computer::talks();
     }
@@ -211,7 +211,7 @@ pub(crate) async fn start() -> Result<Value, String> {
     told["taps"] = json!(cfg!(mobile));
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
-    told["windows"] = json!(cfg!(desktop));
+    told["windows"] = json!(!cfg!(mobile));
     // A phone draws an app's window natively, over the page, where it needs this program's runtime version or an
     // older one (`renderer`).
     #[cfg(mobile)]

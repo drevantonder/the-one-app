@@ -1,8 +1,0 @@
-{
-  "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "computer",
-  "description": "On a computer, the notification plugin's own script in the app's page asks whether notifications are allowed as the page loads, so that it can answer the web's `Notification.permission`; nothing else of it is given to the page.",
-  "windows": ["main"],
-  "platforms": ["macOS", "windows", "linux"],
-  "permissions": ["notification:allow-is-permission-granted"]
-}

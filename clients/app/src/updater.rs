@@ -32,7 +32,7 @@ static DUE: AtomicBool = AtomicBool::new(false);
 #[cfg(mobile)]
 static EDGE: Mutex<Option<String>> = Mutex::new(None);
 /// One build taken at a time.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 static TAKING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
 /// When the network was last asked what the app missed (`looked`).
 static ASKED: Mutex<Option<Instant>> = Mutex::new(None);
@@ -42,7 +42,7 @@ static WAITING: AtomicBool = AtomicBool::new(false);
 /// Starts keeping the app on what's latest, as it opens: a computer's hears its own program replaced, and it asks the
 /// network what it has.
 pub fn start() {
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     replaced();
     looked();
 }
@@ -69,7 +69,7 @@ pub(crate) fn report(name: &str, attributes: Value) {
 /// Hears this program's file replaced, by its device's server, `one update` or anyone, and starts again on it once
 /// it's a newer build (`in_place`), whether or not the network said so: the system says each change to its folder
 /// (FSEvents, inotify, ReadDirectoryChangesW).
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 fn replaced() {
     use notify::{RecursiveMode, Watcher};
     let Ok(program) = cli::serving::program() else { return };
@@ -94,7 +94,7 @@ pub async fn heard(update: Value) {
     report("one.client.update.heard", json!({"one.build.latest": update["latest"][cli_name()], "one.edge.build": update["edge"]}));
     // What it says of each `one` is what servers run (`serving`, `OneCore.Builds`), which may be older than the app's
     // latest build, so the network is asked for that.
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     caught_up().await;
     #[cfg(mobile)]
     if let Some(edge) = update["edge"].as_str() {
@@ -107,7 +107,7 @@ pub async fn heard(update: Value) {
 
 /// Asks the network for what the app missed while it didn't reach it: its latest build, and its page.
 pub async fn caught_up() {
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     if let Ok(views) = crate::views() {
         match cli::serving::latest_program(&views.client).await {
             Ok(Some(latest)) => take(&latest).await,
@@ -121,7 +121,7 @@ pub async fn caught_up() {
 
 /// Takes `latest`, if it's newer than this build: downloaded here, and on a device that's also a server put in place
 /// beside it (`cli::serving::take_program`) or by it.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 async fn take(latest: &str) {
     // A developer's build is what they're trying, which the network's never takes the place of: one on a network
     // being built took the network's latest release and started again on that (21 Nov).
@@ -148,7 +148,7 @@ async fn take(latest: &str) {
 
 /// Whether the program's file is a newer build than the one running, which is then due: what's started again is that
 /// file.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 async fn in_place() {
     let Ok(program) = cli::serving::program() else { return };
     let Ok(Some(there)) = tokio::task::spawn_blocking(move || cli::serving::build_of(&program)).await else { return };
@@ -222,7 +222,7 @@ pub async fn ready() {
     if !DUE.swap(false, Ordering::Relaxed) {
         return;
     }
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     {
         // What it reports is kept, and told from the next start where it isn't before.
         report("one.client.update.restart", json!({}));
@@ -252,7 +252,7 @@ async fn typing() -> Option<String> {
 
 /// This program's name among the network's builds, on a computer.
 fn cli_name() -> String {
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     return cli::serving::name();
     #[cfg(mobile)]
     return String::new();

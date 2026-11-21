@@ -71,7 +71,7 @@ pub(crate) fn cover(window: &tauri::WebviewWindow) -> tauri::Result<()> {
 /// The home screen, as a phone's window is sent to it. Android's web view loads only http.
 #[cfg(target_os = "android")]
 pub(crate) const HOME: &str = "http://tauri.localhost/index.html";
-#[cfg(target_os = "ios")]
+#[cfg(not(target_os = "android"))]
 pub(crate) const HOME: &str = "tauri://localhost/index.html";
 
 /// Whether the window goes where it's sent: to its own pages and its apps', and to the sign-in page it starts on.
@@ -107,11 +107,12 @@ pub(crate) struct Phone(pub(crate) AppHandle);
 impl Shell for Phone {
     /// A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
     /// the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
-    /// when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone::home`).
+    /// when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone::home`). So
+    /// does Linux's, the app harness's.
     fn home(&self) -> anyhow::Result<std::path::PathBuf> {
         #[cfg(target_os = "android")]
         return Ok(self.0.path().app_data_dir()?);
-        #[cfg(target_os = "ios")]
+        #[cfg(not(target_os = "android"))]
         return phone::home(&self.0.path().app_data_dir()?, std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new));
     }
 
@@ -151,7 +152,11 @@ impl Shell for Phone {
     }
 
     fn listen(&self, client: Arc<Client>) {
+        #[cfg(any(target_os = "android", target_os = "ios"))]
         spawn(notifications::listen(self.0.clone(), client));
+        // Linux has no push, so it hears them as a computer does.
+        #[cfg(target_os = "linux")]
+        spawn(notifications::listen(client, ::client::NAME, |opens| app().shell.emit("open", json!(opens))));
     }
 
     /// An iPhone's status bar, which would otherwise follow the device and show dark on dark. Android's bars are

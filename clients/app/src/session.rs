@@ -14,10 +14,10 @@ use url::Url;
 use crate::*;
 
 /// Once the device is signed in to its network, which it's told only once its views are open (`follows`).
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 /// Waits until this device's session is settled: in its network, or signing in, which it is once its client has opened
 /// and asked.
-#[cfg(desktop)]
+#[cfg(not(mobile))]
 pub(crate) async fn settled() {
     let mut session = app().start.subscribe();
     let _ = session.wait_for(|now| matches!(now, Some((_, State::SignedIn { .. } | State::SignIn { .. })))).await;
@@ -61,11 +61,11 @@ pub(crate) async fn opens() {
         }
     };
     eprintln!("the client opened {} ms after the app started", app.started.elapsed().as_millis());
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     computer::opened();
     // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
     // not the system still has the server to start (`cli::serving::settle`).
-    #[cfg(desktop)]
+    #[cfg(not(mobile))]
     spawn({
         let client = client.clone();
         async move {
