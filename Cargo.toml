@@ -53,8 +53,11 @@ accesskit_android = { git = "https://github.com/ptc-au/accesskit", rev = "688806
 # QuickJS-NG with one change, until it's merged: a Proxy's getOwnPropertyDescriptor trap that answers with an accessor
 # gives an accessor, not `{ value: undefined }` (github.com/quickjs-ng/quickjs/pull/1658), so Solid's spread draws the
 # children of merged props; on the commit rquickjs-sys 0.14.0 vendors. It also ships bindings for Android, which
-# rquickjs doesn't, so an Android build runs no bindgen (which needs libclang and the NDK's sysroot).
-rquickjs-sys = { git = "https://github.com/ptc-au/rquickjs", rev = "b57d6e6e70f012c75a4e60e5fb7b420f95b1fe65" }
+# rquickjs doesn't, so an Android build runs no bindgen (which needs libclang and the NDK's sysroot). And rquickjs-core
+# with one change: an ArrayBuffer made from Rust's bytes (LLRT's Blob, TextEncoder's) is copied into QuickJS's own
+# memory, so it counts toward a page's memory and its limit, where a page piling up Blobs held 1.5 GB past a 256 MB one.
+rquickjs-sys = { git = "https://github.com/ptc-au/rquickjs", rev = "f77d66e2a4b4fc0a0ce1d25ab977617ebf8d3871" }
+rquickjs-core = { git = "https://github.com/ptc-au/rquickjs", rev = "f77d66e2a4b4fc0a0ce1d25ab977617ebf8d3871" }
 # wgpu 30.0.2 with one change, until it's taken upstream: its pool of command encoders keeps at most four idle,
 # dropping the least recently used, where it kept every one ever in flight at once, each holding what its driver kept of
 # the most it recorded (Intel's Direct3D 12 driver 0.3 to 0.6 MB a render pass: nine encoders on a Surface held about
