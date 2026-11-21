@@ -1,5 +1,5 @@
-// Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
-// [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
+// Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--scene <words>]
+// [--out <dir>] [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
 // harness>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
 // --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
@@ -56,7 +56,9 @@ const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
 // A device over ssh (`--ssh`, with its own build of the harness, `--harness`) draws each scene too, as motion.js plays there.
 const ssh = option("--ssh")
-const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size", "--ssh", "--harness"].includes(args[at - 1])).map((folder) => resolve(folder))
+// Only the scenes whose names have these words, as motion.js's `--scene`.
+const only = option("--scene")?.toLowerCase()
+const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size", "--ssh", "--harness", "--scene"].includes(args[at - 1])).map((folder) => resolve(folder))
 const targets = folders.length ? folders : [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")))]
 let harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 // The runtime version the UI library needs, and the native host's: a host whose version is older draws nothing of a
@@ -382,7 +384,7 @@ for (const target of targets) {
     await tab.close()
     return text
   }
-  for (const scene of await scenesOf(target, built, serve)) {
+  for (const scene of (await scenesOf(target, built, serve)).filter((scene) => !only || scene.name.toLowerCase().includes(only))) {
     const folder = join(out, name, scene.name.replace(/[^\w.-]+/g, "-"))
     mkdirSync(folder, { recursive: true })
     const shown = await dom(browser, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ problems: [String(error)] }))
