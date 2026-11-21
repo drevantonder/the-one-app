@@ -18,14 +18,14 @@ impl Windows {
         let refresh = self.refresh();
         let frame = self.framing().then(|| match self.ticked.filter(|_| self.ticking()) {
             Some(at) => (refresh * 5 / 4).saturating_sub(since(at)),
-            None => refresh.saturating_sub(since(self.framed)),
+            None => shows(self.vsync, refresh, self.framed).saturating_duration_since(now()),
         });
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due).into_iter().chain(self.recording.as_ref().map(|recording| recording.until.saturating_duration_since(now()))).min();
         let idle = self.renderers().filter_map(Renderer::idle_in);
-        // A change held for the refresh after its window's last frame (`turned`), where the display says nothing yet.
-        let held = self.windows.values().filter(|window| !self.ticking() && window.dirty && window.on_screen()).filter_map(|window| window.presented).map(|at| refresh.saturating_sub(since(at)));
+        // A change held for the refresh its window's last frame shows on (`turned`), where the display says nothing yet.
+        let held = self.windows.values().filter(|window| !self.ticking() && window.dirty && window.on_screen()).filter_map(|window| window.presented).map(|at| shows(self.vsync, refresh, at).saturating_duration_since(now()));
         screens.chain(showing).chain(blank).chain(frame).chain(pulled).chain(check).chain(idle).chain(held).min()
     }
 
@@ -139,12 +139,19 @@ impl Windows {
         let framing = self.framing();
         let ticked = self.display.frame();
         self.ticked = ticked.or(self.ticked);
-        self.vsync = ticked.or(self.vsync);
-        // Where the loop's own clock stands in, its frame is the one the display would have shown a refresh after its
-        // last, at most a refresh late (a link that stopped, noticed a quarter of a refresh on), so what moves keeps the
-        // display's pace: at the clock's own time, a link's pause had it move a step and a half, then half a step.
+        // A tick for the refresh the loop's own clock has drawn for, as the link starts on the refresh the clock stood in
+        // for, shows nothing new: taken as the next, it forgot the frame drawn for it (`presented`), and input after it
+        // was drawn at once, a refresh early, with what came next (a list flung at 60 Hz jumped 113 pt as it was let go).
         let refresh = self.refresh();
-        let shown = ticked.or_else(|| (framing && !self.ticking() && since(self.framed) >= refresh).then(|| Some(self.framed + refresh).filter(|next| since(*next) < refresh).unwrap_or_else(now)));
+        let ticked = ticked.filter(|at| at.saturating_duration_since(self.showed) >= refresh / 4);
+        self.vsync = ticked.or(self.vsync);
+        // Where the loop's own clock stands in, its frame is the display's refresh after the one its last showed on
+        // (`shows`), at most a refresh late (a link that stopped, noticed a quarter of a refresh on), so what moves keeps
+        // the display's pace: at the clock's own time, a link's pause had it move a step and a half, then half a step;
+        // a refresh after a frame drawn as input came, it drew just before each refresh, before the move that came
+        // then, and took two at once as the link started (a Home Screen's page dragged at 120 Hz: 2.5, 5, 2.5 pt).
+        let next = shows(self.vsync, refresh, self.framed);
+        let shown = ticked.or_else(|| (framing && !self.ticking() && now() >= next).then(|| Some(next).filter(|next| since(*next) < refresh).unwrap_or_else(now)));
         // What moves is drawn where it is at the time of the display's refresh its frame is for, as a link's tick says
         // it: the nearest to the loop's own clock's, which, counting from a frame drawn as input came, is out of step
         // with them. Drawn at its own time, a step as the link started came two thirds of a refresh after the one
@@ -339,7 +346,7 @@ impl Windows {
             let (width, height) = (device.width.0 as u32, device.height.0 as u32);
             if let Some(at) = window.presented
                 && window.summoned.is_none()
-                && (ticking || since(at) < refresh)
+                && (ticking || now() < shows(self.vsync, refresh, at))
             {
                 held |= window.dirty;
                 continue;
@@ -562,5 +569,21 @@ impl Windows {
                 window.dirty = true;
             }
         }
+    }
+}
+
+/// The display's refresh a frame presented at `at` shows on: the first a quarter of a refresh or more after it, counted
+/// from the link's last tick (`vsync`), as one presented in the quarter before a refresh is too late for it (`turned`);
+/// a refresh after it where the display has never ticked. What changes after it is drawn there, at the start of the
+/// refresh after, with what comes before it, as a display link's frame begins at its tick: a refresh after the frame
+/// itself, a frame drawn as the page answered just before a refresh had every move after it drawn just before the
+/// next, which a move that comes then missed, a refresh late (a finger's pan held a frame, and took two steps at once
+/// as it was let go).
+fn shows(vsync: Option<web_time::Instant>, refresh: std::time::Duration, at: web_time::Instant) -> web_time::Instant {
+    let ready = at + refresh / 4;
+    match vsync {
+        Some(vsync) if vsync <= ready => vsync + refresh.mul_f64(((ready - vsync).as_secs_f64() / refresh.as_secs_f64()).ceil()),
+        Some(vsync) => vsync,
+        None => at + refresh,
     }
 }
