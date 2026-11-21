@@ -346,7 +346,11 @@ export const useRecoveryKey: typeof Page.useRecoveryKey = async ({ subject } = {
 /// `const { Summary } = await component("chrome-profiles", "profile")`: what another app's client exports
 /// (its client/package.json names it), as a module the client serves beside this app's page: its components, drawn
 /// here with what they're given.
-export const component: typeof Page.component = (app, name) => import(/* @vite-ignore */ `/${app}/client/${name}.js`)
+export const component: typeof Page.component = async (app, name) => {
+  const url = `/${app}/client/${name}.js`
+  await host?.component?.(url)
+  return import(/* @vite-ignore */ url)
+}
 /// `createEffect(link, (to) => ...)`: the link the page was opened to last, `one:settings#vault/accounts&request=4`'s `vault/accounts&request=4`, as it
 /// changes: a link followed while the page is open is told too, the same one again as well. The page's address
 /// forgets it once it's read, so following it again is news. None until a link names more than the app.

@@ -67,7 +67,7 @@
         list: 2,
         video: true,
       },
-      host: { post: (/** @type {object} */ message) => renderer.post(JSON.stringify(message)) },
+      host: { post: (/** @type {object} */ message) => renderer.post(JSON.stringify(message)), component: styled(page, renderer.component) },
     })
     const { canvas, selection, reading } = await made()
     // Typing, through a real field (text-input.js), and what a screen reader reads (semantics.js).
@@ -215,6 +215,22 @@ function mapped(page, html) {
   return { base, script }
 }
 
+/**
+ * What a page's `component` has its host do before it imports another app's module (`host.component`, which the
+ * browser's own loader can't): that app's styles, `styles.json` beside the module, fetched once for each app and
+ * handed to `take`, as a native host's loader loads them as it loads the module.
+ * @param {URL} page @param {(styles: string) => void} take
+ */
+function styled(page, take) {
+  /** @type {Map<string, Promise<void>>} */
+  const loaded = new Map()
+  return (/** @type {string} */ url) => {
+    const table = new URL("styles.json", new URL(url, page)).href
+    if (!loaded.has(table)) loaded.set(table, fetch(table).then(async (response) => void (response.ok && take(await response.text()))))
+    return loaded.get(table)
+  }
+}
+
 /// What the frame's page asked its client itself (a frame's place), by its id, each answered here, not by the page.
 /** @type {Map<string, (result: any) => void>} */
 const asking = new Map()
@@ -248,6 +264,7 @@ function frames(renderer, post) {
     else if (data?.one === "posted") renderer.frame_posted(node, data.calls, data.ran, data.framing)
     else if (data?.one === "started") renderer.frame_started(node, data.error)
     else if (data?.one === "heard") renderer.frame_message(node, data.message)
+    else if (data?.one === "styles") renderer.component(data.styles)
   })
   return {
     frame: async (/** @type {[number, string, string | null]} */ [node, src, subject]) => {
@@ -312,7 +329,7 @@ async function frame(page, pageHtml, framed) {
       list: 2,
       video: false,
     },
-    host: { post: (/** @type {object} */ message) => push(["post", JSON.stringify(message)]) },
+    host: { post: (/** @type {object} */ message) => push(["post", JSON.stringify(message)]), component: styled(page, (styles) => drawing.postMessage({ one: "styles", styles }, "*")) },
     requestAnimationFrame: (/** @type {FrameRequestCallback} */ callback) => (asked.set(next, callback), soon(), next++),
     cancelAnimationFrame: (/** @type {number} */ number) => void asked.delete(number),
   })

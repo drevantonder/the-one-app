@@ -854,6 +854,15 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
     Ok(())
 }
 
+/// The styles another app's component is drawn with (its `styles.json`), which the browser's loader doesn't load as
+/// it loads the component's module, as a native host's does (`js::quickjs`'s `Modules::style`).
+#[wasm_bindgen]
+pub fn component(styles: String) -> Result<(), JsError> {
+    crate::tokens::load_component(&styles).map_err(|error| JsError::new(&format!("{error:#}")))?;
+    crate::load_styles(&styles).map_err(|error| JsError::new(&format!("{error:#}")))?;
+    Ok(())
+}
+
 /// The runtime version this renderer draws (`crate::RUNTIME_VERSION`), which a page's entrypoint names.
 #[wasm_bindgen]
 pub fn runtime_version() -> u32 {

@@ -7,6 +7,9 @@ export interface Host {
   /** Takes a JSON-RPC message for the app's client, as a page on the DOM posts one to its frame's parent (MCP Apps):
    * `ui/initialize`, `tools/call` and the rest, which the client answers as it answers a page. */
   post(message: object): void
+  /** Loads what another app's component module, at `url`, is drawn with (its app's `styles.json` beside it), before
+   * `component` imports it: a host whose own loader loads modules does it as it loads one, and has none of this. */
+  component?(url: string): Promise<void>
 }
 
 /** What the UI library gives the host, as `globalThis.ui` (with renderer.ts's `Events`), once it's loaded. */
