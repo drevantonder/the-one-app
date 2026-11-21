@@ -45,9 +45,9 @@ export async function runThere(at, folder, args, lines) {
   const ran = Bun.spawn(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} '${command.replaceAll("'", "'\\''")}'`], { stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr] = await Promise.all([new Response(ran.stdout).text(), new Response(ran.stderr).text(), ran.exited])
   rmSync(staged, { recursive: true, force: true })
-  // Its tree, which it writes at its end, comes back after what it said.
-  const tree = stderr.lastIndexOf("\n{")
-  if (tree >= 0) writeFileSync(join(folder, "end.json"), stderr.slice(tree + 1))
+  // Its tree (its nodes, a JSON array), which it writes at its end, comes back after what it said, if it said anything.
+  const tree = /^[[{]/.test(stderr) ? 0 : Math.max(stderr.lastIndexOf("\n["), stderr.lastIndexOf("\n{")) + 1 || -1
+  if (tree >= 0) writeFileSync(join(folder, "end.json"), stderr.slice(tree))
   return { stdout, stderr: tree >= 0 ? stderr.slice(0, tree) : stderr, failed: ran.exitCode !== 0 || !stdout.trim() }
 }
 
