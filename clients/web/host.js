@@ -3,6 +3,8 @@
 // passkey, and an app's files come from the edge too (`/apps/`). It's what the app's Rust half answers, the same
 // commands by the same names, less what a browser can't do, which each says.
 
+import { originalPositionFor, TraceMap } from "@jridgewell/trace-mapping"
+
 /** @import { Commands } from "../app/page/host.js" */
 
 /// Where a person signs in: the authorization endpoint of the authorization server the network's metadata names (RFC
@@ -93,6 +95,43 @@ async function mcp(method, params = {}) {
   ended(error?.message ?? (result?.isError ? (result.content?.[0]?.text ?? "The tool failed") : undefined))
   if (error) throw Object.assign(new Error(error.message), { code: error.code })
   return result
+}
+/// A page's error's stack in the source it was built from, as a native client puts one (`source_mapped` in
+/// clients/app/renderer/src/js/stack.rs): each frame a browser says, `at <function> (<file>:<line>:<column>)` in Chrome
+/// and `<function>@<file>:<line>:<column>` in Firefox and Safari, is looked up in its file's sourcemap (`<file>.map`, which
+/// an app's build writes beside each bundle). Only this origin's files are asked for, as a page's stack is its own say.
+/// → the stack and the place of its first frame, the one that threw.
+const FRAME = /^\s*(?:at\s+(?:.+?\s+\()?|[^@\s]*@)?(https?:\/\/.+?):(\d+):(\d+)\)?$/
+/** @param {string} stack @returns {Promise<{ stack: string, place?: { file: string, line: number } }>} */
+async function sourceMapped(stack) {
+  const lines = stack.split("\n").filter((line) => line.trim())
+  const files = new Set(lines.map((line) => FRAME.exec(line)?.[1]).filter((file) => file && new URL(file).origin === location.origin))
+  /** @type {Map<string, TraceMap>} */
+  const maps = new Map()
+  await Promise.all([...files].map(async (file) => {
+    const map = await fetch(`${file}.map`).then((answer) => (answer.ok ? answer.text() : undefined), () => undefined)
+    if (map) maps.set(/** @type {string} */ (file), new TraceMap(map))
+  }))
+  /** @type {{ file: string, line: number } | undefined} */
+  let place
+  const mapped = lines.map((line) => {
+    const [, file = "", row, column] = FRAME.exec(line) ?? []
+    const map = maps.get(file)
+    const at = map && originalPositionFor(map, { line: Number(row), column: Number(column) - 1 })
+    if (!at?.source || at.line === null) return line
+    const source = at.source.replace(/^(\.\.\/)+/, "")
+    place ??= { file: source, line: at.line }
+    return `    at ${source}:${at.line}:${at.column + 1}`
+  })
+  return { stack: mapped.join("\n"), place }
+}
+/// A report of an error with its stack, as a native client sends it: the stack and where it threw in the source.
+/** @param {Record<string, any>} record */
+async function mapped(record) {
+  const stacktrace = record.attributes?.["exception.stacktrace"]
+  if (typeof stacktrace !== "string") return record
+  const { stack, place } = await sourceMapped(stacktrace)
+  return { ...record, attributes: { ...record.attributes, "exception.stacktrace": stack, ...(place && { "code.file.path": place.file, "code.line.number": place.line }) } }
 }
 /// What this browser reported to Telemetry (`report`), kept in its storage until a server is told, a few hundred
 /// at most, as the app's client keeps them on disk. Telling reports nothing itself.
@@ -469,7 +508,7 @@ const commands = {
   update: cannot("A browser has the latest each time it opens."),
   recovery_key: cannot(NO_KEY),
   recover: cannot(NO_KEY),
-  report: ({ record }) => report(record),
+  report: async ({ record }) => report(await mapped(record)),
   opened: ({ view, ms }) => report({ name: "one.client.open.duration", value: ms, attributes: { "one.view": view } }),
   // What the app does as it's seen, which a browser doesn't: it hears notifications.
   visible() {},

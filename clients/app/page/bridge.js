@@ -219,7 +219,7 @@ addEventListener("message", async ({ source, data }) => {
   // An app's page, or a page in its frame, logs its errors as an MCP App logs to its host, and they're its app's,
   // whatever it says.
   const errored = id === undefined && method === "notifications/message" && params.level === "error"
-  if (errored) exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
+  if (errored) exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0], params.data?.stack)
   // A page in a frame is its frame's page's: it says how tall it is to that page.
   const child = [...nested].find(([, one]) => one === view)
   if (id === undefined && child) {

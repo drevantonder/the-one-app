@@ -81,9 +81,10 @@ for (const file of readdirSync(`${root}/clients/web`).filter((file) => !["dist",
   rmSync(`${web}/${file}`, { force: true });
   place(`${root}/clients/web/${file}`, `${web}/${file}`);
 }
-// Its service worker is built, with what it imports, over its source.
+// Its service worker and its host (the page's) are built, with what they import, over their source.
 rmSync(`${web}/sw.js`, { force: true });
-await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile ${web}/sw.js`.cwd(`${root}/clients/web`).quiet();
+rmSync(`${web}/host.js`, { force: true });
+await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile ${web}/sw.js && bun build host.js --format esm --minify --outfile ${web}/host.js`.cwd(`${root}/clients/web`).quiet();
 // Built here, so a deploy never ships whatever build of the UI library was left on disk.
 await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).quiet();
 place(`${root}/core/ui/dist/client`, `${web}/ui/client`);

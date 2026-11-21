@@ -7,13 +7,14 @@ import { invoke } from "./host.js"
 /** @param {string} name @param {string} error @param {Record<string, unknown>} [attributes] */
 export const report = (name, error, attributes = {}) => invoke("report", { record: { name, error, attributes } }).catch(() => {})
 /// An error as OpenTelemetry's `exception` says one: its message, and the file and line it was thrown at, by its
-/// path alone, which leaves out anything a query had in it.
-/** @param {unknown} message @param {unknown} [file] @param {unknown} [line] @param {string} [app] */
-export function exception(message, file, line, app) {
+/// path alone, which leaves out anything a query had in it, and its stack, which a browser's client puts in the
+/// source it was built from (`clients/web/host.js`).
+/** @param {unknown} message @param {unknown} [file] @param {unknown} [line] @param {string} [app] @param {unknown} [stack] */
+export function exception(message, file, line, app, stack) {
   const path = typeof file === "string" && URL.canParse(file) ? new URL(file).pathname : undefined
-  report("exception", String(message).slice(0, 500), { "code.file.path": path, "code.line.number": typeof line === "number" ? line : undefined, "one.app": app })
+  report("exception", String(message).slice(0, 500), { "code.file.path": path, "code.line.number": typeof line === "number" ? line : undefined, "exception.stacktrace": typeof stack === "string" && stack ? stack : undefined, "one.app": app })
 }
-addEventListener("error", ({ message, filename, lineno }) => exception(message, filename, lineno))
-addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message ?? reason))
+addEventListener("error", ({ message, filename, lineno, error }) => exception(message, filename, lineno, undefined, error?.stack))
+addEventListener("unhandledrejection", ({ reason }) => exception(reason?.message ?? reason, undefined, undefined, undefined, reason?.stack))
 /** An element of the page's own, which is there. @param {string} id */
 export const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))

@@ -1,4 +1,4 @@
-// The page is JavaScript, served as it is with no build, and TypeScript checks it: `bunx --package typescript@7.0.2 tsc -p .`.
+// The page is JavaScript, which the edge bundles with what it imports (`core/edge/edge.js`), and TypeScript checks it: `bunx --package typescript@7.0.2 tsc -p .`.
 {
   "compilerOptions": {
     "target": "es2024",

@@ -1,12 +1,13 @@
 {
   "name": "web",
-  "description": "The web client's service worker, which `core/edge/edge.js` builds into what the web client serves.",
+  "description": "The web client's service worker and host, which `core/edge/edge.js` builds into what the web client serves.",
   "private": true,
   "type": "module",
   "dependencies": {
     "@hpke/chacha20poly1305": "1.8.0",
     "@hpke/core": "1.9.0",
     "@hpke/dhkem-x25519": "1.8.0",
+    "@jridgewell/trace-mapping": "0.3.31",
     "@noble/curves": "2.4.0",
     "idb-keyval": "6.3.0"
   }
