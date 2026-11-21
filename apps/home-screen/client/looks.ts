@@ -35,7 +35,9 @@ export const looks = styles({
   // an owner's pages roll up and down.
   fading: { transitionProperty: ["opacity", "scale", "translateY"], transition: tokens.motion.smooth, willChange: ["opacity", "scale", "translateY"] },
   rolling: { transitionProperty: ["opacity", "translateY"], transition: tokens.motion.snappy },
-  search: { flexDirection: "row", alignItems: "center", zIndex: 6 },
+  // The launcher's search floats over its card and what's open in it (a category, at `categoryLayer`), whose apps its
+  // shadow falls on as it falls on the App Library under them, so they look the same flying home as once they're there.
+  search: { flexDirection: "row", alignItems: "center", zIndex: 11 },
   owner: { position: "absolute", overflow: "hidden" },
   track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
   // What goes with the pages without being dragged with them: sliding with them by the same spring, and fading out of
