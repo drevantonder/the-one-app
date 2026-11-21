@@ -285,7 +285,7 @@ pub struct Computed {
     pub line_clamp: Option<usize>,
     /// Placed in the window, over everything, not in its parent (`position: fixed`).
     pub fixed: bool,
-    /// What changes of it move rather than jump, and how (`transitionProperty` and `transition`).
+    /// What changes of it move rather than jump, and how (`transitionProperty`, `transition` and `transitionDelay`).
     pub transition: Option<Transition>,
 }
 
@@ -299,6 +299,8 @@ pub struct Transition {
     pub spring: Option<crate::motion::Spring>,
     /// How fast a spring sets off, as a fraction of the way a second (`transitionVelocity`), where the style says.
     pub velocity: Option<f32>,
+    /// How long after the change it sets off, in milliseconds (`transitionDelay`), as CSS's `transition-delay`.
+    pub delay: f32,
 }
 
 #[derive(Default)]
@@ -663,9 +665,12 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     };
     let properties: Vec<String> = get("transitionProperty").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
     let motion = get("transition").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions));
+    let delay = number("transitionDelay");
     let transition = match motion {
-        Some(motion) if !properties.is_empty() && motion.duration > 0.0 => Some(Transition { properties, duration: motion.duration, easing: motion.easing, spring: motion.spring, velocity: number("transitionVelocity") }),
-        _ => None,
+        _ if properties.is_empty() => None,
+        Some(motion) if motion.duration > 0.0 => Some(Transition { properties, duration: motion.duration, easing: motion.easing, spring: motion.spring, velocity: number("transitionVelocity"), delay: delay.unwrap_or(0.0) }),
+        // With only a delay, it jumps once that's past, as CSS's `transition: opacity 0s 800ms`.
+        _ => delay.map(|delay| Transition { properties, duration: 0.0, easing: [0.0, 0.0, 1.0, 1.0], spring: None, velocity: None, delay }),
     };
     Computed { layout, look, text, line_clamp: number("lineClamp").map(|lines| lines as usize), fixed, transition }
 }

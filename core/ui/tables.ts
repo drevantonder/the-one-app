@@ -152,7 +152,7 @@ const longhands: Record<string, string[]> = {
 }
 
 /** Properties whose numbers aren't pixels. */
-const numbers = ["flexGrow", "flexShrink", "opacity", "zIndex", "aspectRatio", "scale", "strokeWidth", "lineClamp"]
+const numbers = ["flexGrow", "flexShrink", "opacity", "zIndex", "aspectRatio", "scale", "strokeWidth", "lineClamp", "transitionDelay"]
 /** Properties whose values are tokens, or made of several things, which a dynamic style can't take as a value. */
 const fixed = ["font", "gridTemplateColumns", "gridColumn", "boxShadow", "backdropFilter", "transitionProperty", "transition", "animationName", "animation", "lineClamp", "willChange"]
 
@@ -224,6 +224,8 @@ function declarations(property: string, value: any): string {
       return `${kebab(property)}:${[...new Set((value as string[]).map((one) => (one === "translateX" || one === "translateY" ? "translate" : named[one] ?? kebab(one))))].join(",")}`
     case "transition":
       return `transition-duration:var(--${value.token});transition-timing-function:var(--${value.token.replace(/^move-/, "ease-")})`
+    case "transitionDelay":
+      return `transition-delay:${value}ms`
     case "animationName":
       return `animation-name:${value === "none" ? "none" : typeof value === "object" ? keyframesName(value) : `ui-${value}`};animation-iteration-count:infinite`
     case "animation":

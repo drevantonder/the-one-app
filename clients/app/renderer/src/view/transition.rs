@@ -1,6 +1,7 @@
 //! What moves rather than jumps as a node's style changes, as CSS's transitions do: each property its style names
 //! (`transitionProperty`) goes from what's drawn now to its new value over its motion token's time, with its easing,
-//! or by its spring, which a change on the way turns from where it is at the speed it has, as SwiftUI's and Motion's do.
+//! or by its spring, which a change on the way turns from where it is at the speed it has, as SwiftUI's and Motion's do,
+//! setting off its `transitionDelay` after the change, and with only a delay, jumping then, as CSS's do.
 //! A node that's just been added starts from its `entering` state's values, as from CSS's `@starting-style`. Where the
 //! person asked for less motion, what would slide, grow or turn goes straight to where it's going, and a node coming
 //! in fades in instead, as Apple's reduced motion has it. A node a finger or a pointer drags (`drag`, as Motion's) follows
@@ -245,7 +246,7 @@ impl Moving {
     fn state(&self, now: f64) -> (Value, f64) {
         match self.curve {
             Curve::Eased { start, duration, easing } => {
-                let part = ((now - start) / f64::from(duration.max(1.0))).clamp(0.0, 1.0) as f32;
+                let part = if duration > 0.0 { ((now - start) / f64::from(duration)).clamp(0.0, 1.0) as f32 } else { f32::from(u8::from(now >= start)) };
                 (self.from.mix(&self.to, ease(easing, part)).unwrap_or_else(|| self.to.clone()), 0.0)
             }
             Curve::Sprung { start, velocity, spring } => {
@@ -435,9 +436,9 @@ impl Transitions {
                 // it's a number in the same unit.
                 Some(spring) => {
                     let said = transition.velocity.zip(number(&from).zip(number(&to))).map(|(velocity, (from, to))| f64::from(velocity * (to - from)));
-                    Curve::Sprung { start: since, velocity: said.unwrap_or(if alike(&from, &to) { velocity } else { 0.0 }), spring }
+                    Curve::Sprung { start: since + f64::from(transition.delay), velocity: said.unwrap_or(if alike(&from, &to) { velocity } else { 0.0 }), spring }
                 }
-                None => Curve::Eased { start: since, duration: transition.duration, easing: transition.easing },
+                None => Curve::Eased { start: since + f64::from(transition.delay), duration: transition.duration, easing: transition.easing },
             };
             let moving = Moving { from, to, curve };
             set(computed, property, moving.at(now));
