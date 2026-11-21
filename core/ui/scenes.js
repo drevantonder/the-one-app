@@ -164,8 +164,9 @@ function internalWords(tree) {
 }
 
 /// Presses what's named or says `name` on our renderer's canvas, as a person would: found in its ARIA tree
-/// (clients/web/renderer/semantics.js), scrolled into sight by the wheel where it isn't, as far as the native
-/// harness's tap scrolls to it (`Screen::reveal`: whole, with 16 points below it), and pressed where it's drawn.
+/// (clients/web/renderer/semantics.js), scrolled into sight where it isn't as a screen reader has the browser do it,
+/// which the renderer reveals as the native harness's tap does (`Screen::reveal`: whole, with 16 points below it),
+/// and pressed where it's drawn then.
 async function press(frame, name) {
   const page = frame.page()
   if (name.key) return page.keyboard.press([...["ctrl", "shift", "alt", "meta"].filter((held) => name[held]).map((held) => ({ ctrl: "Control", shift: "Shift", alt: "Alt", meta: "Meta" })[held]), name.key].join("+"))
@@ -174,10 +175,19 @@ async function press(frame, name) {
   if (name.x !== undefined) return page.mouse.click(at.x + name.x, at.y + name.y)
   const found = typeof name === "object" ? frame.getByRole(name.role, { name: name.name, exact: true }).first() : frame.locator(`#semantics [aria-label="${name.replaceAll('"', '\\"')}"], #semantics :text-is("${name.replaceAll('"', '\\"')}")`).last()
   let box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
-  for (let turns = 0; box && turns < 10 && (box.y < at.y || box.y + box.height > at.y + at.height); turns++) {
-    await page.mouse.move(at.x + at.width / 2, at.y + at.height / 2)
-    await page.mouse.wheel(0, box.y < at.y ? box.y - at.y : box.y + box.height + 16 - (at.y + at.height))
-    await page.waitForTimeout(500)
+  const out = (/** @type {any} */ box) => box.y < at.y || box.y + box.height > at.y + at.height
+  if (box && out(box)) {
+    // The browser says it scrolled in its next frame, which the renderer then reveals, and the tree's drawn where it's
+    // revealed to a frame or two later: it's pressed once it's there and settled, as Playwright's click waits for what
+    // it clicks to be in view.
+    const frames = () => frame.evaluate(() => new Promise((shown) => requestAnimationFrame(() => requestAnimationFrame(shown))))
+    await found.scrollIntoViewIfNeeded({ timeout: 5000 })
+    for (let tries = 0; box && out(box) && tries < 60; tries++) {
+      await frames()
+      box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
+    }
+    await frame.evaluate((deadline) => /** @type {any} */ (globalThis).inspector.settle(deadline), SETTLES_WITHIN_MS)
+    await frames()
     box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
   }
   if (!box) throw new Error(`Nothing named or saying "${typeof name === "object" ? name.name : name}" to press`)

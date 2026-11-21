@@ -393,7 +393,7 @@ async function made() {
         html, body { margin: 0; height: 100%; overflow: hidden; background: Canvas; color-scheme: light dark; }
         canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
         /* See-through to the pointer. */
-        #semantics { position: absolute; inset: 0; pointer-events: none; color: transparent; }
+        #semantics { position: absolute; inset: 0; overflow: hidden; pointer-events: none; color: transparent; }
         #semantics * { pointer-events: none; }
         /* The real field typed through (text-input.js) shows nothing of its own, its selection neither, as Flutter web's. */
         .field::selection { background: transparent; color: transparent; }
