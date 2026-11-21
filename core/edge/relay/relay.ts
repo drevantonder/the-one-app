@@ -52,6 +52,8 @@ const UPDATE: (keyof Reported)[] = [
   "program",
   "next_program",
   "went_back",
+  "deploys_edge",
+  "edge_went_back",
 ];
 
 const refuse = (status: number, why: string) => new Response(why, { status });

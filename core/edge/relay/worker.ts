@@ -316,6 +316,13 @@ export class Relay extends DurableObject<RelayEnv> {
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`outside ${key}`]);
     ours.serializeAttachment({ outside: key });
+    // It's told where the network's update is as it connects, as what it missed while it was away, and says again
+    // what it is in turn (`OneCore.Release.instructed/2`).
+    const told = this.updated({ status: true }).then((status) => {
+      const said = { jsonrpc: "2.0", method: "notifications/one/update", params: status };
+      if (status && ours.readyState === WebSocket.OPEN) ours.send(JSON.stringify({ message: JSON.stringify(said) }));
+    });
+    this.ctx.waitUntil(told);
     return new Response(null, { status: 101, webSocket: theirs });
   }
 
