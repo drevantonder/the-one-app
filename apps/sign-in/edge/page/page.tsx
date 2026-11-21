@@ -66,7 +66,7 @@ const refused = params.get("error_description") ?? params.get("error") ?? undefi
 /// signing in.
 type Flow =
   | { flow: "join"; invite: string }
-  | { flow: "addPasskey"; another: string }
+  | { flow: "addPasskey"; another: string; replaces?: string }
   | { flow: "assistant"; request: string; client: string }
   | { flow: "device"; code: string }
   | { flow: "deviceInApp"; code: string }
@@ -82,7 +82,7 @@ const flow: Flow = params.has("client_id")
   : opened.has("invite")
     ? { flow: "join", invite: opened.get("invite")! }
     : opened.has("passkey")
-      ? { flow: "addPasskey", another: opened.get("passkey")! }
+      ? { flow: "addPasskey", another: opened.get("passkey")!, replaces: opened.get("replaces") || undefined }
       : opened.has("unlock")
       ? { flow: "unlock", device: opened.get("unlock") || undefined, scope: opened.get("scope") || undefined }
       : params.has("user_code")
@@ -224,11 +224,12 @@ let used: { credential: string; prf?: Uint8Array; at: number } | undefined
 type Answered = { webauthn?: { response: { id: string }; clientExtensionResults?: AuthenticationExtensionsClientOutputs } }
 
 /// Keeps the passkey just answered, and says with it which key its PRF output derives, or that it gave none (`null`),
-/// which a device that holds its person's key encrypts the key to (`edge/auth.ts`).
+/// which a device that holds its person's key encrypts the key to (`edge/auth.ts`), and the passkey it replaces, if it
+/// was made to.
 async function answered(result: Answered, prf: Uint8Array | undefined | null) {
   used = { credential: result.webauthn!.response.id, prf: prf ?? undefined, at: Date.now() }
   const key = prf && (await prfKey(prf))
-  if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key })
+  if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key, replaces: flow.flow === "addPasskey" ? flow.replaces : undefined })
   shownCode = key ? await code(key) : undefined
 }
 
@@ -376,17 +377,30 @@ async function toServers(key: Uint8Array<ArrayBuffer>, owner: string, scope: str
   }
 }
 
+/// The scopes whose keys the person's own opens, besides theirs: the network's and the groups' they own, each sealed to
+/// theirs. One they can't read, or whose key isn't sealed to theirs, isn't.
+async function sealedTo(owner: string) {
+  const { groups } = await tool<{ groups: { group: string; owners: string[] }[] }>("permissions_groups", {})
+  const scopes = ["network", ...groups.filter((group) => group.owners.includes(owner)).map((group) => group.group)]
+  const held = await Promise.all(scopes.map((scope) => tool<Held>("encryption_key", {}, scope).catch(() => null)))
+  return scopes.filter((_, at) => held[at]?.wrapped)
+}
+
 /**
  * Unlock with Passkey: the passkey just answered opens its person's key, or makes it, and hands it to the device the
- * link names, if it does, and to the servers waiting for it, of the person or of the group or network the link
- * names (`scope`), which their key opens.
+ * link names, if it does, and to the servers waiting for the keys it opens: the person's own, and the network's and
+ * their groups' sealed to it, all at once, or only the group's or network's the link names (`scope`), as older apps
+ * link it.
  */
 async function unlock(device: string | undefined, scope: string | undefined) {
-  const { owner, key } = await ownKey()
+  const { owner, key, made } = await ownKey()
   try {
     const name = device && (await toDevice(key, owner, device))
-    const servers = await toServers(key, owner, scope ?? owner)
-    setStage({ stage: "unlocked", name: name || undefined, servers, whose: scope && scope !== owner ? whose(scope) : "your" })
+    const scopes = scope ? [scope] : [owner, ...(made ? [] : await sealedTo(owner))]
+    const servers = []
+    for (const each of scopes) servers.push(...(await toServers(key, owner, each)))
+    const keys = scopes.map((each) => (each === owner ? "your" : whose(each)))
+    setStage({ stage: "unlocked", name: name || undefined, servers: [...new Set(servers)], whose: keys.length === 1 ? `${keys[0]} key` : `${keys.slice(0, -1).join(", ")} and ${keys.at(-1)} keys` })
   } finally {
     key.fill(0)
   }
@@ -396,7 +410,6 @@ async function unlock(device: string | undefined, scope: string | undefined) {
 async function another() {
   const { link } = await ask<{ link: string }>("/passkey/another", { credential: used?.credential })
   location.replace(link)
-  location.reload()
 }
 
 /// The passkey question, and what answering it lets in. Someone joining makes their passkey, and is signed in
@@ -552,30 +565,33 @@ function shows(): Shows {
       switch (now.stage) {
         case "unlocked": {
           const held = [now.name, ...now.servers].filter((name): name is string => !!name)
-          return { heading: "Unlock with Passkey", done: held.length ? `${held.join(", ")} ${held.length === 1 ? "holds" : "hold"} ${now.whose} key now. You can close this page.` : `Nothing is waiting for ${now.whose} key. You can close this page.` }
+          return { heading: "Unlock with Passkey", done: held.length ? `${held.join(", ")} ${held.length === 1 ? "holds" : "hold"} ${now.whose} now. You can close this page.` : `Nothing is waiting for ${now.whose}. You can close this page.` }
         }
         case "failed":
           return failed === NO_PRF
-            ? { heading: "Unlock with Passkey", problem: "This passkey can't unlock your key. Create one that can, as iCloud Keychain, Google Password Manager, 1Password and Windows Hello do.", button: "Create a Passkey", onSignIn: another, stop: "Try Another Passkey", onStop: signIn }
+            ? { heading: "Unlock with Passkey", problem: "This passkey can't unlock your key. Replace it with one that can, saved in iCloud Keychain or Google Password Manager. It stays until the new one works.", button: "Replace Your Passkey", onSignIn: another, stop: "Try Another Passkey", onStop: signIn }
             : { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
         default:
-          return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : flow.scope ? `Use your passkey to hand ${whose(flow.scope)} key to the servers waiting for it.` : "Use your passkey to hand your key to the servers waiting for it.", button: "Continue", onSignIn: signIn }
+          return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : flow.scope ? `Use your passkey to hand ${whose(flow.scope)} key to the servers waiting for it.` : "Use your passkey to hand your keys to the servers waiting for them.", button: "Continue", onSignIn: signIn }
       }
-    case "addPasskey":
+    case "addPasskey": {
+      // Made to replace one that can't unlock, which goes once a device that holds their key allows this one.
+      const heading = flow.replaces ? "Replace Your Passkey" : "Add a passkey"
       switch (now.stage) {
         // One more tap, for its PRF output, which a browser gives only right after one.
         case "confirm":
-          return { heading: "Add a passkey", note: "Use your new passkey once, so it can unlock your key on a new device.", button: "Use Passkey", onSignIn: () => withPasskey().then(() => setStage({ stage: "created" })) }
+          return { heading, note: "Use your new passkey once, so it can unlock your key on a new device.", button: "Use Passkey", onSignIn: () => withPasskey().then(() => setStage({ stage: "created" })) }
         case "created":
           return {
-            heading: "Add a passkey",
+            heading,
             done: shownCode
-              ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}`
+              ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}.${flow.replaces ? " Your old passkey is removed once it's allowed." : ""}`
               : "Your passkey is created, and you can sign in with it, but it can't unlock your key on a new device. Passkeys saved in iCloud Keychain or Google Password Manager can.",
           }
         default:
-          return { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }
+          return { heading, button: "Create a passkey", onSignIn: signIn }
       }
+    }
     case "join":
       return google() ? { heading: "Join", problem: refused, ...withGoogleFirst("Create a Passkey"), asksName: true } : { heading: "Join", button: "Create a passkey", onSignIn: signIn, asksName: true }
     case "signIn":

@@ -265,6 +265,7 @@ interface Passkey {
   createdAt: Date;
   prfKey?: string | null;
   encryptedKey?: string | null;
+  replaces?: string | null;
 }
 
 /**
@@ -318,7 +319,8 @@ const devices = () => ({
     deviceCode: { fields: { name: { type: "string", required: false } } },
     // What lets a passkey unlock its person's key on a new device (`page/passkey.ts`): the public key its PRF output
     // derives, empty for a passkey that said it has none, and their key, encrypted to it by a device that holds it.
-    passkey: { fields: { prfKey: { type: "string", required: false }, encryptedKey: { type: "string", required: false } } },
+    // A passkey made to replace one that can't unlock (`replaces`) takes its place once it unlocks the key.
+    passkey: { fields: { prfKey: { type: "string", required: false }, encryptedKey: { type: "string", required: false }, replaces: { type: "string", required: false } } },
     // The passkey a browser's session was made with, by its credential ID.
     session: { fields: { passkey: { type: "string", required: false } } },
   },
@@ -340,16 +342,22 @@ const devices = () => ({
       const { passkey } = await usedJustNow(ctx);
       const key = ctx.body?.key === null ? "" : String(ctx.body?.key ?? "");
       if (key && !/^[0-9a-f]{64}$/.test(key)) throw new APIError("BAD_REQUEST", { message: "That isn't a passkey's key." });
+      // One made to replace another of theirs that can't unlock says so, and takes its place once it unlocks the key
+      // (`encrypt_for_passkeys`): the other stays until then, so they're never left with no way in.
+      const [replaced] = key && ctx.body?.replaces ? await ctx.context.adapter.findMany<Passkey>({ model: "passkey", where: [{ field: "userId", value: passkey.userId }, { field: "id", value: String(ctx.body.replaces) }] }) : [];
+      if (replaced && replaced.id !== passkey.id && !replaced.prfKey) await ctx.context.adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { replaces: replaced.id } });
       // A passkey that gave no PRF output this time, where a web view or provider didn't pass it on, keeps the key it
       // gave before, and what's encrypted to it.
       if (!key && passkey.prfKey) return ctx.json({});
       if (passkey.prfKey !== key) await ctx.context.adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { prfKey: key, encryptedKey: null } });
       return ctx.json({});
     }),
-    // Where a passkey just used has no PRF, the sign-in page makes one that has, as Sign In & Security's Add Passkey does.
+    // Where a passkey just used has no PRF, the sign-in page makes one that has and replaces it, as Sign In & Security's
+    // Add Passkey makes one.
     passkeyAnother: createAuthEndpoint("/passkey/another", { method: "POST" }, async (ctx) => {
-      const { user } = await usedJustNow(ctx);
-      return ctx.json({ link: `/sign-in/#passkey=${await invitation(ctx.context.adapter, user, 15 * 60 * 1000)}` });
+      const { passkey, user } = await usedJustNow(ctx);
+      const replaces = passkey.prfKey ? "" : `&replaces=${passkey.id}`;
+      return ctx.json({ link: `/sign-in/?passkey#passkey=${await invitation(ctx.context.adapter, user, 15 * 60 * 1000)}${replaces}` });
     }),
     // What the sign-in page opens with a passkey's PRF output, on a new device: the person's key, encrypted to it.
     passkeyEncryptedKey: createAuthEndpoint("/passkey/encrypted-key", { method: "POST" }, async (ctx) => {
@@ -900,6 +908,9 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     const given = passkey && keys[passkey.credentialID];
     if (!given || !passkey.prfKey || given.prf_key !== passkey.prfKey || typeof given.key !== "string") return { passkeys: 0 };
     await adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { encryptedKey: given.key } });
+    // It unlocks the key now, so the one it was made to replace, which can't, goes: a person keeps one passkey.
+    const [replaced] = passkey.replaces ? await adapter.findMany<Passkey>({ model: "passkey", where: [...mine, { field: "id", value: passkey.replaces }] }) : [];
+    if (replaced && !(replaced.prfKey && replaced.encryptedKey)) await adapter.delete({ model: "passkey", where: [{ field: "id", value: replaced.id }] });
     return { passkeys: 1 };
   }
   if (ask === "remove_passkey") {
