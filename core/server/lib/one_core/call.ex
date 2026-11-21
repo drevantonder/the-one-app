@@ -381,10 +381,8 @@ defmodule OneCore.Call do
   With servers' keys in `owner`'s place, it's one of those that runs it, for an app that knows which can: the
   ones that hold a key, say. `:no_response` then means none of them ran it.
   """
-  def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers) do
-    for server <- servers -- [Server.key()], do: asks(call.request, {call.actor, call.subject}, server, "to")
-    :no_response
-  end
+  def forward(%__MODULE__{forwarded: false} = call, servers) when is_list(servers),
+    do: ask_each(call.request, {call.actor, call.subject}, servers -- [Server.key()], "to")
 
   def forward(%__MODULE__{}, servers) when is_list(servers), do: throw({__MODULE__, :forwarding_loop})
   def forward(%__MODULE__{} = call, owner), do: forward(call.request, {call.actor, call.subject}, call.forwarded, owner)
@@ -430,10 +428,10 @@ defmodule OneCore.Call do
     raise Server.error_message(:unreachable, server)
   end
 
-  # Asks each of `servers` in turn to run it, and, if none did, the first that's back of those that were starting or
-  # stopping.
+  # Asks `servers` to run it, as `ask_each/5` does, and, if none did, the first that's back of those that were
+  # starting or stopping.
   defp elsewhere(ask, principal, servers, opts \\ []) do
-    for server <- servers, do: asks(ask, principal, server, "to", :infinity, opts)
+    ask_each(ask, principal, servers, "to", opts)
     if back = Servers.back(servers), do: asks(ask, principal, back, "to", :infinity, opts)
   end
 
@@ -448,44 +446,118 @@ defmodule OneCore.Call do
   With `within`, in milliseconds, a server that hasn't answered within that long what's safe to ask again is taken
   as gone too: one that's there but stuck keeps the call open however long, saying it's still running it. What
   isn't safe to ask again is waited for as long as it takes, since it may be doing it.
+
+  With a list of servers in `server`'s place, one of them runs it, asked as `forward/2` asks them, and `:no_response`
+  means none did.
   """
   def forward_to(call, server, within \\ :infinity)
   def forward_to(%__MODULE__{forwarded: true}, _server, _within), do: throw({__MODULE__, :forwarding_loop})
 
+  def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, servers, :infinity) when is_list(servers),
+    do: ask_each(ask, {actor, subject}, servers, true)
+
   def forward_to(%__MODULE__{request: ask, subject: subject, actor: actor}, server, within),
     do: asks(ask, {actor, subject}, server, true, within)
 
+  # How long what only reads waits for a server's answer before it's asked of the next as well: most are answered
+  # within a second, and a server that's connected but stuck says it's still running it however long, as a busy one
+  # does. The same as a device's client waits (`HEDGE`, `core/client/src/rpc.rs`).
+  @hedge 3_000
+
+  # Has one of `servers` run it, with `forwarded` saying how it reached them. What only reads is hedged, as gRPC's
+  # hedging policy hedges what's safe to ask twice: asked of the first, and of the next too whenever none has answered
+  # within `@hedge` or one couldn't run it, the first answer being its answer. Anything else is asked of each in turn,
+  # each waited for as long as it takes, since it may be doing it. `:no_response` if none ran it.
+  defp ask_each(ask, {_actor, subject} = principal, servers, forwarded, opts \\ []) do
+    {method, params} = passing = passed(ask, principal, forwarded)
+
+    if again?(method, params, subject),
+      do: hedged([], servers, passing, opts),
+      else: Enum.each(servers, &answered(Server.request(&1, method, params, opts), &1, false))
+
+    :no_response
+  end
+
+  defp hedged([], [], _ask, _opts), do: :no_response
+  defp hedged([], [server | rest], ask, opts), do: hedged([hedge(server, ask, opts)], rest, ask, opts)
+
+  defp hedged(asking, servers, ask, opts) do
+    by_ref = Map.new(asking, &{&1.ref, &1})
+
+    receive do
+      {ref, {server, response}} when is_map_key(by_ref, ref) ->
+        Process.demonitor(ref, [:flush])
+        others = List.delete(asking, by_ref[ref])
+
+        if answer?(response) do
+          Enum.each(others, &Task.shutdown(&1, :brutal_kill))
+          answered(response, server, true)
+        else
+          hedged(others, servers, ask, opts)
+        end
+
+      {:DOWN, ref, :process, _pid, _reason} when is_map_key(by_ref, ref) ->
+        hedged(List.delete(asking, by_ref[ref]), servers, ask, opts)
+    after
+      if(servers == [], do: :infinity, else: @hedge) ->
+        [server | rest] = servers
+        hedged([hedge(server, ask, opts) | asking], rest, ask, opts)
+    end
+  end
+
+  # Asks `server` from a process of its own, in this call's trace, which gives what it answered.
+  defp hedge(server, {method, params}, opts) do
+    {trace, state} = {OpenTelemetry.Ctx.get_current(), State.id()}
+
+    Task.Supervisor.async_nolink(OneCore.Asks, fn ->
+      OpenTelemetry.Ctx.attach(trace)
+      State.follow(state)
+
+      try do
+        {server, Server.request(server, method, params, opts)}
+      catch
+        kind, reason -> {server, {:raised, kind, reason, __STACKTRACE__}}
+      end
+    end)
+  end
+
+  # Whether a server ran it, or refused it: anything but couldn't, or would pass it on in turn.
+  defp answer?({:error, code, _why}), do: code != Server.forwarding_loop()
+  defp answer?(response), do: match?({:ok, _}, response) or match?({:raised, _, _, _}, response)
+
   # `forwarded` is what the server asked is told of how the call reached it: `"to"` from one that can't run it, and
   # `true` from one that hands it to the server holding what it needs.
-  defp asks({method, params}, {actor, subject}, server, forwarded, within \\ :infinity, opts \\ []) do
-    forwarding_loop = Server.forwarding_loop()
+  defp asks(ask, {_actor, subject} = principal, server, forwarded, within \\ :infinity, opts \\ []) do
+    {method, params} = passed(ask, principal, forwarded)
+    again = again?(method, params, subject)
 
+    response =
+      if within != :infinity and again,
+        do: request_within(server, method, params, within),
+        else: Server.request(server, method, params, opts)
+
+    answered(response, server, again)
+  end
+
+  defp passed({method, params}, {actor, subject}, forwarded) do
     meta = %{forwarded: forwarded, actor: actor, subject: subject}
     meta = if client = State.client(), do: Map.put(meta, :client, client), else: meta
     # A call whose caller asked for a task that isn't made yet is made one where it runs, which then answers it.
     meta = if method == "tools/call", do: Map.merge(meta, Tasks.asking()), else: meta
-    params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
+    {method, Map.update(params, :_meta, meta, &Map.merge(&1, meta))}
+  end
 
-    response =
-      if within != :infinity and again?(method, params, subject),
-        do: request_within(server, method, params, within),
-        else: Server.request(server, method, params, opts)
+  # The call ends with what `server` answered, if it ran it; `again` is whether it was safe to ask again.
+  defp answered(response, server, again) do
+    forwarding_loop = Server.forwarding_loop()
 
     case response do
-      {:ok, result} ->
-        throw({__MODULE__, {:forwarded, result}})
-
-      {:error, ^forwarding_loop, _why} ->
-        :forwarding_loop
-
-      {:error, _code, why} ->
-        raise why
-
-      :unreachable ->
-        :no_response
-
-      :stopped ->
-        if again?(method, params, subject), do: :no_response, else: raise(Server.error_message(:stopped, server))
+      {:ok, result} -> throw({__MODULE__, {:forwarded, result}})
+      {:error, ^forwarding_loop, _why} -> :forwarding_loop
+      {:error, _code, why} -> raise why
+      {:raised, kind, reason, stacktrace} -> :erlang.raise(kind, reason, stacktrace)
+      :unreachable -> :no_response
+      :stopped -> if again, do: :no_response, else: raise(Server.error_message(:stopped, server))
     end
   end
 
