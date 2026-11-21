@@ -17,6 +17,9 @@ defmodule Telemetry.Rollup do
   # What `Telemetry.Read` reads of a span's or a log line's attributes: whose a call was, how it ended, which app's
   # page, and who the client is (`Telemetry.Read.from/1`).
   @attributes ~w(one.for one.outcome one.forwarded one.app service.name host.name mcp.client.name user_agent.name)
+  # And of a log line's, where an exception threw and its stack (`Telemetry.Read.errors/2`), which a rollup keeps for an
+  # error that's found after its hour was rolled up.
+  @logged @attributes ++ ~w(code.file.path code.line.number exception.stacktrace)
 
   @doc "The rollup of `batches`, exports laid flat or rollups, as one batch."
   def of(batches) do
@@ -27,7 +30,7 @@ defmodule Telemetry.Rollup do
         ),
       "logs" =>
         for(l <- Enum.flat_map(batches, & &1["logs"]), l["severity"] in ["WARN", "ERROR"], l["spanId"] == nil,
-          do: %{l | "attributes" => Map.take(l["attributes"], @attributes)}
+          do: %{l | "attributes" => Map.take(l["attributes"], @logged)}
         ),
       "metrics" =>
         batches
