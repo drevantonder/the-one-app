@@ -51,6 +51,8 @@ impl Windows {
     pub fn attach(&mut self, id: WindowId, mut screen: Screen) -> bool {
         let Some(window) = self.windows.get_mut(&id).filter(|window| window.pending) else { return false };
         fit(&mut screen, &window.parts[0].native, id, window.room(), window.root, window.title_row, self.pressure);
+        screen.when_unused.append(&mut window.when_unused);
+        screen.unused();
         (window.screen, window.pending, window.dirty) = (Ok(screen), false, true);
         true
     }
@@ -108,6 +110,7 @@ impl Windows {
                 chrome: None,
                 screen,
                 pending,
+                when_unused: Vec::new(),
                 title_row: options.title_row,
                 title: options.title,
                 scene: Default::default(),

@@ -28,6 +28,20 @@ impl Windows {
         window.screen.as_mut().ok().map(f)
     }
 
+    /// Does `job` once window `id`'s page isn't in use (`Screen::when_unused`): where it's still opening, once its page
+    /// is attached, so what came between its page being read and its being given it isn't lost.
+    pub fn when_unused(&mut self, id: WindowId, job: Box<dyn FnOnce() + Send>) {
+        let Some(window) = self.windows.get_mut(&id) else { return };
+        match &mut window.screen {
+            Ok(screen) => {
+                screen.when_unused.push(job);
+                screen.unused();
+            }
+            Err(_) if window.pending => window.when_unused.push(job),
+            Err(_) => {}
+        }
+    }
+
     /// Every window, for the inspector's `windows`: what it says it is, its id (`window`), and its `window` op's
     /// answer.
     pub fn list(&mut self) -> Vec<serde_json::Value> {

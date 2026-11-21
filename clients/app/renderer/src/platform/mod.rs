@@ -333,6 +333,9 @@ struct Window {
     /// until it's given it (`attach`), which its title row is made for (`WindowOptions::title_row`).
     screen: Result<Screen, String>,
     pending: bool,
+    /// What waits for its page not to be in use (`Windows::when_unused`) that came while it was still opening: its
+    /// page has it as it's attached.
+    when_unused: Vec<Box<dyn FnOnce() + Send>>,
     title_row: bool,
     title: String,
     scene: crate::render::scene::Scene,

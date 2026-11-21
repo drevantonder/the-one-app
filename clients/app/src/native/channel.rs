@@ -459,10 +459,7 @@ pub(super) fn channel(
                         let (reload, window) = (reload.clone(), window.clone());
                         native.run(move |windows| {
                             if let Some(id) = window.get() {
-                                windows.with(*id, |screen| {
-                                    screen.when_unused.push(Box::new(reload));
-                                    screen.unused();
-                                });
+                                windows.when_unused(*id, Box::new(reload));
                             }
                         });
                     }
