@@ -512,6 +512,15 @@ impl Windows {
         // just started, or stopped, hasn't ticked.
         let waiting = held || (ticking && self.windows.values().any(|window| window.on_screen() && window.dirty));
         let wanted = self.framing() || waiting;
+        // With no frame wanted, what moved is still: its frames are said, so the next one, drawn whenever something
+        // comes, isn't counted as a refresh the display missed, which pressed the device for 5 s.
+        if !wanted {
+            for window in self.windows.values_mut() {
+                if let Some(frames) = window.timing.end(self.display.refresh()) {
+                    (window.on_event)(Event::Frames(frames));
+                }
+            }
+        }
         self.ticked = self.ticked.filter(|_| wanted && self.wanted);
         self.wanted = wanted;
         self.display.request_frame(wanted);
