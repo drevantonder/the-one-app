@@ -8,8 +8,9 @@ import { holds } from "./holds.ts"
 import { Tile } from "./tiles.tsx"
 import { openedCategory, places } from "./library.tsx"
 
-/// How large an opened category's apps' icons are.
-const ICON = 60
+/// How large an opened category's apps' icons are, how wide each is with its name, and the gap between them across,
+/// as `sizes.found` and `looks.openedApps` have them.
+const [ICON, APP, APART] = [60, 76, 12]
 
 /// A category opened over its App Library, as an iPhone's is: the whole screen (in the launcher, its card), its name as
 /// a large title over all its apps in a grid, as Home's, which scrolls, over the App Library blurred and dimmed. Each of
@@ -58,6 +59,14 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
     return looks.scaledAt(scale, icon.x + icon.width / 2 - area().x - at.x - at.width / 2, icon.y - area().y - at.y - at.height / 2 + (scale * at.height) / 2)
   }
   const named = () => (props.open ? looks.named : looks.unnamed)
+  // In a launcher's card, its name and its apps are a column in the card's middle, as Home's pages are, as wide as its
+  // apps take, as a Mac's Launchpad's folder is; a phone's are its whole screen, as an iPhone's.
+  const column = () => {
+    if (!props.within) return undefined
+    const room = area().width - 2 * inset().inline
+    const across = Math.max(1, Math.min(category()?.entrypoints.length ?? 1, Math.floor((room + APART) / (APP + APART))))
+    return looks.wide(across * APP + (across - 1) * APART)
+  }
   // A tap beside its apps closes it; one on an app is the app's (`Pressable`).
   const beside = () => tapping() && close()
   return (
@@ -67,11 +76,11 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
       <View role="dialog" aria-label={category()?.category} style={[looks.opening, props.within && looks.round, looks.at(area().x, area().y, area().width, area().height)]}>
         <View style={[looks.inOpened, looks.handed, props.open ? looks.handing : looks.unseen]}>
           <ScrollView style={[looks.openedArea, !props.open && looks.inert, looks.sized(area().width, area().height)]}>
-            <Pressable onPress={beside} onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, all: event.currentTarget.getBoundingClientRect() }))} style={[looks.opened, looks.libraryPadding(inset().inline, inset().top, inset().bottom), looks.atLeast(area().height)]}>
-              <Text role="heading" aria-level={2} style={[looks.categoryTitle, named()]}>
+            <Pressable onPress={beside} onLayout={measured() ? undefined : (event) => setLaid((laid) => ({ ...laid, all: event.currentTarget.getBoundingClientRect() }))} style={[looks.opened, props.within && looks.centred, looks.libraryPadding(inset().inline, inset().top, inset().bottom), looks.atLeast(area().height)]}>
+              <Text role="heading" aria-level={2} style={[looks.categoryTitle, named(), column()]}>
                 {category()?.category}
               </Text>
-              <View style={looks.openedApps}>
+              <View style={[looks.openedApps, column()]}>
                 <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                   {(entrypoint, index) => {
                     // What's held here is an app of the App Library, as there: its menu, or carried onto Home's pages.

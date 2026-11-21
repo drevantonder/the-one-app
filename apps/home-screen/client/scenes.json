@@ -2627,6 +2627,22 @@
         "name": "Productivity"
       }
     ],
+    "checks": {
+      "Its apps are in the card's middle, as Home's are": [
+        {
+          "expect": {
+            "centred": {
+              "role": "button",
+              "name": "Tasks",
+              "within": {
+                "role": "dialog",
+                "name": "Productivity"
+              }
+            }
+          }
+        }
+      ]
+    },
     "motions": {
       "Close it on a loaded Mac": {
         "from": {
