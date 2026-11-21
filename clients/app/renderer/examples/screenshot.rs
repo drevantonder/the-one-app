@@ -1157,7 +1157,6 @@ fn framed(folder: &std::path::Path, page: &str, ui: Option<PathBuf>, clock: Cloc
     });
     let mut screen = Screen::new(js, Some(asked));
     screen.page = tokens_page;
-    screen.touch = touch;
     Ok(screen)
 }
 

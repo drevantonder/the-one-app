@@ -33,10 +33,7 @@ pub fn framed(node: f64, src: String, page: String, styles: String) -> Result<()
             let mut screen = Screen::new(Thread::of(Clock::real(), Some(node)), Some(asked));
             screen.page = tokens;
             screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src, Some(node))));
-            windows.with(WINDOW, |parent| {
-                (screen.touch, screen.text_size) = (parent.touch, parent.text_size);
-                parent.framed(node, &src, screen)
-            });
+            windows.with(WINDOW, |parent| parent.framed(node, &src, screen));
         })
     });
     Ok(())

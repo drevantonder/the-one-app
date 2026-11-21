@@ -48,6 +48,8 @@ impl Screen {
         }
         screen.nested = true;
         screen.insets = Default::default();
+        // A page in a frame is on its parent's device: a finger or not, and the text size its person has, which its type's sizes follow.
+        (screen.touch, screen.text_size) = (self.touch, self.text_size);
         let shared = Shared(std::rc::Rc::new(std::cell::RefCell::new(std::mem::replace(&mut self.clipboard, Box::new(crate::editing::Memory::default())))));
         self.clipboard = Box::new(shared.clone());
         screen.clipboard = Box::new(shared);
