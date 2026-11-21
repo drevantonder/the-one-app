@@ -62,7 +62,7 @@ defmodule Database.Lease do
   reaches the bucket, is taken over from once a server that can't reach it finds that another can't either, or that
   there's no other to ask (`Database.transaction/3`). One that couldn't reach a holder that took the lease from it, and
   found no other server to ask, doesn't take it back while the relay at the network's address still reaches that one
-  (`OneCore.Servers.answers?/1`): it's the one out of reach, as a laptop that has just woken is, and taking the lease
+  (`OneCore.Servers.answers?/2`): it's the one out of reach, as a laptop that has just woken is, and taking the lease
   back would have it move back and forth. A holder that answers neither has lost it, however recently the relay last
   saw it: being connected there isn't answering.
 

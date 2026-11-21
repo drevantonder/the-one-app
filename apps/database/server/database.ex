@@ -9,7 +9,7 @@ defmodule Database do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.34.70"}
+  def requires, do: %{"core" => ">= 0.34.241"}
 
   require Logger
   alias Database.Lease
@@ -59,6 +59,12 @@ defmodule Database do
   # holder to run it: a holder that's up runs one in well under a second.
   @witness 2_000
 
+  # How long, in milliseconds, the relay at the network's address gives the holder to answer its ping
+  # (`OneCore.Servers.answers?/2`), which is asked as the holder is and waited for after it. A holder that's up answers
+  # in well under a second, so one that hasn't is no more reached through the relay than by this server, and the
+  # relay's own 5 s only had the call outwait the holder's `@reach`.
+  @ping 1_500
+
   # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
   # that needs what only another server has can't be passed on again (a Vault item only some servers open, say).
   # Not reaching it just now isn't its being gone: a network loses a connection now and then, and what this server
@@ -85,7 +91,7 @@ defmodule Database do
     # A call another server passed here to run, as one whose own copy failed passes its own (`:failed`), or as one
     # that couldn't reach the holder does, is asked of the holder once, for `@witness`, and passed on no further.
     passed = call.forwarded == :to
-    relay = if server && not passed, do: Task.async(fn -> OneCore.Servers.answers?(server) == true end)
+    relay = if server && not passed, do: Task.async(fn -> OneCore.Servers.answers?(server, @ping) == true end)
 
     try do
       within = if passed, do: @witness, else: @reach
