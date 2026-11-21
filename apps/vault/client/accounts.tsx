@@ -887,7 +887,7 @@ function Vault() {
               </Show>
               <Show when={creatable("accounts").length}>
                 <List>
-                  <Row heading="Sign in to your accounts for your apps." end={<Button variant="secondary" onPress={addAccount}>Add Account</Button>} />
+                  <Row heading="Sign in to your accounts for your apps." action={<Button variant="secondary" onPress={addAccount}>Add Account</Button>} />
                 </List>
               </Show>
             </Section>
@@ -896,7 +896,7 @@ function Vault() {
                 <List each={items("passwords")} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</List>
               </Show>
               <List>
-                <Row heading="Keep a password or key for your apps and agents." end={<Button variant="secondary" onPress={() => setSheet({ kind: "field" })}>Add</Button>} />
+                <Row heading="Keep a password or key for your apps and agents." action={<Button variant="secondary" onPress={() => setSheet({ kind: "field" })}>Add</Button>} />
               </List>
             </Section>
             <For each={sections()}>
@@ -917,7 +917,7 @@ function Vault() {
                     <List>
                       <Row
                         heading={`Add a ${typeIn(section)!.name} for your apps.`}
-                        end={
+                        action={
                           <Button variant="secondary" onPress={() => (creatable(`section:${section}`).length === 1 ? create(creatable(`section:${section}`)[0]) : setSheet({ kind: "add", section }))}>
                             {`Add ${titled(typeIn(section)!.name)}`}
                           </Button>

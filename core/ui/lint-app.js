@@ -104,6 +104,15 @@ function dom() {
         const variant = node.openingElement.attributes.find((one) => one.type === "JSXAttribute" && one.name.name === "variant")
         if (variant?.value?.value === "destructive") found.push(`${at(node)}: error: a red button isn't a page's: a destructive action is a red \`Row\` in a \`List\` (\`<List><Row heading="Delete…" destructive onPress={…} /></List>\`), and \`confirm({ destructive: true })\` draws the alert's`)
       }
+      // `<Row end={<Button>Update</Button>} />`: `end` is for an icon (a button of `size="icon"` too), an amount or a switch; a button with words goes in
+      // `action`, which a phone puts under the row's words, where in `end` a longer heading would be squeezed by it.
+      if (node.type === "JSXElement" && named(node) === "Row") {
+        const end = node.openingElement.attributes.find((one) => one.type === "JSXAttribute" && one.name.name === "end")
+        walk(end?.value, (inner) => {
+          const icon = inner.openingElement?.attributes.some((one) => one.type === "JSXAttribute" && one.name.name === "size" && one.value?.value === "icon")
+          if (inner.type === "JSXElement" && named(inner) === "Button" && !icon) found.push(`${at(inner)}: error: a \`Button\` in a \`Row\`'s \`end\` squeezes its words: a button goes in \`action\` (\`<Row heading="…" action={<Button>…</Button>} />\`), which a phone puts under them; \`end\` is for an icon, an amount or a switch`)
+        })
+      }
       // `globalThis.document`, `self["window"]`
       const object = unwrapped(node.object)
       if (node.type === "MemberExpression" && object?.type === "Identifier" && ["globalThis", "self"].includes(object.name)) {

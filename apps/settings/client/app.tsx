@@ -304,7 +304,7 @@ function Updates() {
             <Row
               heading="This Device"
               text={updates().behind ? "Update ready" : "Up to date"}
-              end={<Show when={updates().behind}><Button variant="outline" loading={working() === "here"} onPress={press("here", () => client({ update: true }).then(({ message }) => toast(message)))}>Update</Button></Show>}
+              action={<Show when={updates().behind}><Button variant="outline" loading={working() === "here"} onPress={press("here", () => client({ update: true }).then(({ message }) => toast(message)))}>Update</Button></Show>}
             />
           </List>
           <Show when={ready().length}>
@@ -315,7 +315,7 @@ function Updates() {
                     start={<Tile icon={app().icon} />}
                     heading={app().title}
                     text={updateText(app().update!)}
-                    end={<Button variant="outline" loading={working() === app().name} onPress={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
+                    action={<Button variant="outline" loading={working() === app().name} onPress={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
                   />
                 )}
               </List>
@@ -368,7 +368,7 @@ function AppPage(props: { app: App }) {
           {(allowed) => <Row heading="Notifications" end={<Switch aria-label="Notifications" value={allowed().allowed} onValueChange={allow} />} />}
         </Show>
         <Show when={app().update}>
-          <Row heading="Update ready" text={app().update!.state === "failed" ? updateText(app().update!) : undefined} end={<Button variant="outline" loading={working() === "update"} onPress={update}>Update</Button>} />
+          <Row heading="Update ready" text={app().update!.state === "failed" ? updateText(app().update!) : undefined} action={<Button variant="outline" loading={working() === "update"} onPress={update}>Update</Button>} />
         </Show>
       </List>
       <Groups in="app" app={app().name} />

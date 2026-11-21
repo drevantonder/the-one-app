@@ -281,7 +281,7 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
         <Section heading="Options">
           <List>
             <Show when={thing().behind && thing().here}>
-              <Row heading="Update ready" end={<Button variant="outline" loading={working() === thing().id} onPress={press(thing(), update)}>Update</Button>} />
+              <Row heading="Update ready" action={<Button variant="outline" loading={working() === thing().id} onPress={press(thing(), update)}>Update</Button>} />
             </Show>
             <Show when={thing().here && thing().kind === "app"}>
               <Row

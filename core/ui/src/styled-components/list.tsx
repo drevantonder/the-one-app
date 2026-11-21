@@ -101,7 +101,9 @@ const look = styles({
   start: { flexShrink: 0 },
   end: { flexShrink: 0, maxWidth: "50%", color: tokens.colour.secondaryLabel, textAlign: "end" },
   control: { flexShrink: 0, minWidth: tokens.length.control, justifyContent: "center", alignItems: "center", paddingStart: tokens.grid[1] },
-  action: { flexShrink: 0, flexDirection: "row", alignItems: "center", marginStart: "auto", paddingBottom: tokens.grid[2], paddingEnd: tokens.grid[3] },
+  action: { flexShrink: 0, flexDirection: "row", alignItems: "center", marginStart: "auto", paddingEnd: tokens.grid[3] },
+  // In a narrow room it may wrap under the words, where the row has room under it as under any line.
+  wrapped: { paddingBottom: tokens.grid[2] },
   swipe: { position: "absolute", top: 0, bottom: 0, end: 0, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: tokens.colour.red, color: tokens.colour.onAccent, cursor: "pointer" },
   chevron: { flexShrink: 0, color: tokens.colour.tertiaryLabel },
   // A row coming or going: it opens up where it goes, or closes up, fading as it does.
@@ -424,7 +426,7 @@ export function Row(props: RowProps): JSX.Element {
             {inside()}
           </Pressable>
         </Show>
-        <Show when={props.action}>{(action) => <View style={[look.action, moving()]}>{action()}</View>}</Show>
+        <Show when={props.action}>{(action) => <View style={[look.action, room() < ROOMY && look.wrapped, moving()]}>{action()}</View>}</Show>
         <Show when={menu()?.destructive()}>
           {(item) => (
             <Pressable aria-hidden="true" onPress={() => (menu()?.select(item().value), swipe.close())} style={[look.swipe, swipe.settling() && look.settling, look.swiped(swipe.offset())]}>
