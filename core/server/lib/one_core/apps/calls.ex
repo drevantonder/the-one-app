@@ -56,7 +56,9 @@ defmodule OneCore.Apps.Calls do
           ask = {"tools/call", %{name: "#{name}_#{tool}", arguments: inputs, _meta: %{caller: caller}}}
           about = %{"app" => name, "tool" => tool, "inputs" => inputs}
           # What an app answered a hook that's kept, it answered from what its tools change. So after one of those
-          # that doesn't only read, it's invalidated: here, and by the servers this one tells.
+          # that doesn't only read, it's invalidated: here at once, and by the servers this one tells, in the
+          # background, so a server that's stuck holds up nothing. One that isn't told keeps it no longer than it's
+          # kept anywhere (`OneCore.Hooks`).
           cached = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
           if why = member_refused(found, name, principal, caller) do
@@ -65,7 +67,10 @@ defmodule OneCore.Apps.Calls do
             try do
               call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
               result = tool(found, about, principal, Map.values(versions), &invoked(versions, name, {:tool, tool, &1}, call))
-              if cached != [], do: Server.notify_servers(Enum.uniq([at | Apps.chain(subject)]), "invalidate", %{hooks: cached})
+              owners = Enum.uniq([at | Apps.chain(subject)])
+
+              if cached != [],
+                do: Task.Supervisor.start_child(OneCore.Asks, fn -> Server.notify_servers(owners, "invalidate", %{hooks: cached}) end)
               {:ran, result}
             after
               Hooks.invalidate(cached)

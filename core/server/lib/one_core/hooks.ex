@@ -33,11 +33,12 @@ defmodule OneCore.Hooks do
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
   another server is validated on both.
 
-  That something may be reached is kept by the server that asked, so that it asks once: until a tool that doesn't
-  only read is called of an app that validates it, which that server and the ones it tells invalidate at once,
-  and for a few seconds anywhere else. Whose a device is is kept the same way, until a server is told to invalidate it:
-  by a tool of an app that says whose, or by that app's edge function. A refusal is never
-  kept, nor that a device is nobody's. So taking access away reaches every server, and giving it is seen at once.
+  That something may be reached, and whose a device is, is kept by the server that asked, so that it asks once: for
+  10 seconds (`@ttl`), or until a tool that doesn't only read is called of an app that validates it or says whose,
+  which that server invalidates at once and tells the others to, or that app's edge function says to. A refusal is
+  never kept, nor that a device is nobody's. So giving access is seen at once, and taking it away reaches every
+  server it's told to at once and every other within 10 seconds: one that's stuck or out of reach as it's told still
+  answers from what it kept for no longer than that, so nothing waits on telling it.
 
   Who may do what is an app's to decide. Where no app validates `reach` for a moment, nothing is reached and
   no tool is called but by the network's first owner (`OneCore.User.first_owner/0`), who is how a network whose
@@ -82,7 +83,8 @@ defmodule OneCore.Hooks do
     end
   end
 
-  # How long a server keeps that something may be reached, in milliseconds, where nothing told it to invalidate it.
+  # How long a server keeps that something may be reached, or whose a device is, in milliseconds, where nothing told it
+  # to invalidate it: how long a grant that's taken away may still be answered from a server that wasn't told.
   @ttl 10_000
 
   # Where what each of `cached/0` answered is cached. These two are asked of the same thing again and again: whether
@@ -298,7 +300,7 @@ defmodule OneCore.Hooks do
       with [_ | _] <- hooking("device", "network"),
            {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
            :ok <- OneCore.User.user(who) do
-        {:commit, who}
+        {:commit, who, expire: @ttl}
       else
         [] -> {:ignore, {:error, "no app that says whose a device is runs on this server"}}
         {:refuse, why} -> {:ignore, {:error, why}}
