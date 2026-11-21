@@ -194,12 +194,14 @@ async function handleSeen(env: Env, request: Request, url: URL) {
   const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
   const here = await presence(env, keys.slice(0, 1000));
   // With `ping`, each server is pinged as one is before it's given an outsider's call, and whether it `answered`
-  // within `REACH` is said too: a connection that has gone quiet stays here for up to `SILENT`, as a machine that
-  // has just gone to sleep does, so being connected doesn't say a server would answer.
+  // within `REACH`, or the `within` milliseconds the caller can spare if that's less, is said too: a connection that
+  // has gone quiet stays here for up to `SILENT`, as a machine that has just gone to sleep does, so being connected
+  // doesn't say a server would answer.
   if (url.searchParams.has("ping")) {
+    const within = Math.min(Number(url.searchParams.get("within")) || REACH, REACH);
     for (const server of keys.slice(0, 10)) {
       const call = relay(env, (relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } }));
-      const answered = await reach(call, server).then(({ close }) => (close(), true), () => false);
+      const answered = await reach(call, server, within).then(({ close }) => (close(), true), () => false);
       here[server] = { ...(here[server] ?? { connected: false }), answered };
     }
   }
@@ -227,11 +229,11 @@ async function handleUpdate(env: Env, request: Request) {
 const relay = <T,>(env: Env, call: (relay: DurableObjectStub<Relay>) => Promise<T>) => relayed(env.RELAY, call);
 
 /**
- * A connection to `server`, the relay's answer to `call`, once it has answered a ping within `REACH`: `ask` sends a
- * message and gives its answer, or `null` if the server left first. Rejects for a server that isn't here or didn't
- * answer.
+ * A connection to `server`, the relay's answer to `call`, once it has answered a ping within `within` milliseconds,
+ * `REACH` unless the caller can spare less: `ask` sends a message and gives its answer, or `null` if the server left
+ * first. Rejects for a server that isn't here or didn't answer.
  */
-async function reach(call: Promise<Response>, server: string) {
+async function reach(call: Promise<Response>, server: string, within = REACH) {
   const { webSocket } = await call;
   if (!webSocket) throw new Error("isn't connected to the relay");
   webSocket.accept();
@@ -243,10 +245,10 @@ async function reach(call: Promise<Response>, server: string) {
     return new Promise<string | null>((resolve) => (answered = resolve));
   };
   const close = () => webSocket.close(1000, "Done");
-  const pong = await Promise.race([ask(MCP_PING), scheduler.wait(REACH).then(() => null)]);
+  const pong = await Promise.race([ask(MCP_PING), scheduler.wait(within).then(() => null)]);
   if (pong === null) {
     close();
-    throw new Error(`didn't answer a ping within ${REACH / 1000} s`);
+    throw new Error(`didn't answer a ping within ${within / 1000} s`);
   }
   return { server, ask, close };
 }
