@@ -13,7 +13,7 @@
 // says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the web names it, with `ctrl`, `shift`, `alt`
 // or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), `errors` (words of the errors it logs, as a page that can't reach its server does: any other the page logs fails the scene), `timeZone` (the IANA name of the device's, `UTC` unless said: a fixture's instants are said in it, as a person in it reads them), `latency` (ms each tool's answer takes to come on the page's clock, as a server's round trip: for checks of what shows meanwhile), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
-// refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
+// refusal, and `{ "$image": "data:image/png;base64,…" }` a picture, as a server answers one (MCP's `image`: a screenshot). A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
 //
 // Each scene is drawn on a native host by its headless harness (clients/app/renderer's `screenshot` example), with
@@ -101,7 +101,8 @@ addEventListener("message", ({ data, source }) => {
   if (data.method === "tools/call") {
     const answer = own(data.params.name)
     if (answer === undefined || answer?.$error) return reply({ result: { isError: true, content: [{ type: "text", text: answer?.$error ?? "No answer for " + data.params.name }] } })
-    return reply({ result: { content: [{ type: "text", text: JSON.stringify(answer) }] } })
+    const [, mimeType, image] = answer?.$image?.match(/^data:(.*?);base64,(.*)$/) ?? []
+    return reply({ result: { content: [mimeType ? { type: "image", mimeType, data: image } : { type: "text", text: JSON.stringify(answer) }] } })
   }
   // A method no answer names isn't answered, as record.js's and the native harness's aren't.
   const answer = own(data.method)
@@ -153,10 +154,11 @@ function strayRows(tree) {
 }
 
 /// What a screen's words may not say to a person: this codebase's own, as a build error's (`entrypoint`, `runtime_version`,
-/// a file and its line), which belongs in Telemetry and to the agents. Each line of a scene's semantic tree that says one.
+/// a file and its line), or a tool's name (`computer-use_screenshot`, as a tool that didn't answer says it), which belong
+/// in Telemetry and to the agents. Each line of a scene's semantic tree that says one.
 const INTERNAL = /entrypoint|runtime_version|\.[mc]?[jt]sx?:?\(?\d+[,:]\d+|\berror: /i
 function internalWords(tree) {
-  return tree.split("\n").filter((line) => INTERNAL.test(line)).map((line) => line.trim())
+  return tree.split("\n").filter((line) => INTERNAL.test(line) || line.match(/[\w-]+_\w+/g)?.some((word) => tools.has(word))).map((line) => line.trim())
 }
 
 /// Presses what's named or says `name` on our renderer's canvas, as a person would: found in its ARIA tree
@@ -207,23 +209,27 @@ async function web(browser, serve, key, scene, folder) {
   if (drawn) await settled()
   for (const name of drawn ? scene.taps : []) await press(frame, name).then(settled)
   if (drawn) await page.screenshot({ path: join(folder, "web.png") })
+  // What its screen reader reads, each name a line, as the native tree's are checked for words that aren't a person's.
+  const words = drawn ? await frame.evaluate(() => [...document.querySelectorAll("#semantics *")].map((node) => node.getAttribute("aria-label") ?? "").filter(Boolean).join("\n")) : ""
   await page.close()
-  return drawn ? { problems } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
+  return drawn ? { problems, internal: internalWords(words) } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
 }
 
 // A round trip to a server, as a live network's take, and how soon a page opened should show its first content.
 const LATENCY_MS = 150
 const OPENS_WITHIN_MS = 300
 
-// The tools a client answers from what it keeps as a page opens: those that only read, as each app's `tools/0` and One
-// Core's own definitions say (`read_only: true`), named as a client calls them.
-const kept = (() => {
-  const tools = new Set()
+// Every app's tools, named as a client calls them (`<app>_<tool>`), as each app's `tools/0` says, and those a client
+// answers from what it keeps as a page opens: those that only read, as those and One Core's own definitions say
+// (`read_only: true`).
+const { tools, kept } = (() => {
+  const [tools, kept] = [new Set(), new Set()]
   const read = (file, prefix) => {
     const text = readFileSync(file, "utf8")
     const named = [...text.matchAll(/name: "([\w-]+)"/g)]
     named.forEach((match, at) => {
-      if (/read_only: true/.test(text.slice(match.index, named[at + 1]?.index ?? text.length))) tools.add(prefix + match[1])
+      if (prefix) tools.add(prefix + match[1])
+      if (/read_only: true/.test(text.slice(match.index, named[at + 1]?.index ?? text.length))) kept.add(prefix + match[1])
     })
   }
   read(join(root, "core/server/lib/one_core/tools/definitions.ex"), "")
@@ -231,7 +237,7 @@ const kept = (() => {
     const server = join(root, "apps", app, "server")
     if (existsSync(server)) for (const file of readdirSync(server, { recursive: true })) if (String(file).endsWith(".ex")) read(join(server, String(file)), `${app}_`)
   }
-  return [...tools]
+  return { tools, kept: [...kept] }
 })()
 
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
@@ -365,6 +371,10 @@ for (const target of targets) {
     }
     if (ssh && !drawn.missing) said.push(...(await onDevice(drawn, folder)))
     for (const problem of onWeb.problems ?? []) said.push(`  web: ${problem}`)
+    for (const line of onWeb.internal ?? []) {
+      said.push(`  web: the screen says a word that isn't a person's: ${line}`)
+      process.exitCode = 1
+    }
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
     else if (onTheWeb && !drawn.missing) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))

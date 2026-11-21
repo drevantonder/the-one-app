@@ -176,6 +176,10 @@ const greeted = ask<{ hostContext?: object }>("ui/initialize", { protocolVersion
   host?.post({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} })
 })
 
+/** A part of what a tool answered (MCP's content): its text, a picture (`image`), a file in it (`resource`), or a large
+ * file's address (`resource_link`, where its client keeps it). */
+type Content = { type: string; text?: string; uri?: string; data?: string; mimeType?: string; resource?: { mimeType?: string; blob?: string } }
+
 /// `await call("notes_add", { text: "Milk" })`: calls a tool and gives its answer, which is text. A file a
 /// tool answers with is its address, which an `<Image>` takes as its `src`: a `data:` one, or for a large file, one
 /// the client keeps the file at. A tool that refuses throws an `Error` whose `message` is what a person reads of
@@ -186,8 +190,8 @@ const greeted = ask<{ hostContext?: object }>("ui/initialize", { protocolVersion
 /// than one of them says who each call is for: `call("home-screen_pages", {}, { subject: "groups/family" })`, or `network`.
 export const call: typeof Page.call = async (tool, inputs = {}, { subject } = {}) => {
   await greeted
-  const { content, isError } = await ask<{ content: { text?: string }[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
-  const text = content.map(({ text }) => text ?? "").join("\n")
+  const { content, isError } = await ask<{ content: Content[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
+  const text = content.map(({ type, text, uri, data, mimeType, resource }) => text ?? (type === "resource_link" ? uri : `data:${mimeType ?? resource?.mimeType};base64,${data ?? resource?.blob}`)).join("\n")
   if (isError) throw new Error(readable(text), { cause: text })
   return text
 }

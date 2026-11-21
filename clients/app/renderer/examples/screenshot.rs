@@ -162,18 +162,7 @@ fn main() -> anyhow::Result<()> {
             }
             return Some(json!({"jsonrpc": "2.0", "id": id, "result": {}}));
         }
-        let answer = match (method, params["name"].as_str()) {
-            ("tools/call", Some(tool)) => match answers.get(tool) {
-                // `{ "$error": "…" }` is the tool's refusal, as the scenes (core/ui/scenes.js) answer it.
-                Some(answer) if answer.get("$error").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": answer["$error"].as_str().unwrap_or_default()}]}}),
-                Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
-                None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
-            },
-            _ => match answers.get(method) {
-                Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
-            },
-        };
+        let answer = answered(&answers, id, method, params);
         match params["name"].as_str() {
             Some(tool) if method == "tools/call" && latency > 0.0 && !cached.iter().any(|kept| kept == tool) => {
                 sent.borrow_mut().push((renderer::platform::fake_time() + latency, answer));
@@ -310,16 +299,7 @@ fn main() -> anyhow::Result<()> {
                 let id = message.get("id")?.clone();
                 let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
                 let answers = answers.borrow();
-                let answer = match (method, params["name"].as_str()) {
-                    ("tools/call", Some(tool)) => match answers.get(tool) {
-                        Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
-                        None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
-                    },
-                    _ => match answers.get(method) {
-                        Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                        None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
-                    },
-                };
+                let answer = answered(&answers, id, method, params);
                 if method == "tools/call" && latency > 0.0 {
                     sent.borrow_mut().push((renderer::platform::fake_time() + latency, answer));
                     return None;
@@ -1129,16 +1109,7 @@ fn framed(folder: &std::path::Path, page: &str, ui: Option<PathBuf>, clock: Cloc
         let id = message.get("id")?.clone();
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
         let answers = answers.borrow();
-        Some(match (method, params["name"].as_str()) {
-            ("tools/call", Some(tool)) => match answers.get(tool) {
-                Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
-                None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
-            },
-            _ => match answers.get(method) {
-                Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
-                None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
-            },
-        })
+        Some(answered(&answers, id, method, params))
     });
     let mut screen = Screen::new(js, Some(asked));
     screen.page = tokens_page;
@@ -1187,4 +1158,23 @@ fn built_page(folder: &std::path::Path, page: &std::path::Path, ui: Option<PathB
         }
     }
     Ok((module, files, tokens_page))
+}
+
+/// What a page's request is answered with from `answers` (`--answers`, as core/ui's scenes.js has them): a tool's answer
+/// as its text, `{ "$error": "…" }` as the tool's refusal, and `{ "$image": "data:image/png;base64,…" }` as a picture,
+/// as a server answers one (MCP's `image`: Computer Use's screenshot); any other method by its result, or not at all.
+fn answered(answers: &Value, id: Value, method: &str, params: &Value) -> Value {
+    let picture = |src: &str| src.strip_prefix("data:").and_then(|data| data.split_once(";base64,")).map(|(kind, data)| json!({"type": "image", "mimeType": kind, "data": data}));
+    match (method, params["name"].as_str()) {
+        ("tools/call", Some(tool)) => match answers.get(tool) {
+            Some(answer) if answer.get("$error").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": answer["$error"].as_str().unwrap_or_default()}]}}),
+            Some(answer) if answer.get("$image").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [answer["$image"].as_str().and_then(picture)]}}),
+            Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
+            None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
+        },
+        _ => match answers.get(method) {
+            Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+            None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
+        },
+    }
 }

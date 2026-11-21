@@ -69,7 +69,12 @@
     "errors": [
       "Live video didn't connect",
       "The screen gave no picture either"
-    ]
+    ],
+    "answers": {
+      "android-emulator_screen": {
+        "$error": "Couldn't stream its screen"
+      }
+    }
   },
   "A starting emulator": {
     "like": "Emulators",

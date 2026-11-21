@@ -76,7 +76,12 @@
     "errors": [
       "Live video didn't connect",
       "The screen gave no picture either"
-    ]
+    ],
+    "answers": {
+      "iphone-simulator_screen": {
+        "$error": "Couldn't stream its screen"
+      }
+    }
   },
   "A starting simulator": {
     "like": "Simulators",
