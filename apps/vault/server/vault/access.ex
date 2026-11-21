@@ -35,17 +35,11 @@ defmodule Vault.Access do
   read what they're doing: what widens who may use a secret, or where it's sent, is theirs alone to do. An agent, `one`
   in a terminal or an app's code asks with `request`, which they answer there.
 
-  A device's own connection says which client it is only as that client says (its MCP `clientInfo`): the One App says
-  `one-app`, a browser `one-web`, and `one` and `one mcp` their own or their agent's. Over the web an assistant is
-  known by the device it was let in as, whatever it says.
+  Which screen it's on is sign-in's to say, from the device the call came from as that's proved, never from what the
+  call says of itself alone (`SignIn.screen?/1`).
   """
   def person!(call, what) do
-    client = OneCore.Call.client(call) || %{}
-
-    on_screen =
-      call.caller == nil and client["name"] in ["one-app", "one-web"] and
-        not (client["web"] == true and Vault.SignIns.assistant(call, client["device"]))
-
+    on_screen = call.caller == nil and OneCore.Call.app(call, "sign-in").screen?(call)
     on_screen || raise "#{what} is its person's to do, in Vault on their device, where an agent's vault_request asks them."
   end
 

@@ -45,7 +45,8 @@ defmodule Vault do
       "core" => ">= 0.32.167",
       "encryption" => "to keep your secrets from whoever runs the bucket",
       "database" => "to keep your items",
-      "notifications" => "to tell you when an agent saves something to your Vault"
+      "notifications" => "to tell you when an agent saves something to your Vault",
+      "sign-in" => "to know what only you may do is done on your own screen"
     }
   end
 
