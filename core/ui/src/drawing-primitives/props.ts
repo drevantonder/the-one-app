@@ -1,5 +1,5 @@
 // What a primitive makes of the props it's given.
-import { children, merge, omit, type Element } from "solid-js"
+import { children, merge, omit, untrack, type Element } from "solid-js"
 import type { PressableProps } from "../types/ui.d.ts"
 import { flat, styles, type Styled, type Styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
@@ -45,10 +45,17 @@ export const focusable = (props: Pick<PressableProps, "tabIndex" | "onPress" | "
   props.tabIndex !== -1 && (props.tabIndex === 0 || (!!props.onPress && !props.disabled && pressed.has(props.role!))) && !showsFocus(props.style) ? [words ? highlight : ring, props.style] : props.style
 
 /** `props` with each of `names` read from it as `names` says, in place of the props it reads (`from`): React Native's
- * names as the host names them (`tabIndex` as `tabindex`). */
+ * names as the host names them (`tabIndex` as `tabindex`). One read only from props it wasn't given is undefined for
+ * good, as a component's props are the keys it's given, so it isn't bound: a view gives few of them, and each bound
+ * is a binding its node keeps (a long list's rows had six each). */
 export function renamed<T extends object>(props: T, from: readonly string[], names: Record<string, (props: T) => unknown>) {
   const made = {}
-  for (const [name, read] of Object.entries(names)) Object.defineProperty(made, name, { get: () => read(props), enumerable: true })
+  for (const [name, read] of Object.entries(names)) {
+    const reads = new Set<PropertyKey>()
+    const now = untrack(() => read(new Proxy(props, { get: (target, key) => (reads.add(key), Reflect.get(target, key)) })))
+    if (now === undefined && ![...reads].some((key) => key in props)) continue
+    Object.defineProperty(made, name, { get: () => read(props), enumerable: true })
+  }
   return merge(omit(props as Record<string, unknown>, ...from), made)
 }
 

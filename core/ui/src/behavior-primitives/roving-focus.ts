@@ -5,7 +5,7 @@
 // its orientation, swapped right to left; Home and End; wrapping with `loop`; Alt and the shortcut modifiers left
 // alone), on our host's focus: an item has the keyboard by its `autoFocus`, which a move sets, and says it has it by
 // `onFocus`, in place of an element's `focus()` and its focus events.
-import { createSignal } from "solid-js"
+import { createMemo, createSignal } from "solid-js"
 import { direction } from "#bridge"
 import { moveIndex, rovingStop, stepFor, type Orientation } from "./collection.ts"
 import type { Keyed } from "../types/ui.d.ts"
@@ -30,7 +30,8 @@ export function createRovingFocus(options: { items: () => RovingItem[]; orientat
   const [remembered, setRemembered] = createSignal<string | null>(null)
   const [holder, setHolder] = createSignal<string>()
   const [moved, setMoved] = createSignal<string>()
-  const stop = () => rovingStop(options.items().map((item) => ({ key: item.key, disabled: !!item.disabled, focusable: true, preferred: !!item.preferred })), remember ? remembered() : null)
+  // Worked out once as the items change, not by each item's tab stop: each item reads it, not every item.
+  const stop = createMemo(() => rovingStop(options.items().map((item) => ({ key: item.key, disabled: !!item.disabled, focusable: true, preferred: !!item.preferred })), remember ? remembered() : null))
   return {
     stop,
     /** The item that has the keyboard, if one of the group's does. */
