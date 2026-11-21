@@ -73,6 +73,7 @@
     "taps": [
       "iphone-1"
     ],
+    "wait": 6000,
     "errors": [
       "Live video didn't connect",
       "The screen gave no picture either"

@@ -11,7 +11,7 @@
 // page, `client/index.html` unless said, and a link after `#`), `component` (a component its client exports, drawn alone, in
 // place of a page, as another app's page draws it), `uses` (other apps whose components the page draws, as Settings draws its sections: each is built, and served beside the page as `/<app>/client/`), `taps` (what's done first: pressed by what each is named or
 // says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the web names it, with `ctrl`, `shift`, `alt`
-// or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone: true for any window narrower than COMPACT unless the scene says `false`, as a narrow computer's window is), `errors` (words of the errors it logs, as a page that can't reach its server does: any other the page logs fails the scene), `timeZone` (the IANA name of the device's, `UTC` unless said: a fixture's instants are said in it, as a person in it reads them), `latency` (ms each tool's answer takes to come on the page's clock, as a server's round trip: for checks of what shows meanwhile), and `like` (another scene's name, as Storybook's args are a
+// or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `wait` (ms the page runs on after its taps, before it's drawn, for a scene whose end is a state a few seconds on, as a live screen's "couldn't show this screen" is: a native host's clock is stepped by it, the web's runs it out, so both draw that state and not one on the way to it), `touch` (a finger points at it, as on a phone: true for any window narrower than COMPACT unless the scene says `false`, as a narrow computer's window is), `errors` (words of the errors it logs, as a page that can't reach its server does: any other the page logs fails the scene), `timeZone` (the IANA name of the device's, `UTC` unless said: a fixture's instants are said in it, as a person in it reads them), `latency` (ms each tool's answer takes to come on the page's clock, as a server's round trip: for checks of what shows meanwhile), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal, and `{ "$image": "data:image/png;base64,…" }` a picture, as a server answers one (MCP's `image`: a screenshot). A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
@@ -23,7 +23,8 @@
 // one's Direct3D 12, as motion.js plays there: where each node is laid out there and here, and how much of the
 // pictures differs, `device.png` beside `afresh.png`, drawn the same way here), each as a picture, and natively its
 // semantic tree as text (src/drawing-primitives/outline.ts) too. It says, scene by scene, how much of the pictures
-// differs (a web picture more than 1% from its native one fails, `WEB_DIFFERS_MOST`), and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
+// differs (a web picture more than 1% from its native one fails, `WEB_DIFFERS_MOST`) and whether the text in sight is the same (any
+// difference fails, however small the pictures'), and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
 // scrolls, the memory drawing took and what a second window adds, to compare a change's before and after.
@@ -82,12 +83,12 @@ async function scenesOf(target, built) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch, timeZone = "UTC", errors, safeArea } = whole(scene)
+      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch, timeZone = "UTC", errors, safeArea, wait = 0 } = whole(scene)
       const at = whole(scene).page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")
       const [page, link] = at.split("#")
       const eased = Object.values(whole(scene).motions ?? {}).find((motion) => motion.eases && motion.gesture?.trace)
       const wheel = eased && JSON.parse(readFileSync(join(target, "client", eased.gesture.trace), "utf8")).find((event) => event.kind === "wheel")
-      return { ...phone({ name, page, link, uses, answers, taps, size, touch: sized ? undefined : touch, timeZone, errors, safeArea: sized ? undefined : safeArea }), wheel }
+      return { ...phone({ name, page, link, uses, answers, taps, size, touch: sized ? undefined : touch, timeZone, errors, safeArea: sized ? undefined : safeArea }), wheel, wait }
     })
   }
   // The gallery lists its own, drawn at `#scenes` by the native harness (motion.js).
@@ -241,14 +242,31 @@ async function web(browser, serve, key, scene, folder) {
   }
   if (drawn) await settled()
   for (const name of drawn ? scene.taps : []) await press(frame, name).then(settled)
+  // The page's own time runs on here, as a native host's clock is stepped by it: a state that comes in seconds is there.
+  if (drawn && scene.wait) await page.waitForTimeout(scene.wait).then(settled)
   for (const [url, times] of failed) {
     if (times > 1) continue
     problems.push(`${url} failed on the network once and wasn't fetched again, so it's drawn broken`)
     process.exitCode = 1
   }
   if (drawn) await page.screenshot({ path: join(folder, "web.png") })
-  // What its screen reader reads, each name a line, as the native tree's are checked for words that aren't a person's.
-  const words = drawn ? await frame.evaluate(() => [...document.querySelectorAll("#semantics *")].map((node) => node.getAttribute("aria-label") ?? "").filter(Boolean).join("\n")) : ""
+  // What its screen reader reads: each text and name in sight (the native query's), and all of them, as the native tree's
+  // are checked for words that aren't a person's.
+  const { words, names } = drawn
+    ? await frame.evaluate((edge) => {
+        const nodes = [...document.querySelectorAll("#semantics *")]
+        const inside = (/** @type {Element} */ node) => {
+          const box = node.getBoundingClientRect()
+          // A node with no box (one the screen didn't place) is at its parent's origin with no size, and a hairline's worth
+          // (the keys' unseen field) isn't read. A text is in sight when all of it is.
+          if (box.width <= 2 || box.height <= 2) return false
+          return node.children.length ? box.right > 0 && box.bottom > 0 && box.left < innerWidth && box.top < innerHeight : box.left >= edge && box.top >= edge && box.right <= innerWidth - edge && box.bottom <= innerHeight - edge
+        }
+        const named = (/** @type {Element} */ node) => (node.localName === "span" ? node.textContent : node.getAttribute("aria-label")) ?? ""
+        return { words: nodes.filter((node) => named(node) && inside(node)).map(named), names: nodes.map(named).filter(Boolean) }
+      }, EDGE)
+    : { words: [], names: [] }
+  if (drawn) writeFileSync(join(folder, "web-text.txt"), words.join("\n") + "\n")
   const jumped = drawn && scene.wheel && (await notched(page, frame, scene.wheel))
   if (jumped?.note) problems.push(jumped.note)
   else if (jumped) {
@@ -256,7 +274,7 @@ async function web(browser, serve, key, scene, folder) {
     process.exitCode = 1
   }
   await page.close()
-  return drawn ? { problems, internal: internalWords(words) } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
+  return drawn ? { problems, internal: internalWords(names.join("\n")), words, all: names } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
 }
 
 /// A mouse wheel's notch turned at `at`, as Chrome gives one (CDP's: pixels, marked a notch only by its legacy
@@ -335,7 +353,8 @@ function native(built, scene, folder, used) {
   // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   // With a device to draw it too, each ends at rest with where every node is and a picture drawn afresh, to compare.
-  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...(scene.safeArea ? [{ op: "query" }] : []), ...(ssh ? DRAWN : [])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
+  const steps = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...Array.from({ length: Math.ceil(scene.wait / 1000) }, () => ({ op: "clock", step: 1000 })), { op: "query" }, ...(ssh ? DRAWN : [])]
+  const requests = steps.map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone, "--requests", "-"]
   const run = Bun.spawnSync(capped([harness, ...asked]), { stdin: new TextEncoder().encode(requests), env })
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: stopped(run.exitCode) ?? (run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing") }
@@ -347,8 +366,29 @@ function native(built, scene, folder, used) {
   writeFileSync(join(folder, "native.txt"), tree)
   const measured = run.stderr.toString().match(/^measured (.*)$/m)
   const said = answered(run.stdout.toString())
-  const unsafe = scene.safeArea && underTheDevice(said.at(ssh ? -DRAWN.length - 1 : -1)?.result?.nodes ?? [], scene.size[1], insets(scene.safeArea))
-  return { tree, measured: measured && JSON.parse(measured[1]), unsafe, answers: said, at, asked, requests }
+  const queried = said.at(ssh ? -DRAWN.length - 1 : -1)?.result?.nodes ?? []
+  const unsafe = scene.safeArea && underTheDevice(queried, scene.size[1], insets(scene.safeArea))
+  // The words in sight, as the last frame drew them: each text and name of the semantic tree whose node, or the nearest
+  // above it the inspector knows (a text in a line, a page in a frame), has some of its box in the window and isn't
+  // see-through.
+  // A text is in sight when all of it is, and clear of the window's edge (EDGE points), as one cut by it or touching it may
+  // or may not be read there.
+  const [width, height] = scene.size
+  const clear = (rect) => rect.x >= EDGE && rect.y >= EDGE && rect.x + rect.width <= width - EDGE && rect.y + rect.height <= height - EDGE
+  const seen = new Map(queried.map((node) => [node.node, node.opacity > 0 ? (node.rect && !clear(node.rect) && node.seen >= 0.99 ? 0.5 : node.seen) : 0]))
+  const inSight = (list, above = true) => list.flatMap((node) => {
+    const known = seen.get(node.id)
+    const here = known === undefined ? above : (node.children?.length ? known > 0 : known >= 0.99)
+    return [...(here && node.name ? [node.name] : []), ...inSight(node.children ?? [], here)]
+  })
+  // And the pieces of a line (raw text), which the inspector places but doesn't say are seen: those in the window.
+  const pieces = queried.filter((node) => node.kind === "raw-text" && node.name && node.rect && node.rect.width > 0 && clear(node.rect)).map((node) => node.name)
+  const words = [...inSight(Array.isArray(nodes) ? nodes : [nodes]), ...pieces]
+  // Every word of the tree, in sight or not.
+  const every = (list) => list.flatMap((node) => [...(node.name ? [node.name] : []), ...every(node.children ?? [])])
+  const all = [...every(Array.isArray(nodes) ? nodes : [nodes]), ...queried.filter((node) => node.kind === "raw-text" && node.name).map((node) => node.name)]
+  writeFileSync(join(folder, "native-text.txt"), words.join("\n") + "\n")
+  return { tree, words, all, measured: measured && JSON.parse(measured[1]), unsafe, answers: said, at, asked, requests }
 }
 
 const insets = ([top, right, bottom, left]) => ({ top, right, bottom, left })
@@ -436,10 +476,13 @@ function compared(said, them, treeA, treeB, pictureA, pictureB, diff) {
   said.push(`  ${them}: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
 }
 
+/// How far inside the window's edge a text must be to count as in sight, in points: what touches the edge may or may not be read.
+const EDGE = 8
+
 /// The most of a scene's web picture that may differ from its native one, from 0 to 1, else the scene fails: our
 /// renderer draws both, so more is the web platform's fault, as the widgets' shapes missing from the web were (L30).
 const WEB_DIFFERS_MOST = 0.01
-/// Scenes whose web picture differs more for a known reason that isn't one, by `<folder> · <scene>`, each with why.
+/// Scenes whose web picture, or text, differs for a known reason that isn't a fault, by `<folder> · <scene>`, each with why.
 const WEB_DIFFERS = {}
 
 // Our renderer on the web, on WebGPU, which a machine with no GPU has only as SwiftShader's, and whose canvas is put on
@@ -502,6 +545,20 @@ for (const target of targets) {
     for (const line of onWeb.internal ?? []) {
       said.push(`  web: the screen says a word that isn't a person's: ${line}`)
       process.exitCode = 1
+    }
+    // Pictures a little apart can still show different states (a spinner, an error): each word in sight on one is somewhere
+    // on the other, as a person reads it. A word, whichever node or nodes it's in (a text in a line is a node of its own
+    // here and part of its line there, and a name is its text's too), however it's spaced (Chrome keeps a plain space
+    // where ICU4X, as CLDR has it, puts a narrow no-break one in a time, "12:00 AM"), and anywhere in the other's tree,
+    // so one at a window's edge, or under a clip only the native tree knows, isn't a difference.
+    if (drawn.words && onWeb.words) {
+      const bag = (words) => new Set(words.flatMap((word) => word.split(/[\s\u202f]+/).filter(Boolean)))
+      const [nativeSees, webSees, nativeHas, webHas] = [drawn.words, onWeb.words, drawn.all, onWeb.all].map(bag)
+      const lost = [...[...nativeSees].filter((word) => !webHas.has(word)).map((word) => `native shows "${word}", web has none`), ...[...webSees].filter((word) => !nativeHas.has(word)).map((word) => `web shows "${word}", native has none`)]
+      if (lost.length) {
+        said.push(`  native and web: the text differs${WEB_DIFFERS[`${name} · ${scene.name}`] ? ` (known: ${WEB_DIFFERS[`${name} · ${scene.name}`]})` : ""}: ${lost.slice(0, 4).join("; ")}${lost.length > 4 ? `, and ${lost.length - 4} more` : ""}`)
+        if (!WEB_DIFFERS[`${name} · ${scene.name}`]) process.exitCode = 1
+      }
     }
     const excused = WEB_DIFFERS[`${name} · ${scene.name}`]
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
