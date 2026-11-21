@@ -12,6 +12,8 @@
 //! A node is found by a selector, the inputs `node` (its id in the tree), `role` (ARIA's: `button`, `searchbox`),
 //! `name` (its accessible name, exactly), `text` (words in its name, any case) and `key` (its `id` prop, as the DOM's
 //! `id` names an element), every one given matching, in the tree's order; `nth` picks a later match than the first.
+//! It finds only what a screen reader reads, but with `includeHidden`, as Playwright's `getByRole`, what's hidden from
+//! one too (`aria-hidden`, inert, not displayed).
 //! A point is `x` and `y`, in CSS pixels from the window's top left, as `rect`s are.
 //!
 //! - `window` → `{entrypoint, width, height, scale, time, paused, failed, focused, leaving, moving, blank,
@@ -39,11 +41,12 @@
 //! - `replay` (a selector, or a point, where a press goes down; `moves`, each `{dx, dy, ms}`, a stretch with neither
 //!   holding still; `lift`, true unless given; `hz`, the display's frames a second, 60 unless given; `input_hz`, its
 //!   moves a second, `hz` unless given; `after`, ms to keep drawing past its end, 2000 unless given, stopping once
-//!   nothing moves; `track`, a selector of a node to follow; `snap`: true for each frame's picture) → `{hz, budget_ms,
-//!   over, frames, time, paused}`: the press played as `drag` plays it, each move at its own time, and every frame of
-//!   the display drawn as the window draws one, each with what `profile`'s says, `at` (ms since it went down), where
-//!   `track` was drawn (`x`, `y`) and how far what scrolls under its start shows scrolled (`scroll`, with its stretch
-//!   past an end); `over` counts the frames whose painting took longer than `budget_ms`, a frame's time at `hz`.
+//!   nothing moves; `track`, a selector of a node to follow; `count`, a selector of nodes to count; `snap`: true for
+//!   each frame's picture) → `{hz, budget_ms, over, frames, time, paused}`: the press played as `drag` plays it, each
+//!   move at its own time, and every frame of the display drawn as the window draws one, each with what `profile`'s
+//!   says, `at` (ms since it went down), where `track` was drawn (`x`, `y`), how many nodes `count` matches a person
+//!   sees (`count`: drawn at all opaque, some of it in the window), and how far what scrolls under its start shows
+//!   scrolled (`scroll`, with its stretch past an end); `over` counts the frames whose painting took longer than `budget_ms`, a frame's time at `hz`.
 //!   With `frame_ms`, a frame is drawn only that often, as a device others load draws them, each a late one that
 //!   presses it as a window's do (each frame's `pressure`); `leaving` is how much it took out is still drawn going at
 //!   its end.
@@ -226,8 +229,9 @@ pub fn png(width: u32, height: u32, rgba: Vec<u8>) -> anyhow::Result<Value> {
     Ok(json!({"png": data_encoding::BASE64.encode(&png), "width": width, "height": height}))
 }
 
-/// Each node's semantics as `Tree::semantics` gives them, by its id, without its children.
-fn semantics(tree: &Tree) -> HashMap<Id, Map<String, Value>> {
+/// Each node's semantics as `Tree::semantics` gives them, by its id, without its children: with what's hidden from a
+/// screen reader too where the request says `includeHidden`, as Playwright's `getByRole` takes it.
+fn semantics(tree: &Tree, request: &Request) -> HashMap<Id, Map<String, Value>> {
     fn walk(nodes: &[Value], into: &mut HashMap<Id, Map<String, Value>>) {
         for node in nodes {
             let Value::Object(node) = node else { continue };
@@ -241,7 +245,7 @@ fn semantics(tree: &Tree) -> HashMap<Id, Map<String, Value>> {
         }
     }
     let mut described = HashMap::new();
-    walk(&tree.semantics(0), &mut described);
+    walk(&if request.bool("includeHidden") { tree.semantics_including_hidden(0) } else { tree.semantics(0) }, &mut described);
     described
 }
 
@@ -261,7 +265,7 @@ pub fn order(tree: &Tree) -> Vec<Id> {
 
 /// The nodes the request's selector matches, in the tree's order.
 pub fn select(tree: &Tree, request: &Request) -> Vec<Id> {
-    let described = semantics(tree);
+    let described = semantics(tree, request);
     let want = |name: &str| request.wants(name);
     let text = want("text").map(str::to_lowercase);
     order(tree)
@@ -316,7 +320,7 @@ pub fn tree(tree: &Tree, rects: &Rects) -> Value {
 
 /// The nodes a `query` matches, each with all the inspector knows of it.
 pub fn query(tree: &Tree, rects: &Rects, request: &Request) -> Value {
-    let described = semantics(tree);
+    let described = semantics(tree, request);
     let mut found = select(tree, request);
     // And everything inside each, where it's asked for (`descendants`), as a check of what a node holds reads them.
     if request.inputs.get("descendants").and_then(Value::as_bool) == Some(true) {

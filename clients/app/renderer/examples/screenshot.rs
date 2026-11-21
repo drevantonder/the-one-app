@@ -884,7 +884,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     let every = 1000.0 / request.f64("input_hz").unwrap_or(hz).clamp(1.0, 1000.0);
     let after = request.f64("after").unwrap_or(2000.0).max(0.0);
     let snaps = renderer::inspect::snaps(request);
-    let mut track = match request.inputs.get("track") {
+    let query = |input: &str| match request.inputs.get(input) {
         Some(Value::Object(selector)) => {
             let mut query = json!({"op": "query"});
             for (name, value) in selector {
@@ -894,6 +894,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
         _ => None,
     };
+    let (mut track, count) = (query("track"), query("count"));
     let length: f64 = moves.iter().map(|(_, _, ms)| ms).sum();
     // Where it is `t` ms in.
     let at = |t: f64| {
@@ -977,6 +978,11 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
                 }
                 None => frame["gone"] = json!(true),
             }
+        }
+        // How many of what `count` matches a person sees: drawn at all opaque, some of it in the window.
+        if let Some(query) = &count {
+            let found = ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"].as_array().cloned()).unwrap_or_default();
+            frame["count"] = json!(found.iter().filter(|node| node["opacity"].as_f64().is_some_and(|opacity| opacity > 0.0) && node["seen"].as_f64().is_some_and(|seen| seen > 0.0)).count());
         }
         if let Some(scrolled) = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten() {
             frame["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});

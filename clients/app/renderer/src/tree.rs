@@ -375,7 +375,13 @@ impl Tree {
     pub fn semantics(&self, id: Id) -> Vec<Value> {
         let mut path = Vec::new();
         let held = self.modal(id, &mut path).then_some(path);
-        self.read(id, held.as_deref())
+        self.read(id, held.as_deref(), false)
+    }
+
+    /// The semantic tree from `id` with what a screen reader doesn't read in it too (`aria-hidden`, inert, not
+    /// displayed, behind a modal), as Playwright's `includeHidden` finds it: what's drawn, whether or not it's read.
+    pub fn semantics_including_hidden(&self, id: Id) -> Vec<Value> {
+        self.read(id, None, true)
     }
 
     /// Whether there's a modal shown in `id`, the last one there putting the way to it, from `id`, in `path`.
@@ -392,10 +398,11 @@ impl Tree {
         false
     }
 
-    /// The semantic tree from `id`, where `held` is the way to the modal shown, which only what's on it is read on.
-    fn read(&self, id: Id, held: Option<&[Id]>) -> Vec<Value> {
+    /// The semantic tree from `id`, where `held` is the way to the modal shown, which only what's on it is read on,
+    /// and with what's `hidden` from a screen reader where it says.
+    fn read(&self, id: Id, held: Option<&[Id]>, hidden: bool) -> Vec<Value> {
         let Some(node) = self.nodes.get(&id) else { return Vec::new() };
-        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") || self.leaving.contains(&id) {
+        if self.leaving.contains(&id) || !hidden && (node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert")) {
             return Vec::new();
         }
         let held = match held {
@@ -406,7 +413,7 @@ impl Tree {
         // A text that's only words, with a text in it that says something of its own (an inline link), is its words
         // and that text side by side, as the DOM's spans are read.
         if node.kind == Kind::Text && node.str("role").is_none() && node.str("aria-label").is_none() && !node.listens("click") && self.speaks(id) {
-            return node.children.iter().flat_map(|child| self.read(*child, held)).collect();
+            return node.children.iter().flat_map(|child| self.read(*child, held, hidden)).collect();
         }
         // What's in a frame is its own page's, which the screen puts in its place (`Screen::semantics`).
         if node.kind == Kind::Frame {
@@ -414,7 +421,7 @@ impl Tree {
         }
         let text = matches!(node.kind, Kind::Text | Kind::RawText);
         let mut children: Vec<Value> =
-            if text { Vec::new() } else { node.children.iter().flat_map(|child| self.read(*child, held)).collect() };
+            if text { Vec::new() } else { node.children.iter().flat_map(|child| self.read(*child, held, hidden)).collect() };
         // A `list`'s rows say where each is in all of them, which a screen reader reads ("3 of 10,000"), as ARIA's
         // `aria-posinset` and `aria-setsize` have it: it holds only those near the window.
         if node.kind == Kind::List {
@@ -424,7 +431,7 @@ impl Tree {
                 .iter()
                 .flat_map(|child| {
                     let index = self.nodes.get(child).and_then(|row| row.prop("index")).and_then(Value::as_u64);
-                    let mut read = self.read(*child, held);
+                    let mut read = self.read(*child, held, hidden);
                     for one in read.iter_mut().filter_map(Value::as_object_mut) {
                         if let Some(index) = index {
                             one.insert("posinset".into(), json!(index + 1));
@@ -450,7 +457,7 @@ impl Tree {
             .or_else(|| node.str("label"))
             .map(str::to_owned)
             .or_else(|| text.then(|| self.text(id)))
-            .or_else(|| node.str("role").is_some_and(|role| NAMED_BY_CONTENT.contains(&role)).then(|| self.label(id)));
+            .or_else(|| node.str("role").is_some_and(|role| NAMED_BY_CONTENT.contains(&role)).then(|| self.label(id, hidden)));
         let actions: Vec<&str> =
             ["click", "input", "focus", "blur"].into_iter().filter(|event| node.listens(event)).collect();
         // A live region, whose words a screen reader reads as they change: as it says, or as its role is one (ARIA's
@@ -528,11 +535,11 @@ impl Tree {
     }
 
     /// What's written in `id`, its texts' words one after another, as ARIA names something from what's in it: what
-    /// isn't read (`aria-hidden`, or not displayed) says nothing, and what's named (`aria-label`) says its name. A
-    /// button's name where it has no `aria-label`.
-    fn label(&self, id: Id) -> String {
+    /// isn't read (`aria-hidden`, or not displayed) says nothing, but where it's read anyway (`hidden`), and what's named
+    /// (`aria-label`) says its name. A button's name where it has no `aria-label`.
+    fn label(&self, id: Id, hidden: bool) -> String {
         let Some(node) = self.nodes.get(&id) else { return String::new() };
-        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
+        if !hidden && (node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert")) {
             return String::new();
         }
         if let Some(name) = node.str("aria-label") {
@@ -540,7 +547,7 @@ impl Tree {
         }
         match node.kind {
             Kind::Text | Kind::RawText => self.text(id),
-            _ => node.children.iter().map(|child| self.label(*child)).filter(|words| !words.is_empty()).collect::<Vec<_>>().join(" "),
+            _ => node.children.iter().map(|child| self.label(*child, hidden)).filter(|words| !words.is_empty()).collect::<Vec<_>>().join(" "),
         }
     }
 }

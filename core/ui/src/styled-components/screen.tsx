@@ -183,9 +183,10 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
     return Math.min(1, Math.max(0, (scrolled() - from) / span))
   }
   // Only an app's first screen, which has no Back, gives way to the window's title; a large title's bar shows its
-  // heading as that goes.
-  const titleShown = () => (!(!!props.back || !titled()) ? 0 : large || props.largeTitle ? under() : 1)
-  const named = () => titleShown() >= 0.5
+  // heading as that goes, cross-faded as UINavigationBar's: the large one fades out over the first half and the bar's
+  // in over the second, so the two are never drawn at once.
+  const titleShown = () => (!props.back && titled() ? 0 : large || props.largeTitle ? Math.max(0, 2 * under() - 1) : 1)
+  const named = () => titleShown() > 0
   // Its action panel is where a list's rows and the bar's buttons go on a computer; a window of grouped cards has none,
   // as Raycast's Settings window has none, so they stay in the bar and on their rows.
   const panelled = computer && style === "plain"
@@ -259,7 +260,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
           </Show>
           <Show when={large}>
             <View onLayout={(event) => setLargeHeight(event.currentTarget.getBoundingClientRect().height)}>
-              <Heading level={1} aria-hidden={named() ? "true" : undefined} style={[look.large, under() > 0 && look.faded(1 - under())]}>
+              <Heading level={1} aria-hidden={named() ? "true" : undefined} style={[look.large, under() > 0 && look.faded(Math.max(0, 1 - 2 * under()))]}>
                 {props.heading}
               </Heading>
             </View>

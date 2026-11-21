@@ -73,7 +73,7 @@ export default {
         { expect: { tall: { of: { role: "heading", name: "Notes" }, height: 34 } } },
       ],
     },
-    motions: { "Scrolled under its bar": { from: { x: 195, y: 600 }, gesture: { swipe: [0, -200], speed: 400 }, follow: { role: "heading", name: "Notes" } } },
+    motions: { "Scrolled under its bar": { from: { x: 195, y: 600 }, gesture: { swipe: [0, -200], speed: 400 }, follow: { role: "heading", name: "Notes" }, once: { role: "heading", name: "Notes" } } },
   },
   "Screens/Settings": { alone: true, size: [1100, 720], render: () => <View style={look.window}>{settings()}</View> },
   "Screens/A large title": {

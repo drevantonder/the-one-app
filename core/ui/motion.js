@@ -590,7 +590,7 @@ async function play(built, scene, name, motion, hz, folder) {
   }
   // Where what it opens should first be drawn: what `opensFrom` names, before the press.
   const origin = motion.opensFrom && { op: "query", ...selector(motion.opensFrom) }
-  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
+  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.once ? { count: { ...selector(motion.once), includeHidden: true } } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
   const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, ...(origin ? [origin] : []), replay])
   const answer = ran.answers.at(-1)
@@ -636,6 +636,9 @@ async function play(built, scene, name, motion, hz, folder) {
     if (!from || !first) failed.push(`${from ? "what it follows" : "what it opens from"} isn't there to compare`)
     else if (apart(first, from) > Math.max(1, next ? apart(next, first) : 0)) failed.push(`it's first drawn at ${rect(first)}, not where it opens from, ${rect(from)}`)
   }
+  // What `once` names is never in sight twice in a frame, read or not, as a large title and its bar's are cross-faded.
+  const twice = motion.once ? frames.findIndex((frame) => frame.count > 1) : -1
+  if (twice >= 0) failed.push(`${frames[twice].count} of ${JSON.stringify(motion.once)} drawn at once at frame ${twice + 1} (${frames[twice].at} ms)`)
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
   // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.

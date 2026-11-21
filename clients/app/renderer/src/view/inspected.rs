@@ -129,19 +129,13 @@ impl Screen {
             "query" => {
                 let mut found = inspect::query(&self.tree, &self.rects, request);
                 // An input's editing state as the host has it, which is ahead of what its app set.
-                let window = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: crate::geometry::Size { width: self.room.width, height: self.room.height } };
                 for node in found["nodes"].as_array_mut().into_iter().flatten() {
                     let Some(id) = node["node"].as_u64() else { continue };
                     if let Some(field) = self.editing.fields.get(&id) {
                         node["editing"] = json!(field.value());
                     }
-                    // What a person sees of it: how opaque it's drawn, and how much of it is in the window, not
-                    // clipped away.
-                    if let Some(placed) = self.placed(id) {
-                        let rect = self.rects.get(&id).map_or(0.0, |rect| rect.width * rect.height);
-                        let shown = placed.shown.intersect(&window);
-                        let seen = if rect > 0.0 { (shown.size.width.max(0.0) * shown.size.height.max(0.0) / rect).min(1.0) } else { 0.0 };
-                        node["opacity"] = json!((placed.opacity * 1000.0).round() / 1000.0);
+                    if let Some((opacity, seen)) = self.sight(id) {
+                        node["opacity"] = json!((opacity * 1000.0).round() / 1000.0);
                         node["seen"] = json!((seen * 1000.0).round() / 1000.0);
                     }
                     node["focused"] = json!(self.focus.focused == Some(id));
@@ -358,6 +352,17 @@ impl Screen {
         Ok(json!({"frames": frames, "time": clock.now(), "paused": true}))
     }
 
+    /// What a person sees of `id` as the last frame drew it: how opaque it's drawn, with what it's in, and how much of
+    /// its box is in the window, not clipped away. → nothing where it wasn't drawn.
+    fn sight(&self, id: Id) -> Option<(f32, f32)> {
+        let placed = self.placed(id)?;
+        let window = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: crate::geometry::Size { width: self.room.width, height: self.room.height } };
+        let rect = self.rects.get(&id).map_or(0.0, |rect| rect.width * rect.height);
+        let shown = placed.shown.intersect(&window);
+        let seen = if rect > 0.0 { (shown.size.width.max(0.0) * shown.size.height.max(0.0) / rect).min(1.0) } else { 0.0 };
+        Some((placed.opacity, seen))
+    }
+
     /// The inspector's `replay`: a press goes down where it says (a selector, or `x`, `y`), moves along `moves` (each
     /// `{dx, dy, ms}`, a stretch with neither holding still), sampled `input_hz` times a second (`hz` unless it says),
     /// and lifts unless `lift` is false, with the clock paused and stepped to each move and each frame of a display
@@ -365,7 +370,8 @@ impl Screen {
     /// past its end (2000 unless it says) or nothing moves. → each frame's cost, where `track` (a selector) was drawn
     /// (`x`, `y`), how far what scrolls under its start shows scrolled (`scroll`, its stretch past an end with it), and
     /// the frame's budget (`budget_ms`), and how many frames took longer to make (`over`, `inspect::over`). A frame where
-    /// what `track` selects isn't drawn says it's `gone`. With `frame_ms`, its
+    /// what `track` selects isn't drawn says it's `gone`; each says how many of what `count` selects a person sees
+    /// (`count`). With `frame_ms`, its
     /// frames are drawn only that often, as a device others load draws them, and pressed as that presses a window
     /// (each frame's `pressure`). `leaving` is how much that was taken out is still drawn going at its end.
     pub fn replay(&mut self, request: &Request, draw: &mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>) -> anyhow::Result<Value> {
@@ -376,13 +382,23 @@ impl Screen {
         let hz = request.f64("hz").unwrap_or(60.0).clamp(1.0, 480.0);
         let every = 1000.0 / request.f64("input_hz").unwrap_or(hz).clamp(1.0, 1000.0);
         let after = request.f64("after").unwrap_or(2000.0).max(0.0);
-        let track = match request.inputs.get("track") {
+        let selector = |input: &str| match request.inputs.get(input) {
             Some(Value::Object(selector)) => Some(Request { id: Value::Null, op: "query".into(), inputs: selector.clone() }),
             _ => None,
         };
+        let (track, count) = (selector("track"), selector("count"));
+        // How many of what `count` matches a person sees in each frame.
+        let mut counted = |screen: &mut Screen| {
+            let mut drawn = draw(screen)?;
+            if let Some(count) = &count {
+                let seen = inspect::select(&screen.tree, count).into_iter().filter(|id| screen.sight(*id).is_some_and(|(opacity, seen)| opacity > 0.0 && seen > 0.0)).count();
+                drawn["count"] = json!(seen);
+            }
+            Ok(drawn)
+        };
         let trace = super::finger::Trace { start, moves, lift };
         let paced = request.f64("frame_ms").map(|ms| ms.max(1.0));
-        let frames = self.play(&trace, every, hz, paced, after, track.as_ref(), Some(draw))?;
+        let frames = self.play(&trace, every, hz, paced, after, track.as_ref(), Some(&mut counted))?;
         let budget = 1000.0 / hz;
         let over = inspect::over(&frames, budget);
         // What's been taken out but is still drawn going, which `after` should have seen go.
