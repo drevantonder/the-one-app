@@ -20,7 +20,7 @@ defmodule ServerDebug do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.32.202"}
+  def requires, do: %{"core" => ">= 0.34.200"}
 
   @impl true
   def tools do
@@ -215,7 +215,7 @@ defmodule ServerDebug do
     case inputs["server"] do
       nil ->
         if not here?(version, at) do
-          for server <- servers -- [Server.key()], do: Call.forward_to(call, server)
+          Call.forward_to(call, servers -- [Server.key()])
           raise "None of the servers that run #{name} answered"
         end
 
