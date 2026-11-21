@@ -219,9 +219,14 @@ export function Search(props: Omit<InputProps, "inputMode" | "style">) {
 /** A `Checkbox`'s or a `Switch`'s props. */
 export type ChoiceProps = ToggleProps
 
-/// One thing that's so or not, pressed to change it: its mark, `mark(on, wrong)`, before or after its words.
+/// One thing that's so or not, pressed to change it: its mark, `mark(on, wrong)`, before or after its words. A switch
+/// with a label on a computer, where there's room, is a form's row as a `Field`'s: its label beside, and the switch at
+/// the controls' start with its hint under it, as macOS's two-column preferences draw a control.
 function Choice(props: ChoiceProps & { role: "checkbox" | "switch"; mark: (on: boolean, wrong: boolean) => JSX.Element }) {
   const toggle = createToggle(props, props.role)
+  const room = useContext(Room)
+  const beside = () => props.role === "switch" && !touch() && !!props.label && room() >= BESIDE
+  const halves = () => beside() && room() >= pixels(tokens.length.readable)
   const words = () => (
     <Show when={props.label}>
       <View style={look.words}>
@@ -232,15 +237,26 @@ function Choice(props: ChoiceProps & { role: "checkbox" | "switch"; mark: (on: b
       </View>
     </Show>
   )
-  return (
-    <View style={look.field}>
+  const control = () => (
+    <>
       <Pressable {...toggle.control()} style={[look.choice, props.disabled && look.off]}>
-        <Show when={props.role === "switch"}>{words()}</Show>
+        <Show when={props.role === "switch" && !beside()}>{words()}</Show>
         {props.mark(toggle.checked(), !!props.error)}
         <Show when={props.role === "checkbox"}>{words()}</Show>
       </Pressable>
+      <Show when={beside() && props.hint}>
+        <Text style={look.message}>{props.hint}</Text>
+      </Show>
       <Show when={props.error}>
         <Text style={[look.message, look.wrong]}>{props.error}</Text>
+      </Show>
+    </>
+  )
+  return (
+    <View style={[look.field, beside() && look.beside]}>
+      <Show when={beside()} fallback={control()}>
+        <Text style={[look.label, look.besideLabel, halves() && look.halfLabel, props.disabled && look.dim]}>{props.label}</Text>
+        <View style={[look.control, halves() && look.halfControl]}>{control()}</View>
       </Show>
     </View>
   )
@@ -266,7 +282,8 @@ export function Checkbox(props: ChoiceProps) {
 }
 
 /// `<Switch label="Reimbursable" value={on()} onValueChange={set} />`: something
-/// that's on or off, and takes effect at once, at the end of what it says. A checkbox in every other way.
+/// that's on or off, and takes effect at once, at the end of what it says, or in a computer's form where its label is beside it, at the
+/// controls' start. A checkbox in every other way.
 export function Switch(props: ChoiceProps) {
   return (
     <Choice

@@ -191,7 +191,10 @@ export default {
         <Switch label="Notifications" hint="On this device" value />
       </Screen>
     ),
-    checks: { "Its text field is wide enough for a name": [{ expect: { widest: { of: { role: "textbox" }, most: 520 } } }] },
+    checks: {
+      "Its text field is wide enough for a name": [{ expect: { widest: { of: { role: "textbox" }, most: 520 } } }],
+      "Its switch starts where its text field does, in the controls' column": [{ expect: { at: { of: { role: "textbox" }, x: 556 } } }, { expect: { at: { of: { role: "switch" }, x: 556 } } }],
+    },
   },
   // What people expect of a select, from the UI SDK's own tests (tests/specs/select.spec.ts at the commit select.ts
   // names).
