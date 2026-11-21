@@ -110,8 +110,8 @@ use crate::tree::{Id, Kind, Tree};
 /// The inspector protocol's version, which every request names.
 pub const VERSION: u64 = 1;
 
-/// The inputs that select a node.
-const SELECTOR: [&str; 5] = ["node", "role", "name", "text", "key"];
+/// The inputs that select a node: `within` is a selector of what it's inside, as Playwright's nested locators.
+const SELECTOR: [&str; 6] = ["node", "role", "name", "text", "key", "within"];
 
 /// A rectangle, in CSS pixels from the window's top left.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -269,6 +269,11 @@ pub fn select(tree: &Tree, request: &Request) -> Vec<Id> {
     let described = semantics(tree, request);
     let want = |name: &str| request.wants(name);
     let text = want("text").map(str::to_lowercase);
+    let within = match request.inputs.get("within") {
+        Some(Value::Object(selector)) => Some(select(tree, &Request { id: Value::Null, op: "query".into(), inputs: selector.clone() })),
+        _ => None,
+    };
+    let inside = |id: Id| within.as_ref().is_none_or(|outer| std::iter::successors(tree.parent(id), |at| tree.parent(*at)).any(|at| outer.contains(&at)));
     order(tree)
         .into_iter()
         .filter(|id| {
@@ -280,6 +285,7 @@ pub fn select(tree: &Tree, request: &Request) -> Vec<Id> {
                 && want("name").is_none_or(|name| said("name") == Some(name))
                 && text.as_ref().is_none_or(|text| said("name").is_some_and(|name| name.to_lowercase().contains(text)))
                 && want("key").is_none_or(|key| node.str("id") == Some(key))
+                && inside(*id)
         })
         .collect()
 }
