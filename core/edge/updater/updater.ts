@@ -24,7 +24,7 @@
 //     (none) ──the servers are up to date on a build the edge is older than──► deploying
 //     deploying ──the edge runs the build──► (none)
 //     deploying ──the app can't, as it has no token, or the Vault doesn't open there──► needs_setup, said once
-//     deploying ──the deploy went back, the server went, or 10 min passed──► failed, said once
+//     deploying ──the deploy went back, or 10 min passed──► failed, said once
 //     any ──a newer build──► (none), and servers first
 //
 // A server that's asleep or gone as an update begins, or goes while it's under way, is skipped, and caught up under
@@ -190,7 +190,7 @@ export class NetworkUpdater extends DurableObject<Env> {
     }
     // A server coming or going, or saying what it is, moves it on as anything does, and then the edge's.
     this.step(state, presence, reported);
-    this.updateEdge(state, presence, reported);
+    for (const key of this.updateEdge(state, presence, reported)) await this.ctx.storage.put(`reported ${key}`, reported[key]);
 
     await this.ctx.storage.put("state", state);
     const alarm = alarmAt(state);
@@ -338,31 +338,39 @@ export class NetworkUpdater extends DurableObject<Env> {
   /**
    * Moves the edge's own update on (`edge_update`), which never holds the servers': only once they're all up to date
    * on a build the edge is older than, one that's ready, on that build, and has an app that deploys the edge
-   * (`deploys_edge`) deploys it, once for that build. What it says of how it went is kept, and said once.
+   * (`deploys_edge`) deploys it, once for that build. What it says of how it went is kept, and said once. Gives the
+   * servers whose report it changed.
    */
-  updateEdge(state: State, presence: Record<string, Presence | null>, reported: Record<string, Reported>) {
+  updateEdge(state: State, presence: Record<string, Presence | null>, reported: Record<string, Reported>): string[] {
     const build = state.latest?.["server-code"] ?? state.build;
     if (!build || !state.edge || !newer(build, state.edge)) {
       if (state.edge_update?.status === "deploying") state.timings.edge = Date.now() - (state.published ?? Date.now());
       state.edge_update = null;
-      return;
+      return [];
     }
     // A newer build starts it afresh, once the servers are on it.
     if (state.edge_update && state.edge_update.build !== build) state.edge_update = null;
     const edge = state.edge_update;
     if (edge?.status === "deploying") {
-      const said = reported[edge.server];
-      const went = said?.edge_went_back?.build === build ? said.edge_went_back : null;
-      if (went) Object.assign(edge, { status: went.setup ? "needs_setup" : "failed", why: went.why, until: undefined });
-      else if (!presence[edge.server]?.server_ready) Object.assign(edge, { status: "failed", why: `${said?.name ?? "its server"} went before it deployed it`, until: undefined });
-      if (edge.status !== "deploying") edgeSaid(edge);
-      return;
+      // Said by whichever server ran the app that deploys it, which runs where the network's apps do, not always on
+      // the server told; one that goes, or never says, is failed by the deadline (`alarm`).
+      const went = Object.values(reported).find((said) => said.edge_went_back?.build === build)?.edge_went_back;
+      if (went) {
+        Object.assign(edge, { status: went.setup ? "needs_setup" : "failed", why: went.why, until: undefined });
+        edgeSaid(edge);
+      }
+      return [];
     }
-    if (edge || state.network_update_status !== "up_to_date") return;
+    if (edge || state.network_update_status !== "up_to_date") return [];
     const [server] = Object.keys(reported)
       .filter((key) => presence[key]?.server_ready && reported[key].deploys_edge && reported[key].version === build)
       .sort();
-    if (server) state.edge_update = { build, status: "deploying", server, until: Date.now() + DEPLOYING_EDGE };
+    if (!server) return [];
+    state.edge_update = { build, status: "deploying", server, until: Date.now() + DEPLOYING_EDGE };
+    // What an earlier try said of this build is forgotten, so this one's is heard: the keys changed, to keep.
+    const earlier = Object.keys(reported).filter((key) => reported[key].edge_went_back?.build === build);
+    for (const key of earlier) reported[key] = { ...reported[key], edge_went_back: null };
+    return earlier;
   }
 
   /** Takes `server` out of the update, saying why, as behind: the rest go on without it, and it tries again (`RETRIES`). */
