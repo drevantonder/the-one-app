@@ -1,4 +1,4 @@
-import { Button, Empty, History, List, ListStyle, Menu, Row, type Scenes, Screen, Section, Split, styles, Text, View } from "ui"
+import { Button, Empty, History, List, ListStyle, Menu, Row, type Scenes, Screen, Section, SignIn, Split, styles, Text, View } from "ui"
 
 const look = styles({ window: { height: 720 }, narrow: { height: 475 }, phone: { height: 844 } })
 
@@ -112,6 +112,26 @@ export default {
         <Screen heading="Notes" back largeTitle>
           <Text role="heading" aria-level={2}>Notes</Text>
         </Screen>
+      </View>
+    ),
+  },
+  // The sign-in page on a phone, saying a problem longer than a line: its words wrap inside the screen, as the network's
+  // Unlock with Passkey page says a passkey can't unlock (21 Nov, where it ran off both sides on one line).
+  "Screens/Sign-in with a long problem": {
+    alone: true,
+    layout: "fullscreen",
+    touch: true,
+    safeArea: [47, 0, 34, 0],
+    render: () => (
+      <View style={look.phone}>
+        <SignIn
+          heading="Unlock with Passkey"
+          problem="This passkey can't unlock your key on a new device, so approve it from a device that holds your key, or with your recovery key."
+          button="Create a Passkey"
+          onSignIn={() => {}}
+          stop="Try Another Passkey"
+          onStop={() => {}}
+        />
       </View>
     ),
   },

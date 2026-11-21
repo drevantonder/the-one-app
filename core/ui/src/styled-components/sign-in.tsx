@@ -26,7 +26,9 @@ const look = styles({
   heading: { font: tokens.type.largeTitle },
   grey: { color: tokens.colour.secondaryLabel },
   shown: { font: tokens.type.largeTitle, fontFamily: tokens.font.mono },
-  said: { flexDirection: "row", gap: tokens.grid[2.5], alignItems: "flex-start", color: tokens.colour.orange, textAlign: "start" },
+  // As wide as its part, so its words wrap there: Taffy (0.15.1) sizes a row of one line by everything in it, where a
+  // browser fits it to the room it has, so a centred one ran past both sides of a phone (21 Nov).
+  said: { alignSelf: "stretch", flexDirection: "row", gap: tokens.grid[2.5], alignItems: "flex-start", color: tokens.colour.orange, textAlign: "start" },
   problem: { color: tokens.colour.red },
   symbol: { paddingTop: tokens.grid[0.5] },
   words: { flexShrink: 1 },

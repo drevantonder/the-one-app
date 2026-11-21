@@ -379,6 +379,7 @@ function native(built, scene, folder, used) {
   const queried = said.at(ssh ? -DRAWN.length - 1 : -1)?.result?.nodes ?? []
   const unsafe = scene.safeArea && underTheDevice(queried, scene.size[1], insets(scene.safeArea))
   const squeezed = squeezedWords(queried)
+  const overflowing = overflowingWords(queried, scene.size[0])
   // The words in sight, as the last frame drew them: each text and name of the semantic tree whose node, or the nearest
   // above it the inspector knows (a text in a line, a page in a frame), has some of its box in the window and isn't
   // see-through.
@@ -399,7 +400,7 @@ function native(built, scene, folder, used) {
   const every = (list) => list.flatMap((node) => [...(node.name ? [node.name] : []), ...every(node.children ?? [])])
   const all = [...every(Array.isArray(nodes) ? nodes : [nodes]), ...queried.filter((node) => node.kind === "raw-text" && node.name).map((node) => node.name)]
   writeFileSync(join(folder, "native-text.txt"), words.join("\n") + "\n")
-  return { tree, words, all, measured: measured && JSON.parse(measured[1]), unsafe, squeezed, answers: said, at, asked, requests }
+  return { tree, words, all, measured: measured && JSON.parse(measured[1]), unsafe, squeezed, overflowing, answers: said, at, asked, requests }
 }
 
 const insets = ([top, right, bottom, left]) => ({ top, right, bottom, left })
@@ -450,6 +451,23 @@ function squeezedWords(nodes) {
     const control = above.slice(0, above.indexOf(row)).find((up) => up.actions)
     if (control?.rect && control.rect.width < 0.5 * row.rect.width) return []
     return [`"${node.name}" is ${Math.round(node.rect.width)} pt wide in a row ${Math.round(row.rect.width)} pt wide, ${node.cut ? "cut short" : `wrapped to ${node.lines.length} lines`}`]
+  })
+}
+
+/// Words drawn past the side of what they're in, or of the window, where nothing scrolls them there: a line that didn't
+/// wrap in the width it was given. → what's wrong, a line each.
+function overflowingWords(nodes, width) {
+  const parent = new Map(nodes.flatMap((node) => (node.children ?? []).map((child) => [child, node])))
+  return nodes.flatMap((node) => {
+    if (node.kind !== "text" || !node.rect || !(node.opacity > 0) || !(node.seen > 0) || node.rect.width <= 0) return []
+    const above = []
+    for (let up = parent.get(node.node); up; up = parent.get(up.node)) above.push(up)
+    if (above.some((up) => up.kind === "scroll" && up.rect && up.rect.width < node.rect.width)) return []
+    const { x, width: wide } = node.rect
+    if (x < -0.5 || x + wide > width + 0.5) return [`"${node.name}" is drawn from x ${Math.round(x)} to ${Math.round(x + wide)}, past the window's ${width}`]
+    const box = above.find((up) => up.rect)?.rect
+    if (box && (x < box.x - 0.5 || x + wide > box.x + box.width + 0.5)) return [`"${node.name}" is drawn from x ${Math.round(x)} to ${Math.round(x + wide)}, past what it's in, from ${Math.round(box.x)} to ${Math.round(box.x + box.width)}`]
+    return []
   })
 }
 
@@ -567,6 +585,10 @@ for (const target of targets) {
     }
     for (const line of drawn.squeezed ?? []) {
       said.push(`  a row's words are squeezed: ${line}`)
+      process.exitCode = 1
+    }
+    for (const line of drawn.overflowing ?? []) {
+      said.push(`  words run past their side: ${line}`)
       process.exitCode = 1
     }
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
