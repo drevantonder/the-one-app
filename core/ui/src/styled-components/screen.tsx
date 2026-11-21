@@ -16,7 +16,7 @@ import { pixels, tokens } from "../tokens.ts"
 
 const look = styles({
   screen: { position: "relative", flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0 },
-  // The bar keeps clear of what the device keeps for itself at the top.
+  // The bar keeps clear of what the device keeps for itself at the top, on a computer as under a finger.
   bar: { paddingTop: tokens.length.safeTop, paddingStart: tokens.length.safeLeft, paddingEnd: tokens.length.safeRight, userSelect: "none" },
   // Under a finger, what's in it scrolls under the bar, as UINavigationBar's and Android's top app bar's does: clear of
   // it where it's scrolled to its top (`clear`), and the bar takes its material and a hairline as what's in it goes
@@ -38,7 +38,6 @@ const look = styles({
   // On a computer the bar is the window's title row, its unified toolbar, as macOS's System Settings and Raycast have
   // it: at the window's top, after the window's controls and title where it's at the window's start, and before
   // the controls at its end where it's at its end.
-  titleRow: { paddingTop: 0 },
   atStart: { paddingStart: tokens.length.titleBarStart },
   atEnd: { paddingEnd: tokens.length.titleBarEnd },
   // The arrow, not the button's edge, lines up with what's under it.
@@ -215,7 +214,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   return (
     <View style={look.screen}>
       <Show when={barred()}>
-      <View role="banner" style={[look.bar, computer ? look.titleRow : look.floating]} onLayout={computer ? undefined : (event) => setBarHeight(event.currentTarget.getBoundingClientRect().height)}>
+      <View role="banner" style={[look.bar, !computer && look.floating]} onLayout={computer ? undefined : (event) => setBarHeight(event.currentTarget.getBoundingClientRect().height)}>
         <Show when={!computer}>
           <View style={[look.backdrop, look.faded(under())]} />
         </Show>
