@@ -7,7 +7,7 @@ import { build, pageFolder } from "./pages.js"
 import { device, devices, hostScore, judge } from "./tiers.js"
 import { presentThere, run, scenesOf } from "./harness.js"
 import { finger, ios, moves, selector, single, travel } from "./gesture.js"
-import { apart, contactSheet, curve, differs, filmstrip, rect, strayInk } from "./output.js"
+import { apart, contactSheet, curve, cut, differs, filmstrip, rect, strayInk } from "./output.js"
 
 
 /// How the display's link ticks at `hz`, as a real one: a Mac's starts three refreshes after it's asked for frames,
@@ -82,6 +82,9 @@ async function play(built, scene, name, motion, hz, folder) {
   // What fails it: anything it took out still drawn once it's settled, and glass it should keep blurred drawn plain.
   const failed = []
   if (leaving) failed.push(`${leaving} taken out still drawn going once it settled`)
+  // With less motion what moves fades instead, as iOS's Reduce Motion has it: no frame cuts more of the window than a fade does.
+  const cutting = motion.reducedMotion && cut(frames)
+  if (cutting) failed.push(cutting)
   // A refresh that drew nothing new (a busy device's) shows the frame drawn before it.
   let blurs
   const plain = motion.blurred ? frames.findIndex((frame, n) => ((blurs = frame.drawn === false ? blurs : frame.work?.backdrops), n > 0 && !blurs)) : -1

@@ -123,6 +123,7 @@ export default {
   },
   "Motion/A page pushed, under a finger": {
     touch: true,
+    motions: { "Push a page with less motion": { from: { role: "button", name: "Alex's Laptop" }, gesture: { moves: [{ ms: 90 }] }, reducedMotion: true, follow: { role: "heading", name: "Alex's Laptop" } } },
     render: () => <Pushed />,
     checks: {
       "In from the left edge, it goes back a page": ["Alex's Laptop", { wait: 400 }, { expect: { text: "Its page." } }, { trace: "traces/finger-from-left-edge.json" }, { expect: { gone: { text: "Its page." } } }],

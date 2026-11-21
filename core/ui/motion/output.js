@@ -6,6 +6,31 @@ import pixelmatch from "pixelmatch"
 import { out } from "./options.js"
 import { finger } from "./gesture.js"
 
+/// How much of the window a frame may change from the one before it, with less motion, unless a fade covers it: a pixel
+/// that changes by more than `CUT` levels (of 255, in any channel) in one frame is cut, not faded (a 200 ms fade, eased
+/// out, moves a pixel about 40% of the way in its first frame at 60 Hz: 100 levels of black on white), and more than
+/// `SHARE` of the window doing it is a hard cut, as iOS's Reduce Motion has none.
+const CUT = 128
+const SHARE = 0.02
+
+/// The frame of `frames` that cuts the most, if any cuts more than `SHARE` of the window: its number, its time and its share.
+export function cut(frames) {
+  let worst = { share: SHARE }
+  let before
+  frames.forEach((frame, n) => {
+    if (!frame.png) return
+    const now = PNG.sync.read(Buffer.from(frame.png, "base64"))
+    if (before?.width === now.width && before.height === now.height) {
+      let changed = 0
+      for (let at = 0; at < now.data.length; at += 4) if (Math.max(...[0, 1, 2].map((channel) => Math.abs(now.data[at + channel] - before.data[at + channel]))) > CUT) changed++
+      const share = changed / (now.width * now.height)
+      if (share > worst.share) worst = { share, n, at: frame.at }
+    }
+    before = now
+  })
+  return worst.n === undefined ? undefined : `${(worst.share * 100).toFixed(1)}% of the window changes by more than ${CUT} levels at frame ${worst.n + 1} (${worst.at} ms), a cut where less motion fades`
+}
+
 /// The curve: what moved, and the finger, over time, each frame over its budget red.
 export function curve(frames, way, values, stretches, budget, before, apple) {
   const [width, height, pad] = [640, 320, 40]

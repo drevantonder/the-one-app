@@ -1122,6 +1122,24 @@
           ]
         }
       },
+      "Dragged to the App Library with less motion": {
+        "from": {
+          "x": 700,
+          "y": 400
+        },
+        "follow": {
+          "role": "button",
+          "name": "Notes"
+        },
+        "gesture": {
+          "swipe": [
+            -500,
+            0
+          ],
+          "speed": 1200
+        },
+        "reducedMotion": true
+      },
       "Dragged a little and let go": {
         "from": {
           "x": 700,

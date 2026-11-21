@@ -218,6 +218,7 @@ export default {
   },
   "Over the page/A sheet opened": {
     render: () => <Adding />,
+    motions: { "Open it with less motion": { from: { role: "button", name: "Add Note" }, gesture: { moves: [{ ms: 90 }] }, reducedMotion: true, follow: { role: "dialog", name: "New Note" } } },
     checks: {
       "It opens over the page": ["Add Note", { expect: { shown: { role: "dialog" } } }],
       "Escape closes it": ["Add Note", { wait: 400 }, { key: "Escape" }, { expect: { gone: { role: "dialog" } } }],
