@@ -105,7 +105,7 @@ impl Renderer {
             .collect();
         // The tiles of the frame's shadows that haven't one yet, each its box alone, blurred, in a frame of its own.
         let mut planned: Vec<(TileKey, (u32, u32), (u64, u64), (u64, u64))> = Vec::new();
-        if self.pipelines.tiles.get().is_some() {
+        if self.pipelines.ready_tiles().is_some() {
             for batch in &batches {
                 let PrimitiveBatch::Shadows(shadows) = batch else { continue };
                 for shadow in shadows.iter() {

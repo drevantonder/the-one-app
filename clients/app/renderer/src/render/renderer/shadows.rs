@@ -33,7 +33,7 @@ pub(super) fn tiled(shadow: &Shadow) -> Option<(TileKey, [f32; 2])> {
 impl Renderer {
     /// Draws a batch of shadows, each from its tile where it has one, else worked out where it's drawn, in runs.
     pub(super) fn draw_shadows(&self, pass: &mut wgpu::RenderPass<'_>, shadows: &[Shadow], instances: &wgpu::BindGroup, offset: u32) {
-        let tiles = self.pipelines.tiles.get();
+        let tiles = self.pipelines.ready_tiles();
         pass.set_bind_group(1, instances, &[offset]);
         let mut at = 0;
         while at < shadows.len() {

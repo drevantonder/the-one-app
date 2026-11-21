@@ -17,8 +17,8 @@ pub(crate) struct Pipelines {
     /// window's first frame doesn't wait for them (`backdrops`).
     pub(super) backdrops: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
     /// A shadow's tile's: what draws one (its blurred box, alone, into a texture of one channel), and what draws a
-    /// shadow from its tile (`tiles`). Compiled after the rest, as the backdrops' are; till then shadows are worked
-    /// out where they're drawn.
+    /// shadow from its tile. Compiled after the rest (`ready_tiles`); till then shadows are worked out where they're
+    /// drawn.
     pub(super) tiles: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
 }
 
@@ -228,6 +228,17 @@ impl Pipelines {
         })
     }
 
+    /// A shadow's tile's pipelines once they're compiled, which a frame doesn't wait for where they're compiled on a
+    /// thread of their own; else (the web, and the fake platform, whose frames are on a clock of its own that a
+    /// thread's real time can't be ordered against, so a frame is drawn the same on every run) compiled as they're
+    /// first needed.
+    pub(super) fn ready_tiles(&self) -> Option<&(wgpu::RenderPipeline, wgpu::RenderPipeline)> {
+        #[cfg(any(target_arch = "wasm32", feature = "fake"))]
+        return Some(self.tiles());
+        #[cfg(not(any(target_arch = "wasm32", feature = "fake")))]
+        self.tiles.get()
+    }
+
     /// A backdrop's pipeline and its blur's, compiled now unless they are, or waited for where they're being.
     pub(super) fn backdrops(&self) -> &(wgpu::RenderPipeline, wgpu::RenderPipeline) {
         self.backdrops.get_or_init(|| {
@@ -244,8 +255,9 @@ impl Pipelines {
         Self::slot(compiled, format, premultiplied)
             .get_or_init(|| {
                 let pipelines = Arc::new(Pipelines::new(device, queue, format, premultiplied));
-                // The rest compiled in the background where there are threads; on the web, as each is first drawn.
-                #[cfg(not(target_arch = "wasm32"))]
+                // The rest compiled in the background where there are threads; on the web and the fake platform, as
+                // each is first drawn (`ready_tiles`).
+                #[cfg(not(any(target_arch = "wasm32", feature = "fake")))]
                 {
                     let compiling = pipelines.clone();
                     std::thread::spawn(move || {
