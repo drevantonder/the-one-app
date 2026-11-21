@@ -19,6 +19,8 @@
 #            whose launcher answers, and one window of each app, at the end of each.
 #   updated  the Home Screen's page updated while it's open, a few times in a row, as a release deploys it: each time it
 #            opens again in its place, and has a window a moment later.
+#   twice    the Home Screen's page updated twice, the second landing as its window for the first opens again, its
+#            page still starting: one Home Screen window at every moment, and it ends on the version a fresh start loads.
 #   blank    an app's window opened while the server holds every request, so its page can't be read: still blank
 #            5 s on, it says so, and Telemetry hears it once the server answers, with the step its opening reached.
 #   loading  an app's window opened while the server holds every request, so its page can't be read: the app's
@@ -33,19 +35,19 @@
 set -euo pipefail
 shopt -s extglob
 root=$(cd "$(dirname "$0")/.." && pwd)
-usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|updated|blank|loading|open]…"
+usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart|updated|twice|blank|loading|open]…"
 folder= seed=1 checks=()
 while (($#)); do
   case $1 in
     --seed) seed=${2:?$usage} && shift ;;
-    start | reopen | stale | cached | restart | updated | blank | loading | open) checks+=("$1") ;;
+    start | reopen | stale | cached | restart | updated | twice | blank | loading | open) checks+=("$1") ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
   esac
   shift
 done
 [[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
-((${#checks[@]})) || checks=(start reopen stale cached restart updated blank loading open)
+((${#checks[@]})) || checks=(start reopen stale cached restart updated twice blank loading open)
 mkdir -p "$folder/app"
 folder=$(cd "$folder" && pwd)
 RANDOM=$seed
@@ -153,7 +155,7 @@ stale() {
   for name in home-screen settings; do
     rm -rf "$folder/$name" && cp -r "$root/apps/$name" "$folder/$name"
     echo "// a version of its own: $seed $(date +%s%N)" >>"$(find "$folder/$name/client" -maxdepth 1 -name '*.tsx' | head -1)"
-    ONE_SUBJECT=network "$one" deploy --name "$name" --files-from "$folder/$name" >/dev/null
+    ONE_SUBJECT=network "$one" deploy --name "$name" --files-from "$folder/$name" >/dev/null || { echo "        $name: its deploy failed: an app deploys only from a commit on origin/main" && return 1; }
   done
   ONE_REOPEN='[["settings/client/index.html",null]]' setsid "$folder/app/one" >>"$log" 2>&1 &
   app=$!
@@ -168,7 +170,7 @@ stale() {
     [[ -z $twice ]] || break
     sleep 0.2
   done
-  wait $deployed
+  wait $deployed || { echo "        home-screen: its deploy failed: an app deploys only from a commit on origin/main" && return 1; }
   [[ -z $twice ]] || { echo "        another Home Screen ${delay} ms after the start: two windows of $twice: $(windows | tr '\n' ' ')" && return 1; }
   one_each
 }
@@ -268,11 +270,50 @@ updated() {
   rm -rf "$folder/home-screen" && cp -r "$root/apps/home-screen" "$folder/home-screen"
   for round in 1 2 3; do
     echo "// a version of its own: $seed $round $(date +%s%N)" >>"$(find "$folder/home-screen/client" -maxdepth 1 -name '*.tsx' | head -1)"
-    ONE_SUBJECT=network "$one" deploy --name home-screen --files-from "$folder/home-screen" >/dev/null
+    ONE_SUBJECT=network "$one" deploy --name home-screen --files-from "$folder/home-screen" >/dev/null || { echo "        update $round: its deploy failed: an app deploys only from a commit on origin/main" && return 1; }
     sleep 3
     [[ -n $(open_window home-screen) ]] || { echo "        update $round: no Home Screen window 3 s after its page was updated: $(windows | tr '\n' ' ')" && return 1; }
     one_each || { echo "        after update $round" && return 1; }
   done
+}
+
+# The Home Screen's page the launcher shows, by its module's file, as its JS last started (`app.log`).
+home_module() { grep -oP 'oneapp://home-screen\.localhost/home-screen/client/assets/\K[^ ]+(?=.s JS started)' "$log" | tail -1; }
+
+# The Home Screen's page updated twice in a row, the second's news landing as the launcher's window for the first opens
+# again, while its page is still starting: the first's takes seconds, as a slow device's may. One Home Screen window at
+# every moment (two were seen once, in `stale`), and once they're done, the Home Screen shows the version a fresh start
+# loads, where news a window's page hears while it starts could be lost, and the Home Screen stay on the first until
+# the next update. News between a window's page being read and its being given it (`attach`), a few ms as the client
+# keeps a version's files before it says so, isn't reached: holding them holds the second deploy too.
+twice() {
+  local copy twice shown fresh deploy until
+  [[ -n $app ]] || start_app || return 1
+  for copy in slow next; do rm -rf "$folder/home-screen-$copy" && cp -r "$root/apps/home-screen" "$folder/home-screen-$copy"; done
+  # Code, not a comment, so each is a bundle of its own, which its module's file tells apart; the first's busy as it
+  # starts.
+  echo "Object.assign(globalThis, { harness: \"$seed slow $(date +%s%N)\" }); for (let i = 0; i < 12e8; i++);" >>"$folder/home-screen-slow/client/home.tsx"
+  echo "Object.assign(globalThis, { harness: \"$seed next $(date +%s%N)\" })" >>"$folder/home-screen-next/client/home.tsx"
+  ONE_SUBJECT=network "$one" deploy --name home-screen --files-from "$folder/home-screen-slow" >/dev/null || { echo "        its deploy failed: an app deploys only from a commit on origin/main" && return 1; }
+  ONE_SUBJECT=network "$one" deploy --name home-screen --files-from "$folder/home-screen-next" >/dev/null &
+  deploy=$!
+  # Every moment while the second deploys, and 15 s after, as the launcher opens again on each.
+  twice= until=
+  while [[ -z $until ]] || ((SECONDS < until)); do
+    [[ -n $until ]] || kill -0 "$deploy" 2>/dev/null || until=$((SECONDS + 15))
+    twice=$(windows | awk '{ print $2 }' | sort | uniq -d | tr '\n' ' ')
+    [[ -z $twice ]] || break
+    sleep 0.2
+  done
+  wait "$deploy" || { echo "        its deploy failed: an app deploys only from a commit on origin/main" && return 1; }
+  [[ -z $twice ]] || { echo "        two windows of $twice: $(windows | tr '\n' ' ')" && return 1; }
+  one_each || return 1
+  shown=$(home_module)
+  start_app || return 1
+  sleep 10
+  fresh=$(home_module)
+  echo "        the Home Screen after the updates: $shown; after a fresh start: $fresh"
+  [[ $shown == "$fresh" ]] || { echo "        the Home Screen stayed on a version before the last update" && return 1; }
 }
 
 # An app's window opened while the server holds every request (stopped, as one is that's restarting), its page one
@@ -381,6 +422,7 @@ for name in "${checks[@]}"; do
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;
     updated) check "updated: the Home Screen updated while it's open opens again in its place, again and again" updated ;;
+    twice) check "twice: the Home Screen updated again as it opens on an update ends on the last, with one window at every moment" twice ;;
     blank) check "blank: a window still blank 5 s after it opened says so, and Telemetry hears it" blanked ;;
     loading) check "loading: a window whose page can't be read is the app's background, then its loading state" loading ;;
     open) check "open: on the Surface's costs, each window opened again is made before its pipelines could compile" opened ;;
