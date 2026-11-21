@@ -4,10 +4,9 @@ use super::*;
 impl Renderer {
     pub(super) fn draw_frame(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
         self.drew = web_time::Instant::now();
-        self.atlas.before_frame();
         self.draws.set(0);
         self.passes.set(0);
-        self.work.set(Work { uploaded: self.atlas.uploaded(), ..Work::default() });
+        self.work.set(Work::default());
         if let Some(stamps) = &mut self.stamps {
             stamps.begin(&self.device);
         }
@@ -248,7 +247,10 @@ impl Renderer {
         true
     }
 
-    /// Writes the frame's data into its buffer, grown to hold it.
+    /// Writes the frame's data into its buffer, grown to hold it, and what's been added to the atlas into its textures,
+    /// in the frame's own commands: `Queue::write_buffer` and `Queue::write_texture` copy in commands of the queue's
+    /// own, a command encoder more each frame they're used, which wgpu-core keeps while the GPU's on it, and a
+    /// Surface's Intel Direct3D 12 driver took twice the CPU to draw a frame with (p95 10 ms, 6.7 with one).
     fn write_data(&mut self, encoder: &mut wgpu::CommandEncoder) {
         let needed = (self.data.len() as u64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
         self.data.resize(needed as usize, 0);
@@ -262,6 +264,9 @@ impl Renderer {
         }
         let size = wgpu::BufferSize::new(needed).expect("a frame has its globals");
         self.belt.write_buffer(encoder, self.buffer.as_ref().expect("made above"), 0, size).copy_from_slice(&self.data);
+        let mut work = self.work.get();
+        work.uploaded = self.atlas.upload(encoder, &mut self.belt);
+        self.work.set(work);
     }
 
     /// Draws the batches `run` names into `view` in one pass; a backdrop as one of its batch's, with what's behind it

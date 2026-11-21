@@ -82,10 +82,7 @@ pub struct Renderer {
     /// The frame's globals, its batches' instances and its blurs' parameters, written once a frame.
     data: Vec<u8>,
     buffer: Option<wgpu::Buffer>,
-    /// What the frame's data is copied into its buffer from, in the frame's own commands. `Queue::write_buffer` copies
-    /// it in commands of the queue's own, a second command encoder each frame; wgpu keeps four idle (our wgpu's
-    /// change), so a few frames in flight make and free encoders as they go, and Intel's Direct3D 12 driver waits for
-    /// the GPU to make one: a Surface took twice the CPU to draw a frame (p95 10 ms, 6.7 with one).
+    /// What the frame's data and the atlas's uploads are copied from, in the frame's own commands (`write_data`).
     belt: wgpu::util::StagingBelt,
     atlas: Arc<Atlas>,
     sampler: wgpu::Sampler,

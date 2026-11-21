@@ -1,7 +1,7 @@
 // Adapted from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_wgpu/src/wgpu_atlas.rs at commit
 // 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, and the keys and tiles of crates/gpui/src/platform.rs at commit
 // 69e2130295c2649963eb639fc70b4f2ee8ea1624), and cut down for the native host: the glyph and image atlas, its tiles
-// uploaded by the queue as the next frame starts.
+// uploaded in the commands of the next frame that draws.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
@@ -23,7 +23,6 @@ struct PendingUpload {
 
 struct AtlasState {
     device: wgpu::Device,
-    queue: wgpu::Queue,
     max_texture_size: i32,
     storage: AtlasStorage,
     tiles_by_key: HashMap<AtlasKey, AtlasTile>,
@@ -34,34 +33,56 @@ struct AtlasState {
     generation: u64,
     /// How many textures it has made, whose bind groups a renderer keeps (`Renderer::atlas_group`).
     made: u64,
-    /// How many bytes it's written to its textures since it was last asked (`Atlas::uploaded`).
-    uploaded: u64,
 }
 
 impl Atlas {
     pub fn new(context: &Context) -> Self {
         Atlas(Mutex::new(AtlasState {
             device: context.device.clone(),
-            queue: context.queue.clone(),
             max_texture_size: context.device.limits().max_texture_dimension_2d as i32,
             storage: AtlasStorage::default(),
             tiles_by_key: Default::default(),
             uploads: Vec::new(),
             generation: 0,
             made: 0,
-            uploaded: 0,
         }))
     }
 
-    /// Writes what's been added since the last frame into its textures, before the frame that draws it.
-    pub fn before_frame(&self) {
-        self.0.lock().flush();
-    }
-
-    /// How many bytes it's written to its textures since this was last asked: the glyphs and pictures a frame
-    /// uploaded.
-    pub(crate) fn uploaded(&self) -> u64 {
-        std::mem::take(&mut self.0.lock().uploaded)
+    /// Writes what's been added since the last frame into its textures, in `encoder`'s commands, from `belt`, before
+    /// the frame that draws it: `Queue::write_texture` would copy it in commands of the queue's own, a command encoder
+    /// more each frame it's used (`Renderer::write_data`). → how many bytes: the glyphs and pictures the frame uploads.
+    pub(crate) fn upload(&self, encoder: &mut wgpu::CommandEncoder, belt: &mut wgpu::util::StagingBelt) -> u64 {
+        let mut state = self.0.lock();
+        let mut uploaded = 0;
+        for upload in std::mem::take(&mut state.uploads) {
+            let texture = &state.storage[upload.id];
+            let (width, height) = (upload.bounds.size.width.0 as u32, upload.bounds.size.height.0 as u32);
+            let row = width * texture.bytes_per_pixel;
+            // A copy's rows are a multiple of 256 bytes apart, and it starts at a multiple of 512 (Direct3D 12's
+            // placement alignment).
+            let padded = row.next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+            let (Some(size), Some(alignment)) = (wgpu::BufferSize::new(u64::from(padded) * u64::from(height)), wgpu::BufferSize::new(512)) else { continue };
+            let slice = belt.allocate(size, alignment);
+            {
+                let mut staged = slice.get_mapped_range_mut().expect("a staging belt's slice is mapped till it's finished");
+                for (at, from) in upload.data.chunks(row as usize).enumerate() {
+                    let start = at * padded as usize;
+                    staged.slice(start..start + from.len()).copy_from_slice(from);
+                }
+            }
+            encoder.copy_buffer_to_texture(
+                wgpu::TexelCopyBufferInfo { buffer: slice.buffer(), layout: wgpu::TexelCopyBufferLayout { offset: slice.offset(), bytes_per_row: Some(padded), rows_per_image: None } },
+                wgpu::TexelCopyTextureInfo {
+                    texture: &texture.texture,
+                    mip_level: 0,
+                    origin: wgpu::Origin3d { x: upload.bounds.origin.x.0 as u32, y: upload.bounds.origin.y.0 as u32, z: 0 },
+                    aspect: wgpu::TextureAspect::All,
+                },
+                wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            );
+            uploaded += upload.data.len() as u64;
+        }
+        uploaded
     }
 
     /// How many textures it has made (`AtlasState::made`).
@@ -169,32 +190,6 @@ impl AtlasState {
             bytes_per_pixel: format.block_copy_size(None).unwrap_or(4),
         });
         list.last_mut().expect("just pushed")
-    }
-
-    fn flush(&mut self) {
-        for upload in self.uploads.drain(..) {
-            self.uploaded += upload.data.len() as u64;
-            let texture = &self.storage[upload.id];
-            self.queue.write_texture(
-                wgpu::TexelCopyTextureInfo {
-                    texture: &texture.texture,
-                    mip_level: 0,
-                    origin: wgpu::Origin3d { x: upload.bounds.origin.x.0 as u32, y: upload.bounds.origin.y.0 as u32, z: 0 },
-                    aspect: wgpu::TextureAspect::All,
-                },
-                &upload.data,
-                wgpu::TexelCopyBufferLayout {
-                    offset: 0,
-                    bytes_per_row: Some(upload.bounds.size.width.0 as u32 * texture.bytes_per_pixel),
-                    rows_per_image: None,
-                },
-                wgpu::Extent3d {
-                    width: upload.bounds.size.width.0 as u32,
-                    height: upload.bounds.size.height.0 as u32,
-                    depth_or_array_layers: 1,
-                },
-            );
-        }
     }
 }
 
