@@ -23,7 +23,7 @@ defmodule Encryption do
   @impl true
   def requires,
     do: %{
-      "core" => ">= 0.32.202",
+      "core" => ">= 0.34.174",
       "database" => "to keep when it last checked who holds your keys",
       "telemetry" => "to raise an alert while a server that acts for you is waiting for your key"
     }
@@ -219,12 +219,13 @@ defmodule Encryption do
   end
 
   # Has each of `servers` look at what it's handed of an artifact now, so one that was taken off lets go of its
-  # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
+  # keys at once, and one that was handed a new epoch's writes with them, all asked at once (`OneCore.Asks.each/3`).
+  # One that isn't up, or doesn't answer in time, looks when it starts or once it gets to it.
   defp look(%Call{} = call, name, servers) do
     {at, app} = OneCore.Apps.installed(call.subject, call.app_artifact)
     meta = %{actor: nil, subject: User.owner(name), forwarded: true}
     ask = %{installed: at, app: app, function: "looked", arguments: [name], _meta: meta}
-    for server <- servers -- [call.server], do: Server.request(server, "apps/call", ask)
+    OneCore.Asks.each(servers -- [call.server], &Server.request(&1, "apps/call", ask))
   end
 
   @doc false
