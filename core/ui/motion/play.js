@@ -5,7 +5,7 @@ import { against, only, out, present, rates, ssh } from "./options.js"
 import { build, pageFolder } from "./pages.js"
 import { device, devices, hostScore, judge } from "./tiers.js"
 import { presentThere, run, scenesOf } from "./harness.js"
-import { ios, moves, selector, travel } from "./gesture.js"
+import { finger, ios, moves, selector, travel } from "./gesture.js"
 import { apart, contactSheet, curve, differs, filmstrip, rect } from "./output.js"
 
 
@@ -64,13 +64,28 @@ async function play(built, scene, name, motion, hz, folder) {
   // What fails it: anything it took out still drawn once it's settled, and glass it should keep blurred drawn plain.
   const failed = []
   if (leaving) failed.push(`${leaving} taken out still drawn going once it settled`)
-  const plain = motion.blurred ? frames.findIndex((frame, n) => n > 0 && !frame.work?.backdrops) : -1
+  // A refresh that drew nothing new (a busy device's) shows the frame drawn before it.
+  let blurs
+  const plain = motion.blurred ? frames.findIndex((frame, n) => ((blurs = frame.drawn === false ? blurs : frame.work?.backdrops), n > 0 && !blurs)) : -1
   // What a swipe moves goes one way while it's under the fingers, a trace's till they lift: never back.
   const lifted = events?.findLast((event) => event.kind === "up" || ["ended", "cancelled"].includes(event.phase))
   const end = events ? (lifted ?? events.at(-1)).ms : stretches.reduce((sum, stretch) => sum + stretch.ms, 0)
   const toward = Math.sign(values.at(-1) - values[0])
   const back = motion.steady ? values.findIndex((value, n) => n > 0 && frames[n].at <= end && (value - values[n - 1]) * toward < -1) : -1
   if (back >= 0) failed.push(`it went back ${Math.abs(values[back] - values[back - 1]).toFixed(0)} pt at frame ${back + 1} (${frames[back].at} ms)`)
+  // A press let go moves on from where the finger last showed it, as UIScrollView's deceleration and SwiftUI's spring
+  // do: no frame as it's let go jumps further than the finger moved in a refresh just before, or than the frame after
+  // goes on (a fling's first eased step), within a point. Two frames drawn in the refresh it lifts in show only the
+  // second, a jump that skips where the finger was.
+  if (!events && lift && way !== "still") {
+    const refresh = 1000 / hz
+    const at = frames.findIndex((frame) => frame.at >= end)
+    const step = (n) => (n > 0 && n < values.length ? Math.abs(values[n] - values[n - 1]) : 0)
+    const fingered = Math.max(...[0, 1, 2].map((n) => Math.abs(finger(stretches, end - n * refresh, way) - finger(stretches, end - (n + 1) * refresh, way))))
+    const jump = at > 0 ? [at, at + 1].reduce((most, n) => (step(n) > step(most) ? n : most)) : -1
+    if (jump > 0 && step(jump) > Math.max(fingered, step(jump + 1)) + 1)
+      failed.push(`it jumped ${step(jump).toFixed(0)} pt at frame ${jump + 1} (${frames[jump].at} ms) as it was let go, where the finger moved at most ${fingered.toFixed(0)} pt a refresh and the frame after ${step(jump + 1).toFixed(0)} pt`)
+  }
   // What it opens is first drawn from where what it opens from is, its top and its middle there, as an iPhone's folder
   // grows out of its square and its apps out of the square's: within a point, or a step of its own motion, which may
   // have taken one before the frame it's first drawn on.

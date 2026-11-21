@@ -61,12 +61,31 @@ impl Screen {
         Ok(point(x, y))
     }
 
-    /// How far what scrolls under `at` shows scrolled, with its stretch past an end, if something scrolls there.
+    /// How far what scrolls under `at` shows scrolled, with its stretch past an end, if something scrolls there: on the
+    /// fake platform, in the frame its window last presented (`presented`).
     pub fn scrolled_under(&self, at: Point<f32>) -> Option<Point<f32>> {
-        let scrolled = self.under(at).into_iter().find_map(|id| self.scrolled.get(&id).copied())?;
-        let stretched = self.stretched();
+        let (scrolled, stretched) = (&self.scrolled, self.stretched());
+        #[cfg(feature = "fake")]
+        let (scrolled, stretched) = self.shown.as_ref().map_or((scrolled, stretched), |(_, scrolled, stretched)| (scrolled, stretched.clone()));
+        let shown = self.under(at).into_iter().find_map(|id| scrolled.get(&id).copied())?;
         let stretch = self.under(at).into_iter().find_map(|id| stretched.get(&id).copied()).unwrap_or(point(0.0, 0.0));
-        Some(point(scrolled.x + stretch.x, scrolled.y + stretch.y))
+        Some(point(shown.x + stretch.x, shown.y + stretch.y))
+    }
+
+    /// Its window presented the frame it last painted: where each node was drawn in it, and how far what scrolls showed
+    /// scrolled, are what's on the screen till the next (`shown`).
+    #[cfg(feature = "fake")]
+    pub fn presented(&mut self) {
+        if let Some(seen) = &self.seen {
+            self.shown = Some((self.rects.clone(), seen.scrolled.clone(), seen.stretched.iter().map(|(id, at)| (*id, *at)).collect()));
+        }
+    }
+
+    /// Where node `id` is drawn in the frame its window last presented (`presented`), or the last painted where none has
+    /// been.
+    #[cfg(feature = "fake")]
+    pub fn shown_rect(&self, id: crate::tree::Id) -> Option<inspect::Rect> {
+        self.shown.as_ref().map_or(&self.rects, |(rects, ..)| rects).get(&id).copied()
     }
 
     /// A press goes down at `at`, at `time` (ms on its clock): a finger's as a phone's host hands it each touch

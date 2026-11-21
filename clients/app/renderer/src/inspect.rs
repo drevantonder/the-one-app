@@ -131,7 +131,7 @@ impl Rect {
         (self.x + self.width / 2.0, self.y + self.height / 2.0)
     }
 
-    fn json(&self) -> Value {
+    pub fn json(&self) -> Value {
         let round = |n: f32| (n * 100.0).round() / 100.0;
         json!({"x": round(self.x), "y": round(self.y), "width": round(self.width), "height": round(self.height)})
     }

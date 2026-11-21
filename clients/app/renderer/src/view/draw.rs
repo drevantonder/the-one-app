@@ -586,8 +586,8 @@ pub(super) struct Seen {
     size: (Size<f32>, f32),
     conditions: Conditions,
     states: States,
-    scrolled: HashMap<Id, Point<f32>>,
-    stretched: std::collections::BTreeMap<Id, Point<f32>>,
+    pub(super) scrolled: HashMap<Id, Point<f32>>,
+    pub(super) stretched: std::collections::BTreeMap<Id, Point<f32>>,
     fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>, bool)>,
     pub(super) caret: bool,
     /// The input a finger's selection shows its handles in.

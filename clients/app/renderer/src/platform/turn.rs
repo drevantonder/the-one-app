@@ -410,6 +410,10 @@ impl Windows {
             window.missed = 0;
             window.presented = true;
             window.frames += 1;
+            #[cfg(feature = "fake")]
+            if let Ok(screen) = &mut window.screen {
+                screen.presented();
+            }
             // Its opening out of its icon starts from the frame it first shows something in.
             if window.frames == 1
                 && let Some(opening) = window.pull.as_mut().filter(|pull| pull.opens())

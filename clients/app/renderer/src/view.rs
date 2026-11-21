@@ -255,6 +255,11 @@ pub struct Screen {
     /// Where each node was drawn in the last frame, for the inspector, and the frame's size and scale.
     rects: Rects,
     painted: (Size<f32>, f32),
+    /// Where each node was drawn and how far what scrolls showed scrolled, with its stretch past an end, in the frame its
+    /// window last presented (`presented`), which a harness reads as what's on the screen: a frame laid out for input
+    /// it took (`Windows::lay_out`) is shown only on the display's next refresh.
+    #[cfg(feature = "fake")]
+    shown: Option<(Rects, HashMap<Id, Point<f32>>, HashMap<Id, Point<f32>>)>,
     /// What the app asked its client that hasn't been answered, by its JSON-RPC id, for the inspector's `settle`.
     unanswered: HashMap<String, inspect::Asked>,
     /// The inspector's `settle`s waiting: until when, and what to tell when it's settled or that time comes.
@@ -384,6 +389,8 @@ impl Screen {
             arrived: Default::default(),
             rects: Rects::new(),
             painted: (Size::default(), 1.0),
+            #[cfg(feature = "fake")]
+            shown: None,
             unanswered: HashMap::new(),
             settling: Vec::new(),
             tapping: Vec::new(),

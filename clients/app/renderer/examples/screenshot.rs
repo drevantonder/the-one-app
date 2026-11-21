@@ -974,11 +974,13 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             {
                 *query = json!({"op": "query", "node": node});
             }
-            match ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"][0]["rect"].as_object().cloned()) {
+            // Where the frame on the screen drew it, not where input since has it laid out for the next.
+            match query["node"].as_u64().and_then(|node| windows.with(id, |screen| screen.shown_rect(node)).flatten()) {
                 Some(rect) => {
+                    let rect = rect.json();
                     frame["x"] = rect["x"].clone();
                     frame["y"] = rect["y"].clone();
-                    frame["rect"] = Value::Object(rect);
+                    frame["rect"] = rect;
                 }
                 None => frame["gone"] = json!(true),
             }
