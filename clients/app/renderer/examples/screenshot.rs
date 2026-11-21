@@ -39,7 +39,7 @@
 //! trip to a server takes, but for the tools `--cached` names, which a client answers at once from what it keeps
 //! (a tool that only reads): so a page that opens on what isn't kept, or asks again for what an answer said, opens
 //! slowly here as on a device. The page's clock runs as it opens until it's had every answer, at most 5 s; one due
-//! later comes with the first frame drawn once the clock's been stepped to it.
+//! later comes at its time as the clock moves, however it's moved, as a server's answer does.
 //! `--slower` has each picture take that many times as long to decode as on this machine, as on a device with a slower
 //! CPU, where they come later after the page asks for them: the inspector's `window` says the longest one took
 //! (`picture_ms`).
@@ -251,6 +251,9 @@ fn main() -> anyhow::Result<()> {
         Event::Blank(why) => *blanking.borrow_mut() = Some(why),
         _ => {}
     })?;
+    // Each answer on its way (`--latency`) comes at its own time as the clock moves, however it's moved, as a server's
+    // does, what it sets off going out then; one still on its way is a request `settle` waits for.
+    windows.answering(id, coming.clone());
     {
         let (folder, ui, clock, answers) = (folder.clone(), ui.clone(), clock.clone(), answers.clone());
         FRAMES.set(Some(Box::new(move |windows: &mut Windows| {
@@ -335,19 +338,11 @@ fn main() -> anyhow::Result<()> {
         loop {
             windows.run(1000.0 / 60.0);
             let now = renderer::platform::fake_time();
-            let due: Vec<Value> = {
-                let mut coming = coming.borrow_mut();
-                let (due, later) = coming.drain(..).partition(|(at, _)| *at <= now);
-                *coming = later;
-                due.into_iter().map(|(_, answer)| answer).collect()
-            };
-            for answer in &due {
-                windows.with(id, |screen| screen.message(answer));
-            }
-            if !due.is_empty() {
+            if coming.borrow().is_empty() && windows.with(id, |screen| !screen.starting()).unwrap_or(true) {
                 first_content = Some(now - opened);
+                break;
             }
-            if (coming.borrow().is_empty() && windows.with(id, |screen| !screen.starting()).unwrap_or(true)) || now - opened > 5000.0 {
+            if now - opened > 5000.0 {
                 break;
             }
         }
@@ -356,20 +351,7 @@ fn main() -> anyhow::Result<()> {
     let worst_turn = std::cell::Cell::new(std::time::Duration::ZERO);
     // A frame: its page has run what it was sent, the display shows a frame, and the loop takes its turn, drawing what
     // changed; again once the pictures it decodes in the background are ready, as a window is woken to.
-    // What's come by its time on the page's clock (`--latency`), as each request's frame is drawn: an answer still on its
-    // way is a request `settle` waits for.
-    let arriving = coming.clone();
     let frame = |windows: &mut Windows| {
-        let now = renderer::platform::fake_time();
-        let due: Vec<Value> = {
-            let mut coming = arriving.borrow_mut();
-            let (due, later) = coming.drain(..).partition(|(at, _)| *at <= now);
-            *coming = later;
-            due.into_iter().map(|(_, answer)| answer).collect()
-        };
-        for answer in &due {
-            windows.with(id, |screen| screen.message(answer));
-        }
         loop {
             between(windows);
             windows.wait();
@@ -453,7 +435,7 @@ fn main() -> anyhow::Result<()> {
     // for at most SETTLE_MS.
     let settling = renderer::platform::fake_time();
     frame(&mut windows);
-    while (windows.revealing(id) || windows.with(id, |screen| screen.arriving()).unwrap_or(false)) && renderer::platform::fake_time() - settling < SETTLE_MS {
+    while (windows.revealing(id) || windows.with(id, |screen| screen.arriving()).unwrap_or(false) || !coming.borrow().is_empty()) && renderer::platform::fake_time() - settling < SETTLE_MS {
         between(&mut windows);
         windows.run(1000.0 / 60.0);
     }
@@ -683,7 +665,7 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         // The window made `width` × `height` points, as a person drags a computer's window's edge or a phone turns.
         "resize" => {
             let (width, height) = (request.f64("width"), request.f64("height").ok_or_else(|| anyhow::anyhow!("say its height"))?);
-            windows.resize(id, width.map(|width| width as f32), height as f32);
+            windows.sized(id, width.map(|width| width as f32), height as f32);
             windows.run(0.0);
             Ok(json!({}))
         }

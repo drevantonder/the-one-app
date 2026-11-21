@@ -272,13 +272,16 @@ impl Windows {
             // The display ticks while the loop wants frames, or a window has what came meanwhile to draw (a picture
             // that's there at its time).
             let tick = (self.display.wanted() || self.windows.values().any(|window| window.dirty && window.on_screen())).then(|| refresh - now.rem_euclid(refresh)).map(|next| if next < 0.001 { next + refresh } else { next });
-            let timer = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.timer_due()).reduce(f64::min).map(|due| due.max(0.0));
+            let timer = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.timer_due()).chain(self.display.answer_due().map(|at| at - now)).reduce(f64::min).map(|due| due.max(0.0));
             // A refresh a hair past the end, as a driver's own refresh, `1000 / hz` ms, is a hair short of the
             // display's (a `Duration`, whole nanoseconds), is the one it ends on, where it was never shown.
             let next = tick.into_iter().chain(timer).reduce(f64::min).filter(|next| *next <= left + 0.001);
             // The platform's time moves on once, its pages' clock with it, then each page runs what's due by then.
             let by = next.unwrap_or(left.max(0.0));
             fake::advance(by);
+            for (id, answer) in self.display.answers_due(fake::time()) {
+                self.with(id, |screen| screen.message(&answer));
+            }
             for window in self.windows.values_mut() {
                 if let Ok(screen) = &mut window.screen {
                     window.dirty |= screen.advance(0.0);
@@ -350,6 +353,25 @@ impl Windows {
     pub fn key(&mut self, id: WindowId, request: &crate::inspect::Request) -> anyhow::Result<()> {
         self.display.push(id, Input::Key(crate::inspect::Key::of(request)?));
         Ok(())
+    }
+
+    /// What window `id`'s page asked its client comes back as `answers` has it on its way, each at its time on the
+    /// page's clock, as the clock moves (`run`), as a page's timers fire: a server's answer a round trip after it's asked.
+    pub fn answering(&mut self, id: WindowId, answers: std::rc::Rc<std::cell::RefCell<Vec<(f64, serde_json::Value)>>>) {
+        self.display.answering(id, answers);
+    }
+
+    /// Window `id` made `width` × `height` points, as a phone turns, a computer's window's edge is dragged, or a system
+    /// lays a window out from nothing, 0 tall: a panel's room is what its page says (`resize`), any other's is its
+    /// native window's, which its system tells it of (`Input::Resized`).
+    pub fn sized(&mut self, id: WindowId, width: Option<f32>, height: f32) {
+        let Some(window) = self.windows.get(&id) else { return };
+        if window.panel {
+            return self.resize(id, width, height);
+        }
+        let (scale, now) = (window.parts[0].native.scale(), window.parts[0].native.size());
+        let pixels = |points: f32| crate::geometry::DevicePixels((points * scale).round() as i32);
+        self.display.push(id, Input::Resized(Size { width: pixels(width.unwrap_or(now.width.0)), height: pixels(height) }));
     }
 
     /// The app goes to the background for `ms` of its time and comes back, as an iPhone's does: its windows lose the

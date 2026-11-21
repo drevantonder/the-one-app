@@ -28,7 +28,7 @@ async function check(built, scene, folder) {
     results.push(
       ...(await Promise.all(
         played.slice(from, from + 4).map(async ({ name, steps, seed }) => {
-          const ran = requests(steps, scene.from)
+          const ran = requests(steps, scene.from, scene.answers)
           const own = join(folder, name.replace(/[^\w.-]+/g, "-"), String(seed))
           mkdirSync(own, { recursive: true })
           const done = await run(at, own, scene, [{ op: "clock", step: 1000 }, ...taps, ...ran.map(({ request }) => request), crash], seed)

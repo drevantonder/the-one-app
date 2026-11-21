@@ -40,8 +40,9 @@ const EDGE = 4
 /// WCAG's contrast ratio of two luminances.
 const ratio = (a, b) => (Math.max(a, b) + 0.05) / (Math.min(a, b) + 0.05)
 
-/// A check's steps as the harness's requests, each with what judges its answer: why it failed, or nothing.
-export function requests(steps, folder) {
+/// A check's steps as the harness's requests, each with what judges its answer: why it failed, or nothing. `answers`
+/// are the scene's, which a server that restarted answers with again.
+export function requests(steps, folder, answers = {}) {
   const named = (tap) => (typeof tap === "string" ? tap : tap.name ?? tap.text ?? JSON.stringify(tap))
   const out = []
   // What the window looked like before anything's done, which `dimmed` compares what's over the page with.
@@ -54,7 +55,15 @@ export function requests(steps, folder) {
     else if (step.putAway) out.push({ request: { op: "put_away" } })
     else if (step.summon) out.push({ request: { op: "summon" } })
     else if (step.back) out.push({ request: { op: "back" } })
-    else if (step.answers) out.push({ request: { op: "changed", answers: step.answers } })
+    // A server restarting: every tool refuses meanwhile, as one that can't be reached does, then answers as the scene's
+    // do, with what changed while it was down on top, the page told each time.
+    else if (step.restart !== undefined) {
+      const tools = Object.keys(answers).filter((name) => !name.includes("/"))
+      out.push({ request: { op: "changed", answers: Object.fromEntries(tools.map((tool) => [tool, { $error: "Couldn't reach the server" }])) } })
+      out.push({ request: { op: "clock", step: step.restart } })
+      out.push({ request: { op: "changed", answers: { ...Object.fromEntries(tools.map((tool) => [tool, answers[tool]])), ...step.answers } } })
+    } else if (step.answers) out.push({ request: { op: "changed", answers: step.answers } })
+    else if (step.resize) out.push({ request: { op: "resize", width: step.resize[0], height: step.resize[1] } })
     // An agent's press comes the inspector's way, as to a device's window, though nobody could press it (a panel put away).
     else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold, clicks: step.clicks, ...(step.agent ? { inspector: true } : {}) } })
     else if (step.hover) out.push({ request: { op: "hover", ...selector(step.hover) } })

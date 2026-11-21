@@ -41,7 +41,13 @@ pub struct Display {
     /// A phone's screen, in points, where it's a phone's (`phone`): every window but a panel is the whole of it,
     /// whatever it was asked to be, as an iPhone's and an Android phone's are.
     phone: Cell<Option<Size<Pixels>>>,
+    /// What a window's page asked its client that's on its way back, each with when it comes on the page's clock, as a
+    /// server's answer comes a round trip after it's asked (`Windows::answering`).
+    answers: RefCell<Option<(WindowId, Answers)>>,
 }
+
+/// Answers on their way to a page, each with when it comes on the page's clock.
+pub(crate) type Answers = std::rc::Rc<RefCell<Vec<(f64, serde_json::Value)>>>;
 
 /// A phone's system's menu for text: 44 points tall, as UIEditMenuInteraction's, and so wide an item, 8 from what
 /// it's for.
@@ -153,6 +159,7 @@ impl Display {
             text_menu: RefCell::default(),
             magnifier: RefCell::default(),
             phone: Cell::new(None),
+            answers: RefCell::default(),
         }
     }
 
@@ -164,6 +171,25 @@ impl Display {
     /// Whether it's a phone's screen.
     pub fn is_phone(&self) -> bool {
         self.phone.get().is_some()
+    }
+
+    /// What window `id`'s page asked its client is answered from `answers` on their way (`Windows::answering`).
+    pub(crate) fn answering(&self, id: WindowId, answers: Answers) {
+        *self.answers.borrow_mut() = Some((id, answers));
+    }
+
+    /// When the next answer on its way comes, if one is.
+    pub(crate) fn answer_due(&self) -> Option<f64> {
+        self.answers.borrow().as_ref()?.1.borrow().iter().map(|(at, _)| *at).reduce(f64::min)
+    }
+
+    /// The answers on their way that have come by `now`, each with the window whose page asked.
+    pub(crate) fn answers_due(&self, now: f64) -> Vec<(WindowId, serde_json::Value)> {
+        let Some((id, answers)) = &*self.answers.borrow() else { return Vec::new() };
+        let mut answers = answers.borrow_mut();
+        let (due, later) = answers.drain(..).partition(|(at, _)| *at <= now);
+        *answers = later;
+        due.into_iter().map(|(_, answer)| (*id, answer)).collect()
     }
 
     /// Something happened to window `id`, which the loop hears on its next turn.

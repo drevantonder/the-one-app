@@ -477,10 +477,12 @@ export type Scene =
  * it: a trackpad's swipe with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its
  * `phase`), time passing (`wait`, ms), the app in the background that long and back (`away`, ms), which fails where it
  * draws meanwhile, as a phone's GPU refuses that, a panel put away or summoned (`putAway`, `summon`), or the device's own
- * Back (`back`), as Android's key is; the client's answers changed to these tools' and the page told that something
- * changed (`answers`, as an update going away is), or what must
+ * Back (`back`), as Android's key is; the window made `[width, height]` points (`resize`), as a phone turns or its
+ * system lays its window out from nothing, 0 tall; the client's answers changed to these tools' and the page told that something
+ * changed (`answers`, as an update going away is), a server restarting for `restart` ms, every tool refusing
+ * meanwhile, then answering as the scene's do with `answers` on top, or what must
  * hold then (`expect`), waited for a second, or `within` ms. */
-export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agent?: true } | { hover: Tap } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { answers: Record<string, unknown> } | { expect: Expect; within?: number }
+export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agent?: true } | { hover: Tap } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { resize: [number, number] } | { answers: Record<string, unknown> } | { restart: number; answers?: Record<string, unknown> } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
  * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and what the input with the
